@@ -31,6 +31,7 @@ type StockMode = 'image-and-post' | 'image-only' | 'post-only';
 type ImageProvider = 'kie-gpt-image-2';
 type AspectRatio = 'auto' | '1:1' | '9:16' | '16:9' | '4:3' | '3:4';
 type ImageResolution = '1K' | '2K' | '4K';
+type PageStockBuilderTab = 'api' | 'prompt';
 
 interface ApiProfile {
   id: string;
@@ -293,6 +294,7 @@ function extractKieImageUrl(taskData: any): string {
 }
 
 export function PageStockTab() {
+  const [builderTab, setBuilderTab] = useState<PageStockBuilderTab>('api');
   const [profiles, setProfiles] = useState<ApiProfile[]>([]);
   const [selectedPageName, setSelectedPageName] = useState(PAGE_CONFIGS[0]?.name ?? '');
   const [search, setSearch] = useState('');
@@ -815,7 +817,7 @@ export function PageStockTab() {
   if (!selectedPage) {
     return (
       <div className="page-stock-empty">
-        <h1>📮 ทำStockลงเพจ</h1>
+        <h1>📮 สร้างรูปด้วยAPI</h1>
         <p>ยังอ่าน config จากไฟล์ workflow ไม่ได้</p>
       </div>
     );
@@ -845,6 +847,28 @@ export function PageStockTab() {
         </div>
       </section>
 
+      <div className="page-stock-tabs" role="tablist" aria-label="เลือกโหมดทำ Stock ลงเพจ">
+        <button
+          type="button"
+          className={builderTab === 'api' ? 'active' : ''}
+          onClick={() => setBuilderTab('api')}
+          role="tab"
+          aria-selected={builderTab === 'api'}
+        >
+          สร้างรูปด้วยAPI
+        </button>
+        <button
+          type="button"
+          className={builderTab === 'prompt' ? 'active' : ''}
+          onClick={() => setBuilderTab('prompt')}
+          role="tab"
+          aria-selected={builderTab === 'prompt'}
+        >
+          สร้างรูปเองด้วยPrompt
+        </button>
+      </div>
+
+      {builderTab === 'api' ? (
       <div className="page-stock-layout">
         <aside className="page-stock-panel page-stock-pages">
           <div className="page-stock-panel-head">
@@ -1099,6 +1123,14 @@ export function PageStockTab() {
           )}
         </aside>
       </div>
+      ) : (
+        <section className="page-stock-panel page-stock-manual-prompt">
+          <div className="page-stock-panel-head">
+            <h2>สร้างรูปเองด้วยPrompt</h2>
+          </div>
+          <div className="page-stock-manual-empty" />
+        </section>
+      )}
     </div>
   );
 }
