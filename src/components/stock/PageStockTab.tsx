@@ -206,6 +206,33 @@ function createManualBrainKey(fileName: string) {
     .slice(0, 80) || `สมอง Prompt ${new Date().toLocaleDateString('th-TH')}`;
 }
 
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
+}
+
+function normalizeManualBrain(brain: Partial<ManualPromptBrain> | undefined, fallbackName = 'สมอง Prompt'): ManualPromptBrain {
+  return {
+    pageName: String(brain?.pageName || fallbackName),
+    updatedAt: String(brain?.updatedAt || new Date().toISOString()),
+    sourceFileName: brain?.sourceFileName || '',
+    sourceRowCount: Number(brain?.sourceRowCount || 0),
+    trendFileName: brain?.trendFileName || '',
+    trendRowCount: Number(brain?.trendRowCount || 0),
+    summary: String(brain?.summary || 'ยังไม่มีสรุปสมอง'),
+    keywords: asStringArray(brain?.keywords),
+    contentAngles: asStringArray(brain?.contentAngles),
+    toneGuidelines: asStringArray(brain?.toneGuidelines),
+    topicPatterns: asStringArray(brain?.topicPatterns),
+    promptRules: asStringArray(brain?.promptRules),
+    visualStyleRules: asStringArray(brain?.visualStyleRules),
+    negativeRules: asStringArray(brain?.negativeRules),
+    trendInsights: asStringArray(brain?.trendInsights),
+    examplePrompts: asStringArray(brain?.examplePrompts),
+    feedbackNotes: asStringArray(brain?.feedbackNotes),
+    rawAnalysis: brain?.rawAnalysis || '',
+  };
+}
+
 function getTopics(input: string): string[] {
   return input
     .split('\n')
@@ -453,7 +480,9 @@ export function PageStockTab() {
   const hasOpenRouterKey = Boolean(activeProfile?.openRouterKey);
   const hasDropboxAuth = Boolean(activeProfile?.dropboxKey || activeProfile?.dropboxRefreshToken);
   const runnableCount = totalQueuedTopics || topics.length;
-  const manualBrain = manualBrainKey ? manualBrains[manualBrainKey] : undefined;
+  const manualBrain = manualBrainKey && manualBrains[manualBrainKey]
+    ? normalizeManualBrain(manualBrains[manualBrainKey], manualBrainKey)
+    : undefined;
   const manualHasRunningTask = Boolean(manualTaskId);
   const manualTrendRowsCount = useMemo(
     () => manualTrendCsvText.trim() ? parseCsvTable(manualTrendCsvText).length : 0,
@@ -508,16 +537,22 @@ export function PageStockTab() {
       .then(res => res.json())
       .then(data => {
         if (data && typeof data === 'object' && !Array.isArray(data)) {
-          setManualBrains(data);
-          setManualBrainKey(prev => prev || Object.keys(data)[0] || '');
+          const normalized = Object.fromEntries(
+            Object.entries(data).map(([key, brain]) => [key, normalizeManualBrain(brain as Partial<ManualPromptBrain>, key)]),
+          );
+          setManualBrains(normalized);
+          setManualBrainKey(prev => prev || Object.keys(normalized)[0] || '');
         }
       })
       .catch(() => {
         try {
           const data = JSON.parse(localStorage.getItem(MANUAL_PROMPT_BRAINS_KEY) || '{}');
           if (data && typeof data === 'object' && !Array.isArray(data)) {
-            setManualBrains(data);
-            setManualBrainKey(prev => prev || Object.keys(data)[0] || '');
+            const normalized = Object.fromEntries(
+              Object.entries(data).map(([key, brain]) => [key, normalizeManualBrain(brain as Partial<ManualPromptBrain>, key)]),
+            );
+            setManualBrains(normalized);
+            setManualBrainKey(prev => prev || Object.keys(normalized)[0] || '');
           }
         } catch {}
       });
