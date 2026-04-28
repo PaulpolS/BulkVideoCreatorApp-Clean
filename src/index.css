@@ -1420,6 +1420,12 @@ input[type=number] {
   color: #14100a;
 }
 
+.page-stock-manual-card .page-stock-danger {
+  border-color: color-mix(in srgb, #ef4444 56%, var(--border-color));
+  background: color-mix(in srgb, #ef4444 14%, transparent);
+  color: #fca5a5;
+}
+
 .page-stock-upload {
   display: flex;
   align-items: center;
@@ -1485,6 +1491,65 @@ input[type=number] {
   opacity: 0.68;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.page-stock-brain-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.page-stock-brain-detail-grid article {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-card);
+}
+
+.page-stock-brain-detail-grid article.wide {
+  grid-column: 1 / -1;
+}
+
+.page-stock-brain-detail-grid h4 {
+  margin: 0 0 8px;
+  font-size: 0.82rem;
+  font-weight: 900;
+  color: #f59e0b;
+}
+
+.page-stock-brain-detail-grid p,
+.page-stock-brain-detail-grid ul {
+  margin: 0;
+  color: var(--text-secondary, var(--text-main));
+  font-size: 0.84rem;
+  line-height: 1.65;
+}
+
+.page-stock-brain-detail-grid ul {
+  display: grid;
+  gap: 6px;
+  padding-left: 18px;
+}
+
+.page-stock-example-prompts {
+  display: grid;
+  gap: 8px;
+}
+
+.page-stock-example-prompts pre {
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-main);
+  color: var(--text-secondary, var(--text-main));
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.74rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
 }
 
 .page-stock-number-row {

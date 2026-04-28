@@ -87,11 +87,18 @@ interface ManualPromptBrain {
   updatedAt: string;
   sourceFileName?: string;
   sourceRowCount: number;
+  trendFileName?: string;
+  trendRowCount?: number;
   summary: string;
+  keywords: string[];
+  contentAngles: string[];
+  toneGuidelines: string[];
   topicPatterns: string[];
   promptRules: string[];
   visualStyleRules: string[];
   negativeRules: string[];
+  trendInsights: string[];
+  examplePrompts: string[];
   feedbackNotes: string[];
   rawAnalysis?: string;
 }
@@ -448,6 +455,10 @@ export function PageStockTab() {
   const runnableCount = totalQueuedTopics || topics.length;
   const manualBrain = manualBrainKey ? manualBrains[manualBrainKey] : undefined;
   const manualHasRunningTask = Boolean(manualTaskId);
+  const manualTrendRowsCount = useMemo(
+    () => manualTrendCsvText.trim() ? parseCsvTable(manualTrendCsvText).length : 0,
+    [manualTrendCsvText],
+  );
   const manualPromptCsv = useMemo(() => {
     const rows = manualPromptResults.map(result => ({
       'หัวข้อ': result.topic,
@@ -634,6 +645,10 @@ export function PageStockTab() {
     if (!manualCsvText.trim() || !activeProfile?.openRouterKey) return;
     const rows = parseCsvTable(manualCsvText);
     const csvSample = JSON.stringify(rows.slice(0, 80), null, 2).slice(0, 32000);
+    const trendRows = manualTrendCsvText.trim() ? parseCsvTable(manualTrendCsvText) : [];
+    const trendSample = trendRows.length > 0
+      ? JSON.stringify(trendRows.slice(0, 120), null, 2).slice(0, 32000)
+      : '';
     const brainKey = manualBrainKey || createManualBrainKey(manualCsvName || 'CSV Prompt');
     setManualBrainKey(brainKey);
     const nextTaskId = `manual-brain-${Date.now()}`;
@@ -641,38 +656,53 @@ export function PageStockTab() {
       id: nextTaskId,
       title: `🧠 แกะสมอง Prompt: ${brainKey}`,
       category: 'page-stock-manual',
-      progress: 'เตรียมส่ง CSV ให้ AI วิเคราะห์ตัวอย่าง',
+      progress: 'เตรียมส่ง CSV Prompt และ CSV เทรนด์ให้ AI สร้างสมอง',
     }, async ctx => {
       setManualTaskId(ctx.signal.aborted ? '' : nextTaskId);
-      ctx.log(`1/5 อ่าน CSV: ${manualCsvName || 'ไฟล์อัปโหลด'} (${rows.length} แถว)`);
+      ctx.log(`1/6 อ่าน CSV Prompt: ${manualCsvName || 'ไฟล์อัปโหลด'} (${rows.length} แถว)`);
+      if (trendRows.length > 0) {
+        ctx.log(`2/6 อ่าน CSV เทรนด์ล่าสุด: ${manualTrendCsvName || 'trend.csv'} (${trendRows.length} แถว)`);
+      } else {
+        ctx.log('2/6 ไม่มี CSV เทรนด์ล่าสุด: สร้างสมองจาก CSV Prompt อย่างเดียว');
+      }
       await waitIfManualPaused(ctx);
       const prompt = `คุณคือ AI strategist ที่เก่งมากในการแกะ pattern คอนเทนต์และ prompt สร้างรูปจากตัวอย่าง CSV
 
 ชื่อสมองเบื้องต้นจากไฟล์: ${brainKey}
-สำคัญมาก: อย่าใช้เพจที่เลือกในเมนูซ้ายหรือ config อื่นใดมาตัดสิน ให้ยึดข้อมูลจาก CSV นี้เป็นหลักเท่านั้น
+สำคัญมาก: อย่าใช้เพจที่เลือกในเมนูซ้ายหรือ config อื่นใดมาตัดสิน ให้ยึดข้อมูลจาก CSV Prompt เป็นหลัก และใช้ CSV เทรนด์เป็นข้อมูลเสริมเท่านั้น
 
-ตัวอย่างข้อมูลจาก CSV เป็น JSON rows:
+ตัวอย่าง CSV Prompt ที่เคยใช้งานได้ เป็น JSON rows:
 ${csvSample}
 
+${trendSample ? `ข้อมูล CSV เทรนด์ล่าสุด เป็น JSON rows:
+${trendSample}` : 'ไม่มี CSV เทรนด์ล่าสุด'}
+
 งานของคุณ:
-1. วิเคราะห์ว่าหัวข้อของเพจนี้มักเป็นแนวไหน
-2. วิเคราะห์ว่ารายละเอียด/มุมเล่าเรื่องเป็นแบบไหน
-3. วิเคราะห์ว่า prompt สร้างรูปที่ดีควรเขียนโครงสร้างแบบไหน
-4. แยกกฎภาพ สี อารมณ์ องค์ประกอบ ฟอนต์ layout และข้อห้าม
-5. สร้างเป็น "สมองเพจ" สำหรับใช้สร้างหัวข้อและ prompt รูปในอนาคต
+1. วิเคราะห์ keyword หลักและ keyword รองที่ควรใช้
+2. วิเคราะห์ว่าหัวข้อควรทำแนวไหนบ้าง โดยถ้ามีเทรนด์ ให้บอกว่าจะใช้เทรนด์เลือกหัวข้อยังไง
+3. วิเคราะห์สำนวน/น้ำเสียง/วิธีเล่าให้เหมือน pattern ของ CSV Prompt
+4. วิเคราะห์ prompt สร้างรูปที่ดีว่าต้องมีโครงสร้างแบบไหน ต้องตรงกับ pattern ตัวอย่างที่แนบ
+5. สร้างตัวอย่าง Prompt สร้างรูป 3-5 ตัวอย่าง โดยต้องเหมือน format/pattern ที่มีใน CSV Prompt และพร้อมเอาไปใช้ได้
+6. แยกกฎภาพ สี อารมณ์ องค์ประกอบ ฟอนต์ layout และข้อห้าม
+7. เขียนคำอธิบายให้เจ้าของเพจอ่านเข้าใจว่า สมองนี้ควรเอาไปใช้อย่างไร
 
 ตอบเป็น JSON เท่านั้น:
 {
   "pageName": "ชื่อสมอง/ชื่อเพจที่เหมาะสมจาก CSV",
   "summary": "สรุปสั้นๆ",
+  "keywords": ["keyword ที่ควรใช้"],
+  "contentAngles": ["แนวหัวข้อที่ควรทำ"],
+  "toneGuidelines": ["สำนวน/น้ำเสียงที่ควรใช้"],
   "topicPatterns": ["..."],
   "promptRules": ["..."],
   "visualStyleRules": ["..."],
-  "negativeRules": ["..."]
+  "negativeRules": ["..."],
+  "trendInsights": ["ถ้ามี CSV เทรนด์ วิเคราะห์ว่าควรจับกระแสอะไร ถ้าไม่มีให้เป็น []"],
+  "examplePrompts": ["ตัวอย่าง Prompt ที่ตรง pattern และพร้อมใช้"]
 }`;
-      ctx.log('2/5 ส่งให้ OpenRouter วิเคราะห์ CSV และ Prompt ตัวอย่าง');
+      ctx.log('3/6 ส่งให้ OpenRouter วิเคราะห์ CSV Prompt + เทรนด์ และสร้างสมองฉบับสมบูรณ์');
       const answer = await askOpenRouter(prompt, ctx.signal);
-      ctx.log(`3/5 AI วิเคราะห์กลับมาแล้ว (${answer.length.toLocaleString()} ตัวอักษร)`);
+      ctx.log(`4/6 AI วิเคราะห์กลับมาแล้ว (${answer.length.toLocaleString()} ตัวอักษร)`);
       const parsed = extractJsonPayload<any>(answer, {});
       const inferredName = String(parsed.pageName || brainKey).trim() || brainKey;
       const brain: ManualPromptBrain = {
@@ -680,17 +710,24 @@ ${csvSample}
         updatedAt: new Date().toISOString(),
         sourceFileName: manualCsvName,
         sourceRowCount: rows.length,
+        trendFileName: manualTrendCsvName || '',
+        trendRowCount: trendRows.length,
         summary: String(parsed.summary || 'AI วิเคราะห์ไฟล์ CSV แล้ว แต่ไม่ได้ส่ง summary เป็น JSON ชัดเจน'),
+        keywords: Array.isArray(parsed.keywords) ? parsed.keywords.map(String) : [],
+        contentAngles: Array.isArray(parsed.contentAngles) ? parsed.contentAngles.map(String) : [],
+        toneGuidelines: Array.isArray(parsed.toneGuidelines) ? parsed.toneGuidelines.map(String) : [],
         topicPatterns: Array.isArray(parsed.topicPatterns) ? parsed.topicPatterns.map(String) : [],
         promptRules: Array.isArray(parsed.promptRules) ? parsed.promptRules.map(String) : [],
         visualStyleRules: Array.isArray(parsed.visualStyleRules) ? parsed.visualStyleRules.map(String) : [],
         negativeRules: Array.isArray(parsed.negativeRules) ? parsed.negativeRules.map(String) : [],
+        trendInsights: Array.isArray(parsed.trendInsights) ? parsed.trendInsights.map(String) : [],
+        examplePrompts: Array.isArray(parsed.examplePrompts) ? parsed.examplePrompts.map(String) : [],
         feedbackNotes: manualBrain?.feedbackNotes || [],
         rawAnalysis: answer,
       };
-      ctx.log('4/5 บันทึกสมองเพจลง app_data และ localStorage');
+      ctx.log('5/6 บันทึกสมองเพจลง app_data และ localStorage');
       await saveManualBrains({ ...manualBrains, [brainKey]: brain });
-      ctx.log('5/5 สมองเพจพร้อมใช้สำหรับสร้างหัวข้อและ Prompt รูป');
+      ctx.log('6/6 สมองเพจพร้อมใช้: มี keyword, topic pattern, style, prompt pattern และตัวอย่าง prompt');
       setManualTaskId('');
     });
     setManualTaskId(taskId);
@@ -705,10 +742,15 @@ ${csvSample}
       updatedAt: new Date().toISOString(),
       sourceRowCount: 0,
       summary: 'สร้างสมองจาก feedback โดยตรง',
+      keywords: [],
+      contentAngles: [],
+      toneGuidelines: [],
       topicPatterns: [],
       promptRules: [],
       visualStyleRules: [],
       negativeRules: [],
+      trendInsights: [],
+      examplePrompts: [],
       feedbackNotes: [],
     };
     const nextBrain = {
@@ -724,10 +766,6 @@ ${csvSample}
     if (!manualBrain || !activeProfile?.openRouterKey) return;
     const total = Number(manualTopicCount);
     if (!Number.isFinite(total) || total <= 0) return;
-    const trendRows = manualTrendCsvText.trim() ? parseCsvTable(manualTrendCsvText) : [];
-    const trendSample = trendRows.length > 0
-      ? JSON.stringify(trendRows.slice(0, 120), null, 2).slice(0, 32000)
-      : '';
     const nextTaskId = `manual-topics-${Date.now()}`;
     const taskId = globalTaskStore.enqueueTask({
       id: nextTaskId,
@@ -739,11 +777,7 @@ ${csvSample}
       const batchSize = 12;
       const nextTopics: string[] = [];
       const brainText = JSON.stringify(manualBrain, null, 2);
-      if (trendRows.length > 0) {
-        ctx.log(`อ่าน CSV เทรนด์ล่าสุด: ${manualTrendCsvName || 'trend.csv'} (${trendRows.length} แถว)`);
-      } else {
-        ctx.log('ไม่มี CSV เทรนด์ล่าสุด: ใช้สมอง Prompt เดิมเป็นหลัก');
-      }
+      ctx.log(manualBrain.trendRowCount ? `ใช้ข้อมูลเทรนด์จากสมอง: ${manualBrain.trendFileName || 'trend.csv'} (${manualBrain.trendRowCount} แถว)` : 'สมองนี้ไม่มี CSV เทรนด์: ใช้ pattern จาก CSV Prompt เป็นหลัก');
       for (let start = 0; start < total; start += batchSize) {
         if (ctx.isCancelled()) break;
         await waitIfManualPaused(ctx);
@@ -751,9 +785,9 @@ ${csvSample}
         ctx.log(`สร้างหัวข้อ batch ${Math.floor(start / batchSize) + 1}: ขอ ${amount} หัวข้อจาก AI`);
         const answer = await askOpenRouter(`จากสมองเพจนี้:\n${brainText}
 
-${trendSample ? `ข้อมูลเทรนด์ล่าสุดจาก CSV ให้ใช้ประกอบการเลือกหัวข้อ:\n${trendSample}\n\nวิธีใช้เทรนด์:\n- เลือกหัวข้อที่เข้ากับสมองเพจและมีโอกาสทันกระแส\n- อย่าคัดลอก trend row ตรงๆ แบบแข็งๆ ให้แปลงเป็นหัวข้อใหม่ที่น่าสนใจ\n- ถ้าเทรนด์ไม่เข้ากับเพจ ให้ลดน้ำหนักเทรนด์นั้น` : 'ไม่มีข้อมูลเทรนด์เพิ่มเติม'}
-
 สร้างหัวข้อใหม่ ${amount} หัวข้อสำหรับ "${manualBrain.pageName}"
+ให้ใช้ keyword, contentAngles, topicPatterns และ trendInsights ในสมองเป็นหลัก
+ถ้าสมองมี trendInsights ให้เลือกหัวข้อที่ทันกระแส แต่ยังต้องตรงกับ pattern เดิม
 ห้ามซ้ำกับรายการนี้:
 ${[...manualTopics, ...nextTopics].join('\n')}
 
@@ -832,6 +866,18 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
     setManualTaskId('');
     manualPausedRef.current = false;
     setManualPaused(false);
+  };
+
+  const deleteManualBrain = async () => {
+    if (!manualBrainKey || !manualBrains[manualBrainKey]) return;
+    if (!window.confirm(`ลบสมอง "${manualBrains[manualBrainKey].pageName || manualBrainKey}" ใช่ไหม?`)) return;
+    const nextBrains = { ...manualBrains };
+    delete nextBrains[manualBrainKey];
+    await saveManualBrains(nextBrains);
+    const nextKey = Object.keys(nextBrains)[0] || '';
+    setManualBrainKey(nextKey);
+    setManualTopics([]);
+    setManualPromptResults([]);
   };
 
   const downloadManualPromptCsv = () => {
@@ -1533,8 +1579,8 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
           </div>
           <div className="page-stock-manual-grid">
             <div className="page-stock-manual-card">
-              <h3>1. อัปโหลด CSV ตัวอย่าง</h3>
-              <p>ไฟล์ควรมีหัวข้อ รายละเอียด และ Prompt สร้างรูป เพื่อให้ AI แกะ pattern ของเพจนี้</p>
+              <h3>1. สร้างสมองจาก CSV</h3>
+              <p>อัปโหลด CSV Prompt ที่ใช้งานได้ และเสริมด้วย CSV เทรนด์ล่าสุดได้ถ้ามี เพื่อให้ AI สร้างสมองที่เข้าใจทั้ง pattern เดิมและกระแสตอนนี้</p>
               <label>
                 <span>ชื่อสมอง Prompt</span>
                 <input
@@ -1544,25 +1590,42 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
                   placeholder="ระบบจะตั้งจากชื่อไฟล์ให้ หรือพิมพ์เองได้"
                 />
               </label>
+              <label>
+                <span>CSV Prompt ที่ใช้งานได้</span>
+                <label className="page-stock-upload">
+                  <input
+                    type="file"
+                    accept=".csv,text/csv"
+                    onChange={event => handleManualCsvUpload(event.target.files?.[0])}
+                  />
+                  <span>{manualCsvName || 'เลือกไฟล์ CSV Prompt'}</span>
+                </label>
+              </label>
               <label className="page-stock-upload">
                 <input
                   type="file"
                   accept=".csv,text/csv"
-                  onChange={event => handleManualCsvUpload(event.target.files?.[0])}
+                  onChange={event => handleManualTrendCsvUpload(event.target.files?.[0])}
                 />
-                <span>{manualCsvName || 'เลือกไฟล์ CSV'}</span>
+                <span>{manualTrendCsvName || 'เลือก CSV เทรนด์ล่าสุด (ไม่บังคับ)'}</span>
               </label>
+              {manualTrendCsvText.trim() && (
+                <div className="page-stock-trend-box">
+                  <strong>ใช้เทรนด์นี้ตอนสร้างสมอง</strong>
+                  <span>{manualTrendRowsCount} แถว · {manualTrendCsvName}</span>
+                </div>
+              )}
               <button
                 className="page-stock-primary"
                 disabled={!manualCsvText.trim() || !hasOpenRouterKey || manualHasRunningTask}
                 onClick={startAnalyzeManualCsv}
               >
-                แกะ CSV และ Save เป็นสมอง
+                วิเคราะห์ CSV และ Save เป็นสมอง
               </button>
               {manualBrain && (
                 <div className="page-stock-brain-box">
                   <strong>{manualBrain.summary}</strong>
-                  <span>{manualBrain.sourceRowCount} แถว · อัปเดต {new Date(manualBrain.updatedAt).toLocaleString('th-TH')}</span>
+                  <span>{manualBrain.sourceRowCount} แถว · เทรนด์ {manualBrain.trendRowCount || 0} แถว · อัปเดต {new Date(manualBrain.updatedAt).toLocaleString('th-TH')}</span>
                 </div>
               )}
               {Object.keys(manualBrains).length > 0 && (
@@ -1579,28 +1642,18 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
                   </select>
                 </label>
               )}
+              <button
+                className="page-stock-danger"
+                disabled={!manualBrain}
+                onClick={deleteManualBrain}
+              >
+                ลบสมองนี้
+              </button>
             </div>
 
             <div className="page-stock-manual-card">
               <h3>2. สร้างหัวข้อ</h3>
-              <p>ใส่จำนวนที่ต้องการ ระบบจะแบ่งส่งให้ AI ทีละชุด และถ้ามี CSV เทรนด์ ระบบจะใช้ประกอบการเลือกหัวข้อ</p>
-              <label>
-                <span>CSV เทรนด์ล่าสุด / ข้อมูลกระแส</span>
-                <label className="page-stock-upload">
-                  <input
-                    type="file"
-                    accept=".csv,text/csv"
-                    onChange={event => handleManualTrendCsvUpload(event.target.files?.[0])}
-                  />
-                  <span>{manualTrendCsvName || 'เลือกไฟล์ CSV เทรนด์'}</span>
-                </label>
-              </label>
-              {manualTrendCsvText.trim() && (
-                <div className="page-stock-trend-box">
-                  <strong>ใช้ข้อมูลเทรนด์ร่วมในการสร้างหัวข้อ</strong>
-                  <span>{parseCsvTable(manualTrendCsvText).length} แถว · {manualTrendCsvName}</span>
-                </div>
-              )}
+              <p>ใส่จำนวนที่ต้องการ ระบบจะแบ่งส่งให้ AI ทีละชุด โดยใช้สมองที่มี keyword, trend insight, สำนวน และ pattern prompt แล้ว</p>
               <div className="page-stock-number-row">
                 <input
                   type="number"
@@ -1625,6 +1678,39 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
                 <button disabled={!manualHasRunningTask} onClick={stopManualTask}>Stop</button>
               </div>
             </div>
+
+            {manualBrain && (
+              <div className="page-stock-manual-card page-stock-manual-wide">
+                <div className="page-stock-manual-headline">
+                  <h3>สมองนี้วิเคราะห์ว่าอะไร</h3>
+                  <span>{manualBrain.pageName}</span>
+                </div>
+                <div className="page-stock-brain-detail-grid">
+                  <article>
+                    <h4>Keyword ที่ควรใช้</h4>
+                    <p>{manualBrain.keywords.length ? manualBrain.keywords.join(', ') : 'ยังไม่มีข้อมูล keyword'}</p>
+                  </article>
+                  <article>
+                    <h4>แนวหัวข้อที่ควรทำ</h4>
+                    <ul>{(manualBrain.contentAngles.length ? manualBrain.contentAngles : manualBrain.topicPatterns).slice(0, 8).map((item, index) => <li key={index}>{item}</li>)}</ul>
+                  </article>
+                  <article>
+                    <h4>สำนวนที่ใช้</h4>
+                    <ul>{(manualBrain.toneGuidelines.length ? manualBrain.toneGuidelines : ['ยังไม่มีข้อมูลสำนวน']).slice(0, 8).map((item, index) => <li key={index}>{item}</li>)}</ul>
+                  </article>
+                  <article>
+                    <h4>เทรนด์ที่สมองจับได้</h4>
+                    <ul>{(manualBrain.trendInsights.length ? manualBrain.trendInsights : ['ไม่มี CSV เทรนด์ หรือ AI ไม่พบ trend insight ชัดเจน']).slice(0, 8).map((item, index) => <li key={index}>{item}</li>)}</ul>
+                  </article>
+                  <article className="wide">
+                    <h4>ตัวอย่าง Prompt ที่ควรสร้าง</h4>
+                    <div className="page-stock-example-prompts">
+                      {(manualBrain.examplePrompts.length ? manualBrain.examplePrompts : manualBrain.promptRules).slice(0, 5).map((item, index) => <pre key={index}>{item}</pre>)}
+                    </div>
+                  </article>
+                </div>
+              </div>
+            )}
 
             <div className="page-stock-manual-card page-stock-manual-wide">
               <h3>3. ติชมและสอนสมองเพิ่ม</h3>
