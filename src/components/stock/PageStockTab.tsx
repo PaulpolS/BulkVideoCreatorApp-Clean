@@ -206,8 +206,38 @@ function createManualBrainKey(fileName: string) {
     .slice(0, 80) || `สมอง Prompt ${new Date().toLocaleDateString('th-TH')}`;
 }
 
+function stringifyPromptLike(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (!value || typeof value !== 'object') return String(value ?? '').trim();
+  const obj = value as Record<string, unknown>;
+  const likelyKeys = [
+    'imagePrompt', 'prompt', 'Prompt', 'Prompt (English) สำหรับสร้างรูป',
+    'Prompt สำหรับนำไปสร้างรูปภาพ (Image Generation Prompt)', 'examplePrompt',
+  ];
+  for (const key of likelyKeys) {
+    if (typeof obj[key] === 'string' && obj[key]) return String(obj[key]).trim();
+  }
+  return Object.entries(obj)
+    .map(([key, item]) => `${key}: ${typeof item === 'string' ? item : JSON.stringify(item)}`)
+    .join('\n')
+    .trim();
+}
+
 function asStringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
+  return Array.isArray(value) ? value.map(stringifyPromptLike).filter(Boolean) : [];
+}
+
+function getCsvField(row: Record<string, string>, keywords: string[]) {
+  const entries = Object.entries(row);
+  const found = entries.find(([key]) => keywords.some(keyword => key.toLowerCase().includes(keyword.toLowerCase())));
+  return found?.[1]?.trim() || '';
+}
+
+function extractPromptExamplesFromRows(rows: Record<string, string>[]) {
+  return rows
+    .map(row => getCsvField(row, ['prompt', 'สร้างรูป', 'image generation']))
+    .filter(Boolean)
+    .slice(0, 8);
 }
 
 function normalizeManualBrain(brain: Partial<ManualPromptBrain> | undefined, fallbackName = 'สมอง Prompt'): ManualPromptBrain {
@@ -688,6 +718,7 @@ export function PageStockTab() {
     if (!manualCsvText.trim() || !activeProfile?.openRouterKey) return;
     const rows = parseCsvTable(manualCsvText);
     const csvSample = JSON.stringify(rows.slice(0, 80), null, 2).slice(0, 32000);
+    const csvPromptExamples = extractPromptExamplesFromRows(rows);
     const trendRows = manualTrendCsvText.trim() ? parseCsvTable(manualTrendCsvText) : [];
     const trendSample = trendRows.length > 0
       ? JSON.stringify(trendRows.slice(0, 120), null, 2).slice(0, 32000)
@@ -741,7 +772,7 @@ ${trendSample}` : 'ไม่มี CSV เทรนด์ล่าสุด'}
   "visualStyleRules": ["..."],
   "negativeRules": ["..."],
   "trendInsights": ["ถ้ามี CSV เทรนด์ วิเคราะห์ว่าควรจับกระแสอะไร ถ้าไม่มีให้เป็น []"],
-  "examplePrompts": ["ตัวอย่าง Prompt ที่ตรง pattern และพร้อมใช้"]
+  "examplePrompts": ["ต้องเป็น string เท่านั้น ห้ามเป็น object และต้องเป็น prompt เต็มที่พร้อมใช้"]
 }`;
       ctx.log('3/6 ส่งให้ OpenRouter วิเคราะห์ CSV Prompt + เทรนด์ และสร้างสมองฉบับสมบูรณ์');
       const answer = await askOpenRouter(prompt, ctx.signal);
@@ -764,7 +795,9 @@ ${trendSample}` : 'ไม่มี CSV เทรนด์ล่าสุด'}
         visualStyleRules: Array.isArray(parsed.visualStyleRules) ? parsed.visualStyleRules.map(String) : [],
         negativeRules: Array.isArray(parsed.negativeRules) ? parsed.negativeRules.map(String) : [],
         trendInsights: Array.isArray(parsed.trendInsights) ? parsed.trendInsights.map(String) : [],
-        examplePrompts: Array.isArray(parsed.examplePrompts) ? parsed.examplePrompts.map(String) : [],
+        examplePrompts: asStringArray(parsed.examplePrompts).length > 0
+          ? asStringArray(parsed.examplePrompts)
+          : csvPromptExamples,
         feedbackNotes: manualBrain?.feedbackNotes || [],
         rawAnalysis: answer,
       };
@@ -878,11 +911,12 @@ ${brainText}
 ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
 
 ข้อบังคับสำคัญมาก:
-- ห้ามเขียน Prompt เป็นภาษาอังกฤษยาวๆ แบบ image prompt engineer
-- ห้ามเริ่มด้วย "A futuristic infographic", "Create an image", "1080x1080 resolution" หรือบรรยายสี/แสงเองนอก pattern
-- ต้องเขียนเป็นภาษาไทยในรูปแบบเดียวกับ examplePrompts/promptRules ในสมอง
-- ถ้า examplePrompts มีรูปแบบเช่น "สร้างรูปอินโฟอธิบายเป็นภาษาไทย รูปขนาด 1080x1080 มีเครดิทเพจคือ thailand-ai.com หัวข้อ Infographic คือ...รายละเอียด/ไอเดีย...พร้อมเขียนโพส..." ให้ใช้รูปแบบนั้น
-- เปลี่ยนเฉพาะ "หัวข้อ Infographic" และ "รายละเอียด/ไอเดีย" ให้เหมาะกับหัวข้อใหม่
+- ต้อง copy style/format จาก examplePrompts ในสมองให้มากที่สุด
+- ถ้า examplePrompts เป็นภาษาอังกฤษ เช่น "Infographic square image, 1080x1080..." ให้ตอบเป็นภาษาอังกฤษ format เดียวกัน
+- ถ้า examplePrompts เป็นภาษาไทย เช่น "สร้างรูปอินโฟอธิบาย..." ให้ตอบเป็นภาษาไทย format เดียวกัน
+- ห้ามเปลี่ยน template ไปเป็นคนละสไตล์เอง
+- ห้ามตอบเป็น object ซ้อนใน imagePrompt ให้ imagePrompt เป็น string เท่านั้น
+- เปลี่ยนเฉพาะหัวข้อ/รายละเอียดให้เหมาะกับหัวข้อใหม่ ส่วนโครงสร้าง prompt, mood, visual style, size, font, layout ต้องตาม pattern เดิม
 - ต้องพร้อมเอาไปใช้ต่อได้ทันที
 
 ตอบเป็น JSON array เท่านั้น:
