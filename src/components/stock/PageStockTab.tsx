@@ -191,6 +191,14 @@ function extractJsonPayload<T>(text: string, fallback: T): T {
   }
 }
 
+function createManualBrainKey(fileName: string) {
+  return fileName
+    .replace(/\.[^.]+$/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80) || `สมอง Prompt ${new Date().toLocaleDateString('th-TH')}`;
+}
+
 function getTopics(input: string): string[] {
   return input
     .split('\n')
@@ -382,6 +390,7 @@ export function PageStockTab() {
   const [completedResults, setCompletedResults] = useState<PageStockResult[]>([]);
   const [manualCsvName, setManualCsvName] = useState('');
   const [manualCsvText, setManualCsvText] = useState('');
+  const [manualBrainKey, setManualBrainKey] = useState('');
   const [manualBrains, setManualBrains] = useState<Record<string, ManualPromptBrain>>({});
   const [manualFeedback, setManualFeedback] = useState('');
   const [manualTopicCount, setManualTopicCount] = useState('10');
@@ -435,7 +444,7 @@ export function PageStockTab() {
   const hasOpenRouterKey = Boolean(activeProfile?.openRouterKey);
   const hasDropboxAuth = Boolean(activeProfile?.dropboxKey || activeProfile?.dropboxRefreshToken);
   const runnableCount = totalQueuedTopics || topics.length;
-  const manualBrain = selectedPageName ? manualBrains[selectedPageName] : undefined;
+  const manualBrain = manualBrainKey ? manualBrains[manualBrainKey] : undefined;
   const manualHasRunningTask = Boolean(manualTaskId);
   const manualPromptCsv = useMemo(() => {
     const rows = manualPromptResults.map(result => ({
@@ -485,12 +494,18 @@ export function PageStockTab() {
     fetch(`/api/get-app-data?key=${MANUAL_PROMPT_BRAINS_KEY}`)
       .then(res => res.json())
       .then(data => {
-        if (data && typeof data === 'object' && !Array.isArray(data)) setManualBrains(data);
+        if (data && typeof data === 'object' && !Array.isArray(data)) {
+          setManualBrains(data);
+          setManualBrainKey(prev => prev || Object.keys(data)[0] || '');
+        }
       })
       .catch(() => {
         try {
           const data = JSON.parse(localStorage.getItem(MANUAL_PROMPT_BRAINS_KEY) || '{}');
-          if (data && typeof data === 'object' && !Array.isArray(data)) setManualBrains(data);
+          if (data && typeof data === 'object' && !Array.isArray(data)) {
+            setManualBrains(data);
+            setManualBrainKey(prev => prev || Object.keys(data)[0] || '');
+          }
         } catch {}
       });
   }, []);
@@ -598,20 +613,24 @@ export function PageStockTab() {
   const handleManualCsvUpload = async (file?: File | null) => {
     if (!file) return;
     const text = await file.text();
+    const brainKey = createManualBrainKey(file.name);
     setManualCsvName(file.name);
     setManualCsvText(text);
+    setManualBrainKey(brainKey);
     setManualPromptResults([]);
     setManualTopics([]);
   };
 
   const startAnalyzeManualCsv = () => {
-    if (!selectedPage || !manualCsvText.trim() || !activeProfile?.openRouterKey) return;
+    if (!manualCsvText.trim() || !activeProfile?.openRouterKey) return;
     const rows = parseCsvTable(manualCsvText);
     const csvSample = JSON.stringify(rows.slice(0, 80), null, 2).slice(0, 32000);
+    const brainKey = manualBrainKey || createManualBrainKey(manualCsvName || 'CSV Prompt');
+    setManualBrainKey(brainKey);
     const nextTaskId = `manual-brain-${Date.now()}`;
     const taskId = globalTaskStore.enqueueTask({
       id: nextTaskId,
-      title: `🧠 แกะสมอง Prompt: ${selectedPage.name}`,
+      title: `🧠 แกะสมอง Prompt: ${brainKey}`,
       category: 'page-stock-manual',
       progress: 'เตรียมส่ง CSV ให้ AI วิเคราะห์ตัวอย่าง',
     }, async ctx => {
@@ -620,12 +639,8 @@ export function PageStockTab() {
       await waitIfManualPaused(ctx);
       const prompt = `คุณคือ AI strategist ที่เก่งมากในการแกะ pattern คอนเทนต์และ prompt สร้างรูปจากตัวอย่าง CSV
 
-เพจ: ${selectedPage.name}
-ข้อมูล config เดิมของเพจ:
-- image theme: ${selectedPage.image_theme}
-- image font: ${selectedPage.image_font}
-- post persona: ${selectedPage.post_persona}
-- post length: ${selectedPage.post_length}
+ชื่อสมองเบื้องต้นจากไฟล์: ${brainKey}
+สำคัญมาก: อย่าใช้เพจที่เลือกในเมนูซ้ายหรือ config อื่นใดมาตัดสิน ให้ยึดข้อมูลจาก CSV นี้เป็นหลักเท่านั้น
 
 ตัวอย่างข้อมูลจาก CSV เป็น JSON rows:
 ${csvSample}
@@ -639,6 +654,7 @@ ${csvSample}
 
 ตอบเป็น JSON เท่านั้น:
 {
+  "pageName": "ชื่อสมอง/ชื่อเพจที่เหมาะสมจาก CSV",
   "summary": "สรุปสั้นๆ",
   "topicPatterns": ["..."],
   "promptRules": ["..."],
@@ -649,8 +665,9 @@ ${csvSample}
       const answer = await askOpenRouter(prompt, ctx.signal);
       ctx.log(`3/5 AI วิเคราะห์กลับมาแล้ว (${answer.length.toLocaleString()} ตัวอักษร)`);
       const parsed = extractJsonPayload<any>(answer, {});
+      const inferredName = String(parsed.pageName || brainKey).trim() || brainKey;
       const brain: ManualPromptBrain = {
-        pageName: selectedPage.name,
+        pageName: inferredName,
         updatedAt: new Date().toISOString(),
         sourceFileName: manualCsvName,
         sourceRowCount: rows.length,
@@ -663,7 +680,7 @@ ${csvSample}
         rawAnalysis: answer,
       };
       ctx.log('4/5 บันทึกสมองเพจลง app_data และ localStorage');
-      await saveManualBrains({ ...manualBrains, [selectedPage.name]: brain });
+      await saveManualBrains({ ...manualBrains, [brainKey]: brain });
       ctx.log('5/5 สมองเพจพร้อมใช้สำหรับสร้างหัวข้อและ Prompt รูป');
       setManualTaskId('');
     });
@@ -671,9 +688,11 @@ ${csvSample}
   };
 
   const saveManualFeedbackToBrain = async () => {
-    if (!selectedPage || !manualFeedback.trim()) return;
+    if (!manualFeedback.trim()) return;
+    const brainKey = manualBrainKey || createManualBrainKey(manualCsvName || 'CSV Prompt');
+    setManualBrainKey(brainKey);
     const base: ManualPromptBrain = manualBrain || {
-      pageName: selectedPage.name,
+      pageName: brainKey,
       updatedAt: new Date().toISOString(),
       sourceRowCount: 0,
       summary: 'สร้างสมองจาก feedback โดยตรง',
@@ -688,18 +707,18 @@ ${csvSample}
       updatedAt: new Date().toISOString(),
       feedbackNotes: [...base.feedbackNotes, manualFeedback.trim()],
     };
-    await saveManualBrains({ ...manualBrains, [selectedPage.name]: nextBrain });
+    await saveManualBrains({ ...manualBrains, [brainKey]: nextBrain });
     setManualFeedback('');
   };
 
   const startGenerateManualTopics = () => {
-    if (!selectedPage || !manualBrain || !activeProfile?.openRouterKey) return;
+    if (!manualBrain || !activeProfile?.openRouterKey) return;
     const total = Number(manualTopicCount);
     if (!Number.isFinite(total) || total <= 0) return;
     const nextTaskId = `manual-topics-${Date.now()}`;
     const taskId = globalTaskStore.enqueueTask({
       id: nextTaskId,
-      title: `🧠 สร้างหัวข้อ: ${selectedPage.name}`,
+      title: `🧠 สร้างหัวข้อ: ${manualBrain.pageName}`,
       category: 'page-stock-manual',
       progress: `เตรียมสร้างหัวข้อ ${total} หัวข้อ`,
     }, async ctx => {
@@ -712,7 +731,7 @@ ${csvSample}
         await waitIfManualPaused(ctx);
         const amount = Math.min(batchSize, total - start);
         ctx.log(`สร้างหัวข้อ batch ${Math.floor(start / batchSize) + 1}: ขอ ${amount} หัวข้อจาก AI`);
-        const answer = await askOpenRouter(`จากสมองเพจนี้:\n${brainText}\n\nสร้างหัวข้อใหม่ ${amount} หัวข้อสำหรับเพจ "${selectedPage.name}" ห้ามซ้ำกับรายการนี้:\n${[...manualTopics, ...nextTopics].join('\n')}\n\nตอบเป็น JSON array ของ string เท่านั้น`, ctx.signal);
+        const answer = await askOpenRouter(`จากสมองเพจนี้:\n${brainText}\n\nสร้างหัวข้อใหม่ ${amount} หัวข้อสำหรับ "${manualBrain.pageName}" ห้ามซ้ำกับรายการนี้:\n${[...manualTopics, ...nextTopics].join('\n')}\n\nตอบเป็น JSON array ของ string เท่านั้น`, ctx.signal);
         const parsed = extractJsonPayload<string[]>(answer, []);
         const clean = parsed.map(item => String(item).trim()).filter(Boolean);
         nextTopics.push(...clean.slice(0, amount));
@@ -726,11 +745,11 @@ ${csvSample}
   };
 
   const startGenerateManualPrompts = () => {
-    if (!selectedPage || !manualBrain || manualTopics.length === 0 || !activeProfile?.openRouterKey) return;
+    if (!manualBrain || manualTopics.length === 0 || !activeProfile?.openRouterKey) return;
     const nextTaskId = `manual-prompts-${Date.now()}`;
     const taskId = globalTaskStore.enqueueTask({
       id: nextTaskId,
-      title: `🎨 สร้าง Prompt รูป: ${selectedPage.name}`,
+      title: `🎨 สร้าง Prompt รูป: ${manualBrain.pageName}`,
       category: 'page-stock-manual',
       progress: `เตรียมสร้าง Prompt รูป ${manualTopics.length} หัวข้อ`,
     }, async ctx => {
@@ -794,7 +813,7 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
     const blob = new Blob(['\uFEFF' + manualPromptCsv], { type: 'text/csv;charset=utf-8' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `manual-image-prompts-${selectedPage?.name || 'page'}-${Date.now()}.csv`;
+    link.download = `manual-image-prompts-${manualBrain?.pageName || manualBrainKey || 'page'}-${Date.now()}.csv`;
     link.click();
     URL.revokeObjectURL(link.href);
   };
@@ -1484,12 +1503,21 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
         <section className="page-stock-panel page-stock-manual-prompt">
           <div className="page-stock-panel-head">
             <h2>สร้างรูปเองด้วยPrompt</h2>
-            <span>{manualBrain ? 'มีสมองเพจแล้ว' : 'ยังไม่มีสมองเพจ'}</span>
+            <span>{manualBrain ? `สมอง: ${manualBrain.pageName}` : 'ยังไม่มีสมอง Prompt'}</span>
           </div>
           <div className="page-stock-manual-grid">
             <div className="page-stock-manual-card">
               <h3>1. อัปโหลด CSV ตัวอย่าง</h3>
               <p>ไฟล์ควรมีหัวข้อ รายละเอียด และ Prompt สร้างรูป เพื่อให้ AI แกะ pattern ของเพจนี้</p>
+              <label>
+                <span>ชื่อสมอง Prompt</span>
+                <input
+                  className="page-stock-manual-input"
+                  value={manualBrainKey}
+                  onChange={event => setManualBrainKey(event.target.value)}
+                  placeholder="ระบบจะตั้งจากชื่อไฟล์ให้ หรือพิมพ์เองได้"
+                />
+              </label>
               <label className="page-stock-upload">
                 <input
                   type="file"
@@ -1510,6 +1538,20 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
                   <strong>{manualBrain.summary}</strong>
                   <span>{manualBrain.sourceRowCount} แถว · อัปเดต {new Date(manualBrain.updatedAt).toLocaleString('th-TH')}</span>
                 </div>
+              )}
+              {Object.keys(manualBrains).length > 0 && (
+                <label>
+                  <span>โหลดสมองที่เคย Save</span>
+                  <select
+                    className="page-stock-manual-input"
+                    value={manualBrainKey}
+                    onChange={event => setManualBrainKey(event.target.value)}
+                  >
+                    {Object.entries(manualBrains).map(([key, brain]) => (
+                      <option key={key} value={key}>{brain.pageName || key}</option>
+                    ))}
+                  </select>
+                </label>
               )}
             </div>
 

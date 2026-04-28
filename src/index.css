@@ -1426,6 +1426,26 @@ input[type=number] {
   overflow: hidden;
 }
 
+.page-stock-manual-card label {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.page-stock-manual-input {
+  width: 100%;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text-main);
+  font: inherit;
+  outline: none;
+}
+
 .page-stock-upload input {
   display: none;
 }
