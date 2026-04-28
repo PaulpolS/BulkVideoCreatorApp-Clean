@@ -1,0 +1,287 @@
+export interface EffectConfig {
+  label: string;
+  var: boolean;
+}
+
+export interface Templates {
+  [key: string]: { cut_dur: number; n_cuts: number; dynamic: boolean };
+}
+
+export const TEMPLATES: Templates = {
+  "⚡ Quick Cut  (0.5วิ × 8)":   { cut_dur: 0.5, n_cuts: 8,  dynamic: false },
+  "🔥 Highlight  (0.8วิ × 6)":   { cut_dur: 0.8, n_cuts: 6,  dynamic: false },
+  "💫 Dynamic Beat (สลับจังหวะ)": { cut_dur: 0.5, n_cuts: 8,  dynamic: true },
+  "😈 Phonk Beat (0.4วิ × 10)":   { cut_dur: 0.4, n_cuts: 10, dynamic: true },
+  "🌊 Slow Reveal (1.5วิ × 4)":  { cut_dur: 1.5, n_cuts: 4,  dynamic: false },
+  "🎯 Micro Cuts  (0.3วิ × 10)": { cut_dur: 0.3, n_cuts: 10, dynamic: false },
+  "✏️ Custom (กำหนดเอง)":         { cut_dur: 0.5, n_cuts: 6,  dynamic: false },
+}
+
+export interface SingleClipConfig {
+  clipPath: string;
+  outputPath: string;
+  scene1Start: number;
+  scene1End: number;
+  cutsPreview: { ts: number; dur: number }[];
+  bgmPath?: string;
+  bgmVolStart: number;
+  bgmRampAt: number;
+  scEffects: { [key: string]: EffectConfig };
+  scEffectsS2: { [key: string]: EffectConfig };
+  transType: string;
+  transDur: number;
+  autoSub?: boolean;
+}
+
+// Map from Python's dictionary
+const FREI0R_KEYS = ["fr_cartoon", "fr_glow", "fr_glitch", "fr_pixelize", "fr_scanline", "fr_softglow", "fr_nervous", "fr_colorize"];
+
+function buildFx(
+  startCur: string,
+  totalDur: string, // string representation to inject bash vars like "$dur1"
+  effects: { [key: string]: EffectConfig },
+  lblPfx: string
+): { parts: string[], curOut: string } {
+  const parts: string[] = [];
+  let cur = startCur;
+  let n = 0;
+
+  const lbl = (tag: string) => {
+    n++;
+    return `[${lblPfx}_${tag}_${n}]`;
+  };
+
+  const getVar = (key: string) => effects[key]?.var || false;
+
+  if (getVar("fade_in")) {
+    const out = lbl("fade");
+    parts.push(`${cur}fade=t=in:st=0:d=0.5${out}`);
+    cur = out;
+  }
+  
+  if (getVar("zoom")) {
+    const out = lbl("zoom");
+    parts.push(`${cur}zoompan=z='min(zoom+0.0008,1.08)':d=\${fps}*\${zoom_dur}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=iwxih${out}`);
+    cur = out;
+  }
+  
+  if (getVar("color_grade")) {
+    const out = lbl("grade");
+    parts.push(`${cur}curves=r='0/0 0.5/0.58 1/1':g='0/0 0.5/0.50 1/1':b='0/0 0.5/0.42 1/0.9'${out}`);
+    cur = out;
+  }
+
+  if (getVar("sharpen")) {
+    const out = lbl("sharp");
+    parts.push(`${cur}unsharp=5:5:1.2:5:5:0.0${out}`);
+    cur = out;
+  }
+
+  if (getVar("chroma_ab")) {
+    const out = lbl("cab");
+    parts.push(`${cur}rgbashift=rh=2:bh=-2${out}`);
+    cur = out;
+  }
+
+  if (getVar("vignette")) {
+    const out = lbl("vig");
+    parts.push(`${cur}vignette=angle=PI/4${out}`);
+    cur = out;
+  }
+
+  if (getVar("phonk_flash")) {
+    const out = lbl("pflash");
+    parts.push(`${cur}eq=brightness='0.2*sin(t*8)':contrast=1.2${out}`);
+    cur = out;
+  }
+
+  if (getVar("phonk_shake")) {
+    const out = lbl("pshake");
+    parts.push(`${cur}crop=iw*0.9:ih*0.9:iw*0.05+20*sin(t*15):ih*0.05+20*cos(t*15),scale=iw:ih${out}`);
+    cur = out;
+  }
+
+  if (getVar("phonk_invert")) {
+    const out = lbl("pinv");
+    parts.push(`${cur}negate${out}`);
+    cur = out;
+  }
+
+  if (getVar("glow")) {
+    const hasFrei0r = FREI0R_KEYS.some(k => getVar(k));
+    if (!hasFrei0r) {
+      const sp1 = lbl("gsp1"), sp2 = lbl("gsp2");
+      const blr = lbl("gblr"), out = lbl("glow");
+      parts.push(`${cur}split${sp1}${sp2}`);
+      parts.push(`${sp2}gblur=sigma=8${blr}`);
+      parts.push(`${sp1}${blr}blend=all_mode=screen:all_opacity=0.25${out}`);
+      cur = out;
+    }
+  }
+
+  if (getVar("grain")) {
+    const out = lbl("grain");
+    parts.push(`${cur}noise=alls=8:allf=t+u${out}`);
+    cur = out;
+  }
+
+  const frei0rMap: { [key: string]: string } = {
+    "fr_cartoon":  "frei0r=cartoon:0.5|0.1",
+    "fr_glow":     "frei0r=glow:0.5",
+    "fr_glitch":   "frei0r=glitch0r:0.1|0.5|0.5",
+    "fr_pixelize": "frei0r=pixeliz0r:0.05|0.05",
+    "fr_scanline": "frei0r=scanline0r:0",
+    "fr_softglow": "frei0r=softglow:0.5|0.75|0.85",
+    "fr_nervous":  "frei0r=nervous",
+    "fr_colorize": "frei0r=colorize:0.5|0.6|0.5",
+  };
+  
+  const hasFrei0r = FREI0R_KEYS.some(k => getVar(k));
+  if (hasFrei0r) {
+    const fmt = lbl("fmt_rgb");
+    parts.push(`${cur}format=rgb24${fmt}`);
+    cur = fmt;
+  }
+
+  for (const fk of Object.keys(frei0rMap)) {
+    if (getVar(fk)) {
+      const out = lbl(fk);
+      parts.push(`${cur}${frei0rMap[fk]}${out}`);
+      cur = out;
+    }
+  }
+
+  if (hasFrei0r) {
+    const yuv = lbl("fmt_yuv");
+    parts.push(`${cur}format=yuv420p${yuv}`);
+    cur = yuv;
+  }
+
+  return { parts, curOut: cur };
+}
+
+export function buildBashScript(config: SingleClipConfig): string {
+  const { clipPath, outputPath, scene1Start, scene1End, cutsPreview, bgmPath, bgmVolStart, bgmRampAt, scEffects, scEffectsS2, transType, transDur } = config;
+
+  let script = `#!/bin/bash
+# Single Clip Editor Rendering Script
+# Automatically generated by BulkVideoCreatorApp
+
+# 1. Variables
+CLIP="\${1:-${clipPath}}"
+OUTPUT="\${2:-${outputPath}}"
+BGM="${bgmPath || ''}"
+
+if [ ! -f "$CLIP" ]; then
+  echo "Error: Source clip not found at $CLIP"
+  exit 1
+fi
+
+echo "Probing media info..."
+# FFprobe fetching info dynamically
+duration=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$CLIP" | tr -d '\\r\\n')
+fps=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=noprint_wrappers=1:nokey=1 "$CLIP" | head -n1)
+sr=$(ffprobe -v error -select_streams a:0 -show_entries stream=sample_rate -of default=noprint_wrappers=1:nokey=1 "$CLIP" | head -n1)
+
+# Ensure sample rate fallback
+if [ -z "$sr" ]; then sr="44100"; fi
+cl="stereo"
+
+# Parse FPS to float
+if [[ $fps == *"/"* ]]; then
+  zoom_dur="\${duration}"
+else
+  zoom_dur="\${duration}"
+fi
+
+echo "Source FPS: $fps, Audio SR: $sr"
+
+`;
+
+  // Filter Complex construction
+  // Input arguments
+  let inputArgs = ` -i "$CLIP"`;
+  cutsPreview.forEach((cut) => {
+    inputArgs += ` -ss ${cut.ts.toFixed(3)} -t ${cut.dur.toFixed(3)} -i "$CLIP"`;
+  });
+  
+  let bgmIdx: number | null = null;
+  if (bgmPath) {
+    inputArgs += ` -i "$BGM"`;
+    bgmIdx = 1 + cutsPreview.length;
+  }
+
+  const s1Start = scene1Start;
+  const s1End = scene1End;
+  const s1Dur = Math.max(0.1, s1End - s1Start);
+  let toffRaw = Math.max(0.0, s1Dur - transDur);
+  
+  const fc: string[] = [];
+
+  // Scene 1 video trim and effects
+  fc.push(`[0:v]trim=${s1Start.toFixed(3)}:${s1End.toFixed(3)},setpts=PTS-STARTPTS[s1v_raw]`);
+  
+  const s1Fx = buildFx("[s1v_raw]", `${s1Dur}`, scEffects, "s1");
+  fc.push(...s1Fx.parts);
+  fc.push(`${s1Fx.curOut}fps=$fps[s1_final]`);
+
+  // Scene 2 jump cuts concat
+  for (let i = 0; i < cutsPreview.length; i++) {
+    fc.push(`[${i+1}:v]setpts=PTS-STARTPTS,scale=iw:ih:flags=fast_bilinear,format=yuv420p[cv${i}]`);
+  }
+  const cvParts = cutsPreview.map((_, i) => `[cv${i}]`).join("");
+  fc.push(`${cvParts}concat=n=${cutsPreview.length}:v=1:a=0:unsafe=1[s2_concat]`);
+
+  // Scene 2 total duration
+  const s2TotalDur = cutsPreview.reduce((acc, c) => acc + c.dur, 0);
+  const s2Fx = buildFx("[s2_concat]", `${s2TotalDur}`, scEffectsS2, "s2");
+  fc.push(...s2Fx.parts);
+  fc.push(`${s2Fx.curOut}fps=$fps[s2v]`);
+
+  // Xfade transition
+  fc.push(`[s1_final][s2v]xfade=transition=${transType}:duration=${transDur.toFixed(2)}:offset=${toffRaw.toFixed(3)}[vout]`);
+
+  // Audio: scene 1
+  fc.push(`[0:a]atrim=${s1Start.toFixed(3)}:${s1End.toFixed(3)},asetpts=PTS-STARTPTS,aformat=sample_fmts=fltp:sample_rates=$sr:channel_layouts=$cl[s1a]`);
+
+  // Audio: scene 2 cuts (muted)
+  for (let i = 0; i < cutsPreview.length; i++) {
+    fc.push(`[${i+1}:a]volume=0,asetpts=PTS-STARTPTS,aformat=sample_fmts=fltp:sample_rates=$sr:channel_layouts=$cl[ca${i}]`);
+  }
+  const caParts = cutsPreview.map((_, i) => `[ca${i}]`).join("");
+  fc.push(`${caParts}concat=n=${cutsPreview.length}:v=0:a=1:unsafe=1[s2a]`);
+  fc.push(`[s1a][s2a]concat=n=2:v=0:a=1:unsafe=1[acombined]`);
+
+  let aout = "[acombined]";
+
+  // BGM Layering (fade and mixing)
+  if (bgmPath && bgmIdx !== null) {
+    const rampAt = Math.min(bgmRampAt, s1Dur * 0.95);
+    const rampDur = Math.max(0.1, s1Dur - rampAt);
+    const volExpr = `if(lt(t,${rampAt.toFixed(3)}),${bgmVolStart.toFixed(3)},if(lt(t,${s1Dur.toFixed(3)}),${bgmVolStart.toFixed(3)}+${(1.0 - bgmVolStart).toFixed(3)}*((t-${rampAt.toFixed(3)})/${rampDur.toFixed(3)}),1.0))`;
+    
+    fc.push(`[${bgmIdx}:a]volume='${volExpr}':eval=frame[amusic]`);
+    fc.push(`[acombined][amusic]amix=inputs=2:duration=first:normalize=0[aout]`);
+  }
+
+  script += `
+echo "Running FFmpeg compilation..."
+
+# Note: local project Frei0r plugins can be picked up if installed, otherwise relies on system FFmpeg
+export FREI0R_PATH="/usr/local/lib/frei0r-1:/opt/homebrew/lib/frei0r-1:\\$FREI0R_PATH"
+
+ffmpeg -y ${inputArgs} \\
+-filter_complex '
+${fc.join(";\n")}
+' \\
+-map '[vout]' -map '${aout}' \\
+-c:v libx264 -preset medium -crf 23 \\
+-c:a aac -b:a 192k \\
+-movflags +faststart \\
+"$OUTPUT"
+
+echo "Done! Saved to $OUTPUT"
+`;
+
+  return script;
+}

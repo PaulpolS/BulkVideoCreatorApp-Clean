@@ -1,0 +1,773 @@
+{
+  "name": "🔄 [ทำรูปStock ทุกเพจ] All-in-One",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 3
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -200,
+        0
+      ],
+      "id": "a0000001-0000-0000-0000-000000000001",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -200,
+        200
+      ],
+      "id": "a0000001-0000-0000-0000-000000000002",
+      "name": "กดรันเอง"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// 📋 ตั้งค่าเพจทั้งหมดที่นี่ (24 เพจ)\n// ============================================================\n// 🆕 เพิ่มเพจใหม่ = เพิ่ม object ใน array นี้\n// ============================================================\n\nconst pages = [\n  {\n    name: \"เรื่องเล่าจากดิน\",\n    document_id: \"14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU\",\n    sheet_name: \"info เรื่องเล่าจากดิน\",\n    filter_column: \"สร้างแล้วยัง\",\n    dropbox_path: \"/info_ลุงตี่ทุกอัน/เรื่องเล่าจากดิน\",\n    item_limit: 20,\n    image_theme: \"Cinematic black and white or sepia-toned historical photograph style. Dramatic storytelling composition with a subject in period-accurate clothing. Emotional, raw, documentary feel. High contrast lighting, gritty texture, photojournalistic.\",\n    image_font: \"Elegant serif or handwritten style Thai font\",\n    image_credit: \"เครดิตเพจ เรื่องเล่าจากดิน\",\n    post_persona: \"แอดมินเพจเป็นผู้ชาย นักเล่าเรื่อง\",\n    post_length: \"1500-1700 ตัวอักษร\",\n    post_hook: \"ให้เริ่มประโยคเป็น hook เพื่อดึงดูดคน\\nส่งมาแต่คำตอบที่เป็นบทความโพสเท่านั้น\"\n  },\n  {\n    name: \"ลุงตี่ inspiration\",\n    document_id: \"14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU\",\n    sheet_name: \"info ลุงตี่ inspiration\",\n    filter_column: \"สร้างแล้วยัง\",\n    dropbox_path: \"/info_ลุงตี่ทุกอัน/ลุงตี่ inspiration\",\n    item_limit: 20,\n    image_theme: \"Motivational infographic style. Bold typography with inspirational quote overlay on a clean, modern background. Professional business or self-improvement theme. Warm golden lighting, subtle gradient, clean layout with icons.\",\n    image_font: \"Modern Extra Bold Sans-Serif (Prompt or Kanit style)\",\n    image_credit: \"เครดิตเพจ ลุงตี่ inspiration\",\n    post_persona: \"แอดมินเพจเป็นผู้ชาย\",\n    post_length: \"1500-1700 ตัวอักษร\",\n    post_hook: \"\"\n  },\n  {\n    name: \"ลุงตี่\",\n    document_id: \"14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU\",\n    sheet_name: \"info ลุงตี่\",\n    filter_column: \"สร้างแล้วยัง\",\n    dropbox_path: \"/info_ลุงตี่ทุกอัน/ลุงตี่\",\n    item_limit: 20,\n    image_theme: \"Professional self-improvement and habit-building infographic. Clean modern design with bold typography. Warm, motivational color palette. Business casual aesthetic, productivity tools, modern office or lifestyle setting.\",\n    image_font: \"Modern Extra Bold Sans-Serif (Prompt or Kanit style)\",\n    image_credit: \"เครดิตเพจ ลุงตี่\",\n    post_persona: \"แอดมินเพจเป็นผู้ชาย\",\n    post_length: \"1500-1700 ตัวอักษร\",\n    post_hook: \"\"\n  },\n  {\n    name: \"ธุรกิจ\",\n    document_id: \"14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU\",\n    sheet_name: \"info ธุรกิจ\",\n    filter_column: \"สร้างแล้วยัง\",\n    dropbox_path: \"/info_ลุงตี่ทุกอัน/ธุรกิจ\",\n    item_limit: 20,\n    image_theme: \"Corporate business infographic style. Professional workspace, modern office, laptop with charts, conference setting. Clean design, blue and white color scheme, corporate aesthetic, data visualization elements.\",\n    image_font: \"Modern Bold Sans-Serif professional font\",\n    image_credit: \"เครดิตเพจ ธุรกิจ\",\n    post_persona: \"แอดมินเพจเป็นผู้ชาย นักธุรกิจ\",\n    post_length: \"1500-1700 ตัวอักษร\",\n    post_hook: \"\"\n  },\n  {\n    name: \"ธุรกิจ Clean\",\n    document_id: \"14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU\",\n    sheet_name: \"info ธุรกิจ Clean\",\n    filter_column: \"สร้างแล้วยัง\",\n    dropbox_path: \"/info_ลุงตี่ทุกอัน/ธุรกิจ Clean\",\n    item_limit: 20,\n    image_theme: \"Corporate business infographic style. Professional workspace, modern office, laptop with charts. Clean minimalist design, blue and white color scheme, corporate aesthetic.\",\n    image_font: \"Modern Bold Sans-Serif professional font\",\n    image_credit: \"เครดิตเพจ ธุรกิจ\",\n    post_persona: \"แอดมินเพจเป็นผู้ชาย นักธุรกิจ\",\n    post_length: \"1500-1700 ตัวอักษร\",\n    post_hook: \"\"\n  },\n  {\n    name: \"นักดนตรี\",\n    document_id: \"14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU\",\n    sheet_name: \"info นักดนตรี\",\n    filter_column: \"สร้างแล้วยัง\",\n    dropbox_path: \"/info_ลุงตี่ทุกอัน/นักดนตรี\",\n    item_limit: 20,\n    image_theme: \"Close-up photorealistic image of a musical instrument (violin, piano, guitar) with warm cinematic lighting. Rich wood textures, bokeh background, concert hall ambiance. Elegant, artistic, high-end photography style.\",\n    image_font: \"Elegant serif font with musical sophistication\",\n    image_credit: \"เครดิตเพจ นักดนตรี\",\n    post_persona: \"แอดมินเพจเป็นผู้ชาย คนรักดนตรี\",\n    post_length: \"1500-1700 ตัวอักษร\",\n    post_hook: \"\"\n  },\n  {\n    name: \"หารายได้วัยเกษียณ\",\n    document_id: \"14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU\",\n    sheet_name: \"info หารายได้วัยเกษียณ\",\n    filter_column: \"สร้างแล้วยัง\",\n    dropbox_path: \"/info_ลุงตี่ทุกอัน/หารายได้วัยเกษียณ\",\n    item_limit: 20,\n    image_theme: \"Warm, hopeful lifestyle image for seniors. Healthy elderly person in a cozy home or garden setting. Warm golden hour lighting, cheerful colors, photorealistic. Themes of health, wealth, and peaceful retirement.\",\n    image_font: \"Modern Extra Bold Sans-Serif, highly legible\",\n    image_credit: \"เครดิตเพจ หารายได้วัยเกษียณ\",\n    post_persona: \"แอดมินเพจเป็นผู้ชาย\",\n    post_length: \"1500-1700 ตัวอักษร\",\n    post_hook: \"\"\n  },\n  {\n    name: \"บ้านคนรักการอ่าน\",\n    document_id: \"14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU\",\n    sheet_name: \"info บ้านคนรักการอ่าน\",\n    filter_column: \"สร้างแล้วยัง\",\n    dropbox_path: \"/info_ลุงตี่ทุกอัน/บ้านคนรักการอ่าน\",\n    item_limit: 20,\n    image_theme: \"Cozy reading nook or library setting. Open book, warm lamp light, coffee cup, wooden bookshelf background. Warm amber tones, soft bokeh, intellectual and inviting atmosphere. Photorealistic book lover aesthetic.\",\n    image_font: \"Elegant serif font with literary sophistication\",\n    image_credit: \"เครดิตเพจ บ้านคนรักการอ่าน\",\n    post_persona: \"แอดมินเพจเป็นผู้ชาย นักอ่าน\",\n    post_length: \"1500-1700 ตัวอักษร\",\n    post_hook: \"\"\n  },\n  {\n    name: \"ชีวิตไม่ต้องชนะใคร\",\n    document_id: \"14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU\",\n    sheet_name: \"info ชีวิตไม่ต้องชนะใคร\",\n    filter_column: \"สร้างแล้วยัง\",\n    dropbox_path: \"/info_ลุงตี่ทุกอัน/ชีวิตไม่ต้องชนะใคร\",\n    item_limit: 20,\n    image_theme: \"Soft watercolor illustration style infographic. Peaceful nature scene with a person resting under a tree, butterflies, flowers, compass. Pastel green, cream, and soft blue palette. Hand-drawn feel with cute icons. Warm, comforting, gentle aesthetic.\",\n    image_font: \"Friendly rounded Thai font, warm and approachable\",\n    image_credit: \"เครดิตเพจ ชีวิตไม่ต้องชนะใคร\",\n    post_persona: \"แอดมินเพจเป็นผู้ชาย\",\n    post_length: \"1500-1700 ตัวอักษร\",\n    post_hook: \"\"\n  },\n  {\n    name: \"บ้านแสงธรรม\",\n    document_id: \"14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU\",\n    sheet_name: \"info บ้านแสงธรรม\",\n    filter_column: \"สร้างแล้วยัง\",\n    dropbox_path: \"/info_ลุงตี่ทุกอัน/บ้านแสงธรรม\",\n    item_limit: 20,\n    image_theme: \"Serene Buddhist-inspired scene. Golden temple, lotus flowers, monk in meditation, soft morning light. Warm golden and saffron tones, peaceful atmosphere, spiritual and calming. Photorealistic or soft painting style.\",\n    image_font: \"Elegant Thai serif font with spiritual grace\",\n    image_credit: \"เครดิตเพจ บ้านแสงธรรม\",\n    post_persona: \"แอดมินเพจเป็นผู้ชาย\",\n    post_length: \"1500-1700 ตัวอักษร\",\n    post_hook: \"\"\n  },\n  {\n    name: \"ใต้เงาไม้\",\n    document_id: \"14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU\",\n    sheet_name: \"info ใต้เงาไม้\",\n    filter_column: \"สร้างแล้วยัง\",\n    dropbox_path: \"/info_ลุงตี่ทุกอัน/ใต้เงาไม้\",\n    item_limit: 20,\n    image_theme: \"Emotional, melancholic love quote aesthetic. Lonely figure under a large tree, rain or twilight sky. Muted blue and purple tones, cinematic mood, dreamy atmosphere. Soft focus, emotional storytelling.\",\n    image_font: \"Handwritten or elegant script Thai font\",\n    image_credit: \"เครดิตเพจ ใต้เงาไม้\",\n    post_persona: \"แอดมินเพจเป็นผู้ชาย\",\n    post_length: \"1500-1700 ตัวอักษร\",\n    post_hook: \"\"\n  },\n  {\n    name: \"8xWealth\",\n    document_id: \"14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU\",\n    sheet_name: \"info 8xWealth\",\n    filter_column: \"สร้างแล้วยัง\",\n    dropbox_path: \"/info_ลุงตี่ทุกอัน/8xWealth\",\n    item_limit: 20,\n    image_theme: \"Premium finance and investment infographic. Gold coins, stock charts, luxury watch, leather portfolio. Dark navy and gold color scheme, sleek modern design. Professional wealth management aesthetic.\",\n    image_font: \"Modern Bold Sans-Serif, premium financial look\",\n    image_credit: \"เครดิตเพจ 8xWealth\",\n    post_persona: \"แอดมินเพจเป็นผู้ชาย นักลงทุน\",\n    post_length: \"1500-1700 ตัวอักษร\",\n    post_hook: \"\"\n  },\n  {\n    name: \"ลึกลับทั่วโลก\",\n    document_id: \"14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU\",\n    sheet_name: \"info ลึกลับทั่วโลก\",\n    filter_column: \"สร้างแล้วยัง\",\n    dropbox_path: \"/info_ลุงตี่ทุกอัน/ลึกลับทั่วโลก\",\n    item_limit: 20,\n    image_theme: \"Dramatic, mysterious infographic with dark cinematic tones. Real-world mysterious locations, ancient ruins, unexplained phenomena. Dark background with fiery orange/red accents, glowing text boxes, timeline elements. Documentary and dramatic style.\",\n    image_font: \"Bold impactful font with glowing/neon effect\",\n    image_credit: \"เครดิตเพจ ลึกลับทั่วโลก\",\n    post_persona: \"แอดมินเพจเป็นผู้ชาย นักสำรวจ\",\n    post_length: \"1500-1700 ตัวอักษร\",\n    post_hook: \"ให้เริ่มประโยคเป็น hook เพื่อดึงดูดคน\\nส่งมาแต่คำตอบที่เป็นบทความโพสเท่านั้น\"\n  },\n  {\n    name: \"ปราชญ์หนังสือ\",\n    document_id: \"14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU\",\n    sheet_name: \"info ปราชญ์หนังสือ\",\n    filter_column: \"สร้างแล้วยัง\",\n    dropbox_path: \"/info_ลุงตี่ทุกอัน/ปราชญ์หนังสือ\",\n    item_limit: 20,\n    image_theme: \"Book review infographic style. Open book, reading glasses, desk lamp, stacked books. Warm library ambiance, intellectual aesthetic. Rich wood tones, soft warm lighting, cozy study room atmosphere.\",\n    image_font: \"Elegant serif font with intellectual feel\",\n    image_credit: \"เครดิตเพจ ปราชญ์หนังสือ\",\n    post_persona: \"แอดมินเพจเป็นผู้ชาย นักอ่าน\",\n    post_length: \"1500-1700 ตัวอักษร\",\n    post_hook: \"\"\n  },\n  {\n    name: \"โลกเทพเจ้า\",\n    document_id: \"14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU\",\n    sheet_name: \"info โลกเทพเจ้า\",\n    filter_column: \"สร้างแล้วยัง\",\n    dropbox_path: \"/info_ลุงตี่ทุกอัน/โลกเทพเจ้า\",\n    item_limit: 20,\n    image_theme: \"Classical mythology painting style. Renaissance or Baroque art inspired, dramatic chiaroscuro lighting. Ancient gods, epic scenes, dark and dramatic atmosphere. Oil painting texture, museum-quality fine art aesthetic.\",\n    image_font: \"Classical serif font with mythological grandeur\",\n    image_credit: \"เครดิตเพจ โลกเทพเจ้า\",\n    post_persona: \"แอดมินเพจเป็นผู้ชาย\",\n    post_length: \"1500-1700 ตัวอักษร\",\n    post_hook: \"ให้เริ่มประโยคเป็น hook เพื่อดึงดูดคน\\nส่งมาแต่คำตอบที่เป็นบทความโพสเท่านั้น\"\n  },\n  {\n    name: \"แก่แต่เก๋า\",\n    document_id: \"14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU\",\n    sheet_name: \"แก่แต่เก๋า\",\n    filter_column: \"สร้างแล้วยัง\",\n    dropbox_path: \"/info_ลุงตี่ทุกอัน/แก่แต่เก๋า\",\n    item_limit: 20,\n    image_theme: \"Active and stylish seniors aged 60+, Vibrant and healthy lifestyle, Joyful atmosphere, Warm cinematic lighting, Depth of field, photorealistic, 8k resolution. Focus on themes of vitality, wealth, or happy relationships in later life.\",\n    image_font: \"Modern, Extra Bold, Highly Legible Sans-Serif font (resembling Prompt or Kanit)\",\n    image_credit: \"เครดิตเพจ แก่แต่เก๋า\",\n    post_persona: \"แอดมินเมจเป็นผู้ชาย\",\n    post_length: \"1500-1700 ตัวอักษร\",\n    post_hook: \"\"\n  },\n  {\n    name: \"เกษียณมั่งคั่ง\",\n    document_id: \"14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU\",\n    sheet_name: \"เกษียณมั่งคั่ง\",\n    filter_column: \"สร้างแล้วยัง\",\n    dropbox_path: \"/info_ลุงตี่ทุกอัน/เกษียณมั่งคั่ง\",\n    item_limit: 20,\n    image_theme: \"Professional photorealistic style. Modern technology, financial planning, smart home, healthy lifestyle for retirees. Warm cinematic lighting, depth of field, premium feel. Dark navy header bar with bold white Thai text overlay.\",\n    image_font: \"Modern, Extra Bold Sans-Serif, white on dark header\",\n    image_credit: \"เครดิตเพจ เกษียณมั่งคั่ง\",\n    post_persona: \"แอดมินเพจเป็นผู้ชาย\",\n    post_length: \"1500-1700 ตัวอักษร\",\n    post_hook: \"\"\n  },\n  {\n    name: \"มิสเตอร์ เบียร์\",\n    document_id: \"14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU\",\n    sheet_name: \"มิสเตอร์ เบียร์\",\n    filter_column: \"สร้างแล้วยัง\",\n    dropbox_path: \"/info_ลุงตี่ทุกอัน/มิสเตอร์ เบียร์\",\n    item_limit: 20,\n    image_theme: \"Fun science and curiosity infographic. Colorful, engaging design with brain illustrations, question marks, fun facts. Bright and playful color palette, clean modern layout. Pop-science magazine aesthetic.\",\n    image_font: \"Modern Bold Sans-Serif, fun and engaging\",\n    image_credit: \"เครดิตเพจ มิสเตอร์ เบียร์\",\n    post_persona: \"แอดมินเพจเป็นผู้ชาย\",\n    post_length: \"1500-1700 ตัวอักษร\",\n    post_hook: \"\"\n  },\n  {\n    name: \"หัวใจเสือ\",\n    document_id: \"14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU\",\n    sheet_name: \"หัวใจเสือ\",\n    filter_column: \"สร้างแล้วยัง\",\n    dropbox_path: \"/info_ลุงตี่ทุกอัน/หัวใจเสือ\",\n    item_limit: 20,\n    image_theme: \"Powerful motivational image with a majestic tiger. Dramatic jungle or savanna lighting, fierce and confident mood. Bold, dark tones with orange/gold accents. Cinematic, high contrast, photorealistic wildlife photography.\",\n    image_font: \"Ultra Bold, impactful Sans-Serif font\",\n    image_credit: \"เครดิตเพจ หัวใจเสือ\",\n    post_persona: \"แอดมินเพจเป็นผู้ชาย\",\n    post_length: \"1500-1700 ตัวอักษร\",\n    post_hook: \"\"\n  },\n  {\n    name: \"อภิปุญญาภินิหาร\",\n    document_id: \"14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU\",\n    sheet_name: \"อภิปุญญาภินิหาร\",\n    filter_column: \"สร้างแล้วยัง\",\n    dropbox_path: \"/พี่ตี่CEO/พุทธประวัติ\",\n    item_limit: 20,\n    image_theme: \"Sacred Buddhist art style. Golden Buddha statues, ancient temples, lotus flowers, candlelight. Warm golden and saffron tones, ethereal glow, spiritual and majestic atmosphere. Traditional Thai mural painting influence.\",\n    image_font: \"Elegant Thai traditional font with gold accents\",\n    image_credit: \"\",\n    post_persona: \"แอดมินเมจเป็นผู้ชาย\",\n    post_length: \"700-900 คำ\",\n    post_hook: \"ให้เริ่มประโยคเป็น hook เพื่อดึงดูดคน\\nส่งมาแต่คำตอบที่เป็นบทความโพสเท่านั้น\"\n  },\n  {\n    name: \"พุทธประวัติ\",\n    document_id: \"14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU\",\n    sheet_name: \"พุทธประวัติ\",\n    filter_column: \"สร้างแล้วยัง\",\n    dropbox_path: \"/พี่ตี่CEO/พุทธประวัติ\",\n    item_limit: 20,\n    image_theme: \"Traditional Thai mural painting of Buddhist scenes. Serene, elegant, soft pastel colors, gold leaf accents, vintage Thai art style, peaceful atmosphere. Lotus flowers, ancient temples.\",\n    image_font: \"Elegant, Thai traditional or modern serif font\",\n    image_credit: \"\",\n    post_persona: \"แอดมินเมจเป็นผู้ชาย\",\n    post_length: \"700-900 คำ\",\n    post_hook: \"ให้เริ่มประโยคเป็น hook เพื่อดึงดูดคน\\nส่งมาแต่คำตอบที่เป็นบทความโพสเท่านั้น\"\n  },\n  {\n    name: \"เสียงกระซิบจากใจ\",\n    document_id: \"14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU\",\n    sheet_name: \"เสียงกระซิบจากใจ\",\n    filter_column: \"สร้างแล้วยัง\",\n    dropbox_path: \"/info_ลุงตี่ทุกอัน/เสียงกระซิบจากใจ\",\n    item_limit: 20,\n    image_theme: \"Cute chibi anime couple illustration. Bright, warm, colorful cafe or park setting. Adorable cartoon style with speech bubbles. Soft pastel lighting, playful and romantic mood. Japanese anime chibi aesthetic, vertical format.\",\n    image_font: \"Cute rounded Thai font, playful and sweet\",\n    image_credit: \"เสียงกระซิบจากใจ\",\n    post_persona: \"แอดมินเพจเป็นผู้ชาย\",\n    post_length: \"500-700 ตัวอักษร\",\n    post_hook: \"\"\n  },\n  {\n    name: \"คำคมเฟสบุ๊ค\",\n    document_id: \"14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU\",\n    sheet_name: \"คำคมเฟสบุ๊ค\",\n    filter_column: \"สร้างแล้วยัง\",\n    dropbox_path: \"/info_ลุงตี่ทุกอัน/คำคมเฟสบุ๊ค\",\n    item_limit: 20,\n    image_theme: \"Aesthetic still-life photography. Ceramic cup, candle, flowers, cozy home setting. Soft warm natural lighting, shallow depth of field. Minimalist, peaceful, lifestyle blog aesthetic. Muted warm tones.\",\n    image_font: \"Elegant handwritten or script Thai font\",\n    image_credit: \"คำคมเฟสบุ๊ค\",\n    post_persona: \"แอดมินเพจเป็นผู้ชาย\",\n    post_length: \"500-700 ตัวอักษร\",\n    post_hook: \"\"\n  },\n  {\n    name: \"เศษเสี้ยวความรู้สึก\",\n    document_id: \"14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU\",\n    sheet_name: \"เศษเสี้ยวความรู้สึก\",\n    filter_column: \"สร้างแล้วยัง\",\n    dropbox_path: \"/info_ลุงตี่ทุกอัน/เศษเสี้ยวความรู้สึก\",\n    item_limit: 20,\n    image_theme: \"Romantic anime illustration of a young couple. Beautiful outdoor scenery, sunset, cherry blossoms, or starry night. Soft dreamy lighting, warm pastel colors. Japanese anime art style, emotional and beautiful.\",\n    image_font: \"Elegant handwritten Thai font, romantic style\",\n    image_credit: \"เศษเสี้ยวความรู้สึก\",\n    post_persona: \"แอดมินเพจเป็นผู้ชาย\",\n    post_length: \"500-700 ตัวอักษร\",\n    post_hook: \"\"\n  }\n];\n\nreturn pages.map(p => ({ json: p }));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        100,
+        0
+      ],
+      "id": "a0000001-0000-0000-0000-000000000003",
+      "name": "📋 ตั้งค่าเพจ"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        400,
+        0
+      ],
+      "id": "a0000001-0000-0000-0000-000000000004",
+      "name": "🔄 วนเพจ"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('🔄 วนเพจ').item.json.document_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $('🔄 วนเพจ').item.json.sheet_name }}",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "={{ $('🔄 วนเพจ').item.json.filter_column }}",
+              "lookupValue": "N"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        700,
+        -200
+      ],
+      "id": "a0000001-0000-0000-0000-000000000005",
+      "name": "📊 ดึงข้อมูล",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "lcrKmhuWm7ExdVBa",
+          "name": "GoogleSheet 28/1/69"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "maxItems": "={{ $('🔄 วนเพจ').item.json.item_limit }}"
+      },
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        1000,
+        -200
+      ],
+      "id": "a0000001-0000-0000-0000-000000000006",
+      "name": "🔢 Limit"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1300,
+        -200
+      ],
+      "id": "a0000001-0000-0000-0000-000000000007",
+      "name": "🔄 วน Items"
+    },
+    {
+      "parameters": {
+        "jsCode": "const page = $('🔄 วนเพจ').item.json;\nconst topic = $json['หัวข้อ'];\nconst row_number = $json.row_number;\n\nconst creditLine = page.image_credit\n  ? `Footer: Include the text \"${page.image_credit}\" at the bottom.`\n  : 'No Watermarks/Credits: DO NOT include any footer, credits, or watermark.';\n\nconst promptText = `Act as a professional AI Image Prompt Engineer.\nYour task is to write a detailed English prompt to generate a high-quality infographic image (1080x1080).\n\nInput Data:\nContent Source: \"${topic}\"\n\nInstructions for the Prompt you will write:\n\nAnalyze and Apply the Visual Scene: The core visual aesthetic MUST strictly follow this description: \"${page.image_theme}\" Do not deviate from this primary visual.\n\nText Generation & Layout (Crucial):\nMain Text: Summarize the Content Source into one single, powerful sentence or quote in the THAI LANGUAGE (max 15 words) that captures its essence.\n${creditLine}\nFont Style: Specify \"${page.image_font}\" for the text.\n\nComposition:\nThe text should be placed in a negative space or on a subtle, elegant semi-transparent overlay so it is easy to read against the background.\n\nOutput format:\nReturn ONLY the final image generation prompt text in English. Do not include introductory or concluding remarks.`;\n\nreturn [{ json: { promptText, topic, row_number } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        -200
+      ],
+      "id": "a0000001-0000-0000-0000-000000000008",
+      "name": "📋 สร้าง Prompt รูป"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.promptText }}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1900,
+        -200
+      ],
+      "id": "a0000001-0000-0000-0000-000000000009",
+      "name": "🤖 สร้าง Prompt"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+      "typeVersion": 1,
+      "position": [
+        1980,
+        0
+      ],
+      "id": "a0000001-0000-0000-0000-000000000010",
+      "name": "DeepSeek Chat Model",
+      "credentials": {
+        "deepSeekApi": {
+          "id": "ISRzMDRrun6HybpJ",
+          "name": "DeepSeek account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.kie.ai/api/v1/jobs/createTask",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"model\": \"gpt-image-2-text-to-image\", \"input\": { \"prompt\": $json.text, \"aspect_ratio\": \"1:1\" } } }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2200,
+        -200
+      ],
+      "id": "a0000001-0000-0000-0000-000000000011",
+      "name": "🎨 สร้างรูป KIE",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "2dYtw9cYL7hZdM1h",
+          "name": "Kie ลุงตี่"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 600
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2500,
+        -200
+      ],
+      "id": "a0000001-0000-0000-0000-000000000012",
+      "name": "⏳ รอรูปเสร็จ",
+      "webhookId": "unified-stock-wait-001"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.kie.ai/api/v1/jobs/recordInfo?taskId={{ $json.data.taskId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2800,
+        -200
+      ],
+      "id": "a0000001-0000-0000-0000-000000000013",
+      "name": "✅ ตรวจ Task",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "2dYtw9cYL7hZdM1h",
+          "name": "Kie ลุงตี่"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ JSON.parse($json.data.resultJson).resultUrls[0] }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        3100,
+        -200
+      ],
+      "id": "a0000001-0000-0000-0000-000000000014",
+      "name": "⬇️ โหลดรูป"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "path": "={{ $('🔄 วนเพจ').item.json.dropbox_path }}/{{ $('✅ ตรวจ Task').item.json.data.taskId }}.png",
+        "binaryData": true
+      },
+      "type": "n8n-nodes-base.dropbox",
+      "typeVersion": 1,
+      "position": [
+        3400,
+        -200
+      ],
+      "id": "a0000001-0000-0000-0000-000000000015",
+      "name": "☁️ อัพ Dropbox",
+      "credentials": {
+        "dropboxOAuth2Api": {
+          "id": "Q498QxQJ66MEJBOa",
+          "name": "ลุงตี่"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "path",
+              "value": "={{ $json.path_lower }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        3700,
+        -200
+      ],
+      "id": "a0000001-0000-0000-0000-000000000016",
+      "name": "🔗 สร้าง Share Link",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "MioPT8ucXQh05jzU",
+          "name": "dropbox"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((item) => {\n  let finalUrl = \"\";\n  if (item.json.url) {\n    finalUrl = item.json.url;\n  } else if (item.json.error && item.json.error.message) {\n    const match = item.json.error.message.match(/https:[^\\\\\\\"]+/);\n    if (match) finalUrl = match[0];\n  }\n  return {\n    json: {\n      name: item.json.name || \"stock.png\",\n      url: finalUrl ? finalUrl.replace('dl=0', 'dl=1') : \"ไม่พบลิงก์\"\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4000,
+        -200
+      ],
+      "id": "a0000001-0000-0000-0000-000000000017",
+      "name": "📝 แปลง URL"
+    },
+    {
+      "parameters": {
+        "jsCode": "const page = $('🔄 วนเพจ').item.json;\nconst topic = $('📋 สร้าง Prompt รูป').item.json.topic;\n\nconst postPrompt = `เขียนโพสสั้นๆ ${page.post_persona} ความยาวไม่เกิน ${page.post_length} เป็นภาษาง่ายๆที่อ่านเข้าใจ อธิบายเรื่องนี้ ${topic}\n${page.post_hook}\nส่งมาแต่คำตอบที่เป็นบทความโพสเท่านั้น`;\n\nreturn [{ json: { postPrompt, url: $json.url } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4300,
+        -200
+      ],
+      "id": "a0000001-0000-0000-0000-000000000018",
+      "name": "📋 สร้าง Prompt โพส"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.postPrompt }}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        4600,
+        -200
+      ],
+      "id": "a0000001-0000-0000-0000-000000000019",
+      "name": "✍️ เขียนโพส"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+      "typeVersion": 1,
+      "position": [
+        4680,
+        0
+      ],
+      "id": "a0000001-0000-0000-0000-000000000020",
+      "name": "DeepSeek Chat Model1",
+      "credentials": {
+        "deepSeekApi": {
+          "id": "ISRzMDRrun6HybpJ",
+          "name": "DeepSeek account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('🔄 วนเพจ').item.json.document_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $('🔄 วนเพจ').item.json.sheet_name }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "row_number": "={{ $('📋 สร้าง Prompt รูป').item.json.row_number }}",
+            "Post": "N",
+            "สร้างแล้วยัง": "Done",
+            "ID Dropbox": "={{ $('☁️ อัพ Dropbox').item.json.id }}",
+            "หัวข้อ": "={{ $('📋 สร้าง Prompt รูป').item.json.topic }}",
+            "Linkรูป": "={{ $('📋 สร้าง Prompt โพส').item.json.url }}",
+            "โพส": "={{ $json.text }}",
+            "อัพวันที่เท่าไร": "={{ $now.format('yyyy-MM-dd HH:mm:ss') }}"
+          },
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true
+            },
+            {
+              "id": "หัวข้อ",
+              "displayName": "หัวข้อ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Linkรูป",
+              "displayName": "Linkรูป",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "โพส",
+              "displayName": "โพส",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Post",
+              "displayName": "Post",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ID Dropbox",
+              "displayName": "ID Dropbox",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "สร้างแล้วยัง",
+              "displayName": "สร้างแล้วยัง",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "อัพวันที่เท่าไร",
+              "displayName": "อัพวันที่เท่าไร",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        4900,
+        -200
+      ],
+      "id": "a0000001-0000-0000-0000-000000000021",
+      "name": "📊 อัพเดท Sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "lcrKmhuWm7ExdVBa",
+          "name": "GoogleSheet 28/1/69"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        5200,
+        -200
+      ],
+      "id": "a0000001-0000-0000-0000-000000000022",
+      "name": "⏭️ Item ถัดไป"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "📋 ตั้งค่าเพจ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "กดรันเอง": {
+      "main": [
+        [
+          {
+            "node": "📋 ตั้งค่าเพจ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 ตั้งค่าเพจ": {
+      "main": [
+        [
+          {
+            "node": "🔄 วนเพจ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔄 วนเพจ": {
+      "main": [
+        [],
+        [
+          {
+            "node": "📊 ดึงข้อมูล",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 ดึงข้อมูล": {
+      "main": [
+        [
+          {
+            "node": "🔢 Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔢 Limit": {
+      "main": [
+        [
+          {
+            "node": "🔄 วน Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔄 วน Items": {
+      "main": [
+        [
+          {
+            "node": "🔄 วนเพจ",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📋 สร้าง Prompt รูป",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 สร้าง Prompt รูป": {
+      "main": [
+        [
+          {
+            "node": "🤖 สร้าง Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "🤖 สร้าง Prompt",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🤖 สร้าง Prompt": {
+      "main": [
+        [
+          {
+            "node": "🎨 สร้างรูป KIE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🎨 สร้างรูป KIE": {
+      "main": [
+        [
+          {
+            "node": "⏳ รอรูปเสร็จ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏳ รอรูปเสร็จ": {
+      "main": [
+        [
+          {
+            "node": "✅ ตรวจ Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✅ ตรวจ Task": {
+      "main": [
+        [
+          {
+            "node": "⬇️ โหลดรูป",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⬇️ โหลดรูป": {
+      "main": [
+        [
+          {
+            "node": "☁️ อัพ Dropbox",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "☁️ อัพ Dropbox": {
+      "main": [
+        [
+          {
+            "node": "🔗 สร้าง Share Link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔗 สร้าง Share Link": {
+      "main": [
+        [
+          {
+            "node": "📝 แปลง URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 แปลง URL": {
+      "main": [
+        [
+          {
+            "node": "📋 สร้าง Prompt โพส",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 สร้าง Prompt โพส": {
+      "main": [
+        [
+          {
+            "node": "✍️ เขียนโพส",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "✍️ เขียนโพส",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✍️ เขียนโพส": {
+      "main": [
+        [
+          {
+            "node": "📊 อัพเดท Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 อัพเดท Sheet": {
+      "main": [
+        [
+          {
+            "node": "⏭️ Item ถัดไป",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏭️ Item ถัดไป": {
+      "main": [
+        [
+          {
+            "node": "🔄 วน Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false,
+    "timezone": "Asia/Bangkok"
+  },
+  "versionId": "unified-stock-v1",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "85e19124c3abdbdf237141ad745073553bc16572116e727a573661e5c1f4b7a9"
+  },
+  "tags": [
+    {
+      "updatedAt": "2026-01-24T08:35:14.437Z",
+      "createdAt": "2026-01-24T08:35:14.437Z",
+      "id": "FpQ9VtOgss1pkTWA",
+      "name": "เครื่องมือต่างๆ"
+    }
+  ]
+}

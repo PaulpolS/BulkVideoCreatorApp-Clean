@@ -1,0 +1,1368 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sync Master Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Prompt:wght@300;400;500;600;700&display=swap');
+        :root { --accent: #f43f5e; }
+
+        [data-theme="slate"] {
+            --primary: #6366f1; --primary-glow: rgba(99,102,241,0.4);
+            --glass-card: rgba(30,41,59,0.6); --border-dark: rgba(255,255,255,0.08);
+            --bg-grad-1: #0f172a; --bg-grad-2: #020617;
+            --nav-bg: rgba(15,23,42,0.85); --input-bg: rgba(15,23,42,0.8);
+            --text-main: #f8fafc; --text-sub: #94a3b8;
+            --card-bg: rgba(30,41,59,0.7); --hover-bg: rgba(255,255,255,0.05);
+            --section-bg: rgba(30,41,59,0.9); --border-subtle: rgba(255,255,255,0.08);
+        }
+        [data-theme="nord"] {
+            --primary: #81a1c1; --primary-glow: rgba(129,161,193,0.4);
+            --glass-card: rgba(59,66,82,0.8); --border-dark: rgba(216,222,233,0.1);
+            --bg-grad-1: #2e3440; --bg-grad-2: #242933;
+            --nav-bg: rgba(46,52,64,0.95); --input-bg: rgba(67,76,94,0.8);
+            --text-main: #eceff4; --text-sub: #d8dee9;
+            --card-bg: rgba(59,66,82,0.7); --hover-bg: rgba(255,255,255,0.05);
+            --section-bg: rgba(59,66,82,0.9); --border-subtle: rgba(216,222,233,0.1);
+        }
+        [data-theme="mocha"] {
+            --primary: #d08770; --primary-glow: rgba(208,135,112,0.4);
+            --glass-card: rgba(60,56,54,0.8); --border-dark: rgba(235,219,178,0.08);
+            --bg-grad-1: #282828; --bg-grad-2: #1d2021;
+            --nav-bg: rgba(40,40,40,0.95); --input-bg: rgba(50,48,47,0.8);
+            --text-main: #ebdbb2; --text-sub: #a89984;
+            --card-bg: rgba(60,56,54,0.7); --hover-bg: rgba(255,255,255,0.05);
+            --section-bg: rgba(60,56,54,0.9); --border-subtle: rgba(235,219,178,0.08);
+        }
+        [data-theme="dracula"] {
+            --primary: #bd93f9; --primary-glow: rgba(189,147,249,0.4);
+            --glass-card: rgba(68,71,90,0.7); --border-dark: rgba(248,248,242,0.08);
+            --bg-grad-1: #282a36; --bg-grad-2: #21222c;
+            --nav-bg: rgba(40,42,54,0.9); --input-bg: rgba(68,71,90,0.5);
+            --text-main: #f8f8f2; --text-sub: #6272a4;
+            --card-bg: rgba(68,71,90,0.7); --hover-bg: rgba(255,255,255,0.05);
+            --section-bg: rgba(68,71,90,0.9); --border-subtle: rgba(248,248,242,0.08);
+        }
+        [data-theme="light"] {
+            --primary: #6366f1; --primary-glow: rgba(99,102,241,0.3);
+            --glass-card: rgba(255,255,255,0.7); --border-dark: rgba(0,0,0,0.08);
+            --bg-grad-1: #f8fafc; --bg-grad-2: #e2e8f0;
+            --nav-bg: rgba(255,255,255,0.9); --input-bg: rgba(241,245,249,0.9);
+            --text-main: #0f172a; --text-sub: #64748b;
+            --card-bg: rgba(255,255,255,0.8); --hover-bg: rgba(0,0,0,0.03);
+            --section-bg: rgba(255,255,255,0.95); --border-subtle: rgba(0,0,0,0.08);
+        }
+
+        body { font-family: 'Outfit','Prompt',sans-serif; background: radial-gradient(circle at top center,var(--bg-grad-1),var(--bg-grad-2)); background-attachment: fixed; color: var(--text-main); min-height: 100vh; scroll-behavior: smooth; transition: background 0.5s ease; }
+        .glass-card { background-color: var(--glass-card); backdrop-filter: blur(12px) saturate(150%); border: 1px solid var(--border-dark); transition: all 0.3s ease; }
+        .card-bg { background-color: var(--card-bg); }
+        .section-bg { background-color: var(--section-bg); }
+        .text-main { color: var(--text-main); }
+        .text-sub { color: var(--text-sub); }
+        .nav-bg { background-color: var(--nav-bg); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border-dark); }
+        .input-bg { background-color: var(--input-bg); color: var(--text-main); border: 1px solid var(--border-dark); }
+        .input-bg:focus { border-color: var(--primary); outline: none; box-shadow: 0 0 0 2px var(--primary-glow); }
+        .hover-bg:hover { background-color: var(--hover-bg); }
+        .border-subtle { border-color: var(--border-subtle); }
+        .tab-active { color: var(--primary); border-color: var(--primary); font-weight: 600; }
+        .tab-inactive { color: var(--text-sub); }
+        .tab-inactive:hover { color: var(--text-main); }
+
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); z-index: 100; display: flex; align-items: center; justify-content: center; }
+        .note-textarea { min-height: 80px; resize: vertical; }
+        .emoji-picker { display: flex; flex-wrap: wrap; gap: 4px; max-height: 120px; overflow-y: auto; }
+        .emoji-picker button { font-size: 18px; padding: 4px; border: none; background: none; cursor: pointer; border-radius: 6px; }
+        .emoji-picker button:hover { background: var(--hover-bg); }
+        .stock-bar { height: 100%; border-radius: 9999px; transition: width 1s ease; }
+
+        /* Notebook / Prompt System */
+        .prompt-card { position: relative; transition: all 0.3s cubic-bezier(0.4,0,0.2,1); }
+        .prompt-card:hover { transform: translateY(-4px); box-shadow: 0 16px 48px rgba(0,0,0,0.15); }
+        .prompt-card .copy-btn { opacity: 0; transition: opacity 0.2s ease; }
+        .prompt-card:hover .copy-btn { opacity: 1; }
+        .prompt-content { white-space: pre-wrap; word-break: break-word; font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.7; }
+        .manual-section { max-height: 0; overflow: hidden; transition: max-height 0.4s ease, opacity 0.3s ease; opacity: 0; }
+        .manual-section.open { max-height: 2000px; opacity: 1; }
+        .notebook-search { position: relative; }
+        .notebook-search i { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); }
+        .tag-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border-radius: 9999px; font-size: 11px; font-weight: 600; letter-spacing: 0.03em; cursor: pointer; transition: all 0.2s ease; }
+        .tag-chip:hover { filter: brightness(1.2); }
+        .tag-chip.active { box-shadow: 0 0 0 2px var(--primary); }
+
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg-grad-2); }
+        ::-webkit-scrollbar-thumb { background-color: var(--primary); border-radius: 10px; opacity: 0.5; }
+        ::-webkit-scrollbar-thumb:hover { background-color: var(--text-sub); }
+
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-slide-up { animation: slideUp 0.5s ease forwards; }
+        .fade-in { animation: slideUp 0.4s ease-out forwards; }
+
+        .main-grid { display: grid; grid-template-columns: 1fr 350px; gap: 2rem; }
+        @media (max-width: 1024px) { .main-grid { grid-template-columns: 1fr; } }
+        .kanban-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 1rem; align-items: start; }
+        @media (max-width: 768px) { .kanban-grid { grid-template-columns: 1fr; } }
+        .kanban-col { min-height: 400px; padding: 12px; border-radius: 16px; }
+        .kanban-item { cursor: grab; }
+        .kanban-item:active { cursor: grabbing; }
+        .badge { padding: 2px 8px; border-radius: 9999px; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.05em; }
+        .badge-urgent { background: rgba(244,63,94,0.1); color: #f43f5e; border: 1px solid rgba(244,63,94,0.2); }
+        .badge-normal { background: rgba(16,185,129,0.1); color: #10b981; border: 1px solid rgba(16,185,129,0.2); }
+
+        .deadline-warning { animation: pulseRed 2s infinite; color: var(--accent); font-weight: 700; }
+        @keyframes pulseRed { 0%{opacity:1} 50%{opacity:0.5} 100%{opacity:1} }
+        .card-hover { transition: all 0.3s ease; }
+        .card-hover:hover { transform: translateY(-5px); box-shadow: 0 12px 40px rgba(0,0,0,0.1); }
+
+        /* Responsive */
+        @media (max-width: 640px) {
+            .nav-title { display: none; }
+            .nav-right { gap: 4px; }
+            .nav-right select { font-size: 11px; padding: 4px 8px; }
+            .nav-right button { padding: 4px 8px; font-size: 11px; }
+        }
+        @media (max-width: 480px) {
+            .main-grid { gap: 1rem; }
+            body { font-size: 14px; }
+        }
+    </style>
+</head>
+<body data-theme="slate">
+
+<!-- NAV -->
+<nav class="nav-bg sticky top-0 z-50">
+    <div class="max-w-[1600px] mx-auto px-2 sm:px-4 lg:px-8">
+        <div class="flex items-center justify-between h-14 sm:h-16 flex-wrap gap-y-1">
+            <div class="flex items-center gap-2 sm:gap-3 min-w-0">
+                <i class="fa-solid fa-layer-group text-xl sm:text-2xl" style="color:var(--primary)"></i>
+                <span class="font-bold text-base sm:text-xl text-main tracking-wide nav-title truncate">Sync Master Dashboard</span>
+            </div>
+            <div class="flex items-center gap-1 sm:gap-2 nav-right flex-shrink-0">
+                <button onclick="exportAllData()" class="p-1.5 sm:p-2 rounded-lg hover-bg transition-colors text-main" title="Export"><i class="fa-solid fa-download text-xs sm:text-sm"></i></button>
+                <button onclick="document.getElementById('import-file').click()" class="p-1.5 sm:p-2 rounded-lg hover-bg transition-colors text-main" title="Import"><i class="fa-solid fa-upload text-xs sm:text-sm"></i></button>
+                <input type="file" id="import-file" accept=".json" class="hidden" onchange="importAllData(event)">
+                <select id="theme-selector" onchange="changeTheme(this.value)" class="input-bg text-xs sm:text-sm px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg cursor-pointer outline-none">
+                    <option value="slate">🌙 Slate</option>
+                    <option value="nord">❄️ Nord</option>
+                    <option value="mocha">☕ Mocha</option>
+                    <option value="dracula">🧛 Dracula</option>
+                    <option value="light">☀️ Light</option>
+                </select>
+                <button onclick="logout()" class="text-xs sm:text-sm font-medium text-main hover:text-rose-400 transition-colors hover-bg px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg border" style="border-color:var(--border-dark)">
+                    <i class="fa-solid fa-key"></i><span class="hidden sm:inline ml-1">Key</span>
+                </button>
+            </div>
+        </div>
+    </div>
+</nav>
+
+<!-- LOGIN -->
+<div id="login-section" class="max-w-md mx-auto mt-12 sm:mt-24 glass-card p-4 sm:p-8 rounded-2xl shadow-2xl hidden mx-4 sm:mx-auto">
+    <div class="text-center mb-6">
+        <div class="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 border" style="background:var(--primary-glow);border-color:var(--border-dark)">
+            <i class="fa-solid fa-lock text-2xl" style="color:var(--primary)"></i>
+        </div>
+        <h2 class="text-2xl font-bold text-main">Google Sheets Access</h2>
+        <p class="text-sub mt-2 text-sm">กรุณาใส่ Google API Key ของคุณ</p>
+    </div>
+    <div class="space-y-4">
+        <input type="password" id="api-key-input" placeholder="วาง API Key (AIza...) ที่นี่..." class="w-full px-4 py-3 rounded-lg input-bg transition-all text-sm">
+        <button onclick="saveApiKey()" class="w-full text-white font-bold py-3 rounded-lg shadow-lg transition-all" style="background-color:var(--primary);">เชื่อมต่อระบบ</button>
+        <div class="text-xs text-sub text-center mt-4">
+            * AIzaSyAihSSlxF8yeYd0GhyMea4s9vb0aVbY8qw<br><br>
+            <span class="text-amber-500 font-bold">💡 หากใช้งานหน้าจอนี้ผ่านแอปหลัก<br>กรุณาตั้งค่า Key ที่ปุ่ม "ตั้งค่า API" ด้านขวาบนของแอปแทนครับ</span>
+        </div>
+    </div>
+</div>
+
+<!-- LOADING -->
+<div id="loading-section" class="max-w-7xl mx-auto mt-32 text-center hidden">
+    <div class="inline-block animate-spin rounded-full h-14 w-14 border-4 border-t-transparent mb-6" style="border-color:var(--primary);border-top-color:transparent;"></div>
+    <h3 class="text-xl font-medium text-main" id="loading-text">กำลังโหลดข้อมูล...</h3>
+    <p class="text-sub mt-2 text-sm" id="loading-subtext">ประมวลผลและเชื่อมต่อ Google Sheets</p>
+</div>
+
+<!-- DASHBOARD -->
+<div id="dashboard-section" class="max-w-[1600px] mx-auto px-2 sm:px-4 lg:px-8 py-4 sm:py-8 hidden">
+    <div class="w-full">
+        <div class="space-y-6">
+            <div class="flex items-center glass-card rounded-xl px-1 sm:px-2 overflow-x-auto scrollbar-thin" id="tabs-bar" style="-webkit-overflow-scrolling:touch;"></div>
+            <div id="tab-content" class="fade-in min-h-[300px] sm:min-h-[500px]"></div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL: Create Tab -->
+<div id="modal-create-tab" class="modal-overlay hidden" onclick="if(event.target===this)closeModal('modal-create-tab')">
+    <div class="section-bg rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4 fade-in">
+        <h3 class="text-lg font-bold text-main mb-4"><i class="fa-solid fa-plus-circle mr-2" style="color:var(--primary)"></i>สร้าง Tab ใหม่</h3>
+        <div class="space-y-4">
+            <div><label class="text-sm text-sub font-medium">ชื่อ Tab</label><input id="new-tab-name" class="w-full mt-1 px-4 py-2.5 rounded-lg input-bg" placeholder="เช่น งานพิเศษ"></div>
+            <div><label class="text-sm text-sub font-medium">Emoji</label>
+                <div class="mt-1 flex items-center gap-3"><span id="new-tab-emoji-preview" class="text-3xl cursor-pointer" onclick="document.getElementById('new-tab-emoji-picker').classList.toggle('hidden')">📁</span><input id="new-tab-emoji-input" class="w-full px-4 py-2.5 rounded-lg input-bg" placeholder="วาง emoji" oninput="document.getElementById('new-tab-emoji-preview').innerText=this.value||'📁'"></div>
+                <div id="new-tab-emoji-picker" class="emoji-picker mt-2 hidden"></div>
+            </div>
+            <div class="flex gap-3 pt-2">
+                <button onclick="closeModal('modal-create-tab')" class="flex-1 py-2.5 rounded-lg border text-sub hover-bg transition-colors" style="border-color:var(--border-dark)">ยกเลิก</button>
+                <button onclick="createCustomTab()" class="flex-1 py-2.5 rounded-lg text-white font-semibold transition-colors" style="background-color:var(--primary)">สร้าง</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL: Create Box -->
+<div id="modal-create-box" class="modal-overlay hidden" onclick="if(event.target===this)closeModal('modal-create-box')">
+    <div class="section-bg rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4 fade-in" style="max-height:90vh;overflow-y:auto">
+        <h3 class="text-lg font-bold text-main mb-4"><i class="fa-solid fa-box-open mr-2" style="color:var(--primary)"></i>สร้างกล่องติดตามงาน</h3>
+        <div class="space-y-4">
+            <div><label class="text-sm text-sub font-medium">ชื่อกล่อง</label><input id="new-box-name" class="w-full mt-1 px-4 py-2.5 rounded-lg input-bg" placeholder="เช่น งานคลิปสั้น"></div>
+            <div><label class="text-sm text-sub font-medium">Emoji</label>
+                <div class="mt-1 flex items-center gap-3"><span id="new-box-emoji-preview" class="text-3xl cursor-pointer" onclick="document.getElementById('new-box-emoji-picker').classList.toggle('hidden')">📦</span><input id="new-box-emoji-input" class="w-full px-4 py-2.5 rounded-lg input-bg" placeholder="วาง emoji" oninput="document.getElementById('new-box-emoji-preview').innerText=this.value||'📦'"></div>
+                <div id="new-box-emoji-picker" class="emoji-picker mt-2 hidden"></div>
+            </div>
+            <div><label class="text-sm text-sub font-medium">Spreadsheet ID</label><input id="new-box-sheet-id" class="w-full mt-1 px-4 py-2.5 rounded-lg input-bg text-xs" placeholder="เช่น 14jiUb5-96MY6rCIJTWkbcSBmbvCk..."></div>
+            <div class="grid grid-cols-2 gap-3">
+                <div><label class="text-sm text-sub font-medium">ชื่อ Sheet</label><input id="new-box-sheet-name" class="w-full mt-1 px-4 py-2.5 rounded-lg input-bg" placeholder="เช่น ทั้งหมด"></div>
+                <div><label class="text-sm text-sub font-medium">Cell</label><input id="new-box-cell" class="w-full mt-1 px-4 py-2.5 rounded-lg input-bg" placeholder="เช่น K2"></div>
+            </div>
+            <div><label class="text-sm text-sub font-medium">Link (ไม่บังคับ)</label><input id="new-box-link" class="w-full mt-1 px-4 py-2.5 rounded-lg input-bg text-xs" placeholder="https://..."></div>
+            <div><label class="text-sm text-sub font-medium">สีธีม</label>
+                <div class="flex gap-2 mt-1 flex-wrap">
+                    <button onclick="selectBoxColor('indigo')" class="w-8 h-8 rounded-full bg-indigo-500 border-2 border-transparent hover:border-white box-color-btn" data-color="indigo"></button>
+                    <button onclick="selectBoxColor('red')" class="w-8 h-8 rounded-full bg-red-500 border-2 border-transparent hover:border-white box-color-btn" data-color="red"></button>
+                    <button onclick="selectBoxColor('emerald')" class="w-8 h-8 rounded-full bg-emerald-500 border-2 border-transparent hover:border-white box-color-btn" data-color="emerald"></button>
+                    <button onclick="selectBoxColor('purple')" class="w-8 h-8 rounded-full bg-purple-500 border-2 border-transparent hover:border-white box-color-btn" data-color="purple"></button>
+                    <button onclick="selectBoxColor('pink')" class="w-8 h-8 rounded-full bg-pink-500 border-2 border-transparent hover:border-white box-color-btn" data-color="pink"></button>
+                    <button onclick="selectBoxColor('amber')" class="w-8 h-8 rounded-full bg-amber-500 border-2 border-transparent hover:border-white box-color-btn" data-color="amber"></button>
+                    <button onclick="selectBoxColor('sky')" class="w-8 h-8 rounded-full bg-sky-500 border-2 border-transparent hover:border-white box-color-btn" data-color="sky"></button>
+                </div>
+            </div>
+            <div class="flex gap-3 pt-2">
+                <button onclick="closeModal('modal-create-box')" class="flex-1 py-2.5 rounded-lg border text-sub hover-bg transition-colors" style="border-color:var(--border-dark)">ยกเลิก</button>
+                <button onclick="createCustomBox()" class="flex-1 py-2.5 rounded-lg text-white font-semibold transition-colors" style="background-color:var(--primary)">สร้าง</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL: Edit Box -->
+<div id="modal-edit-box" class="modal-overlay hidden" onclick="if(event.target===this)closeModal('modal-edit-box')">
+    <div class="section-bg rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4 fade-in" style="max-height:90vh;overflow-y:auto">
+        <h3 class="text-lg font-bold text-main mb-4"><i class="fa-solid fa-pen mr-2" style="color:var(--primary)"></i>แก้ไขกล่อง</h3>
+        <div class="space-y-4">
+            <div><label class="text-sm text-sub font-medium">ชื่อกล่อง</label><input id="edit-box-name" class="w-full mt-1 px-4 py-2.5 rounded-lg input-bg"></div>
+            <div><label class="text-sm text-sub font-medium">Emoji</label>
+                <div class="mt-1 flex items-center gap-3"><span id="edit-box-emoji-preview" class="text-3xl cursor-pointer" onclick="document.getElementById('edit-box-emoji-picker').classList.toggle('hidden')">📦</span><input id="edit-box-emoji-input" class="w-full px-4 py-2.5 rounded-lg input-bg" oninput="document.getElementById('edit-box-emoji-preview').innerText=this.value||'📦'"></div>
+                <div id="edit-box-emoji-picker" class="emoji-picker mt-2 hidden"></div>
+            </div>
+            <div><label class="text-sm text-sub font-medium">Spreadsheet ID</label><input id="edit-box-sheet-id" class="w-full mt-1 px-4 py-2.5 rounded-lg input-bg text-xs"></div>
+            <div class="grid grid-cols-2 gap-3">
+                <div><label class="text-sm text-sub font-medium">ชื่อ Sheet</label><input id="edit-box-sheet-name" class="w-full mt-1 px-4 py-2.5 rounded-lg input-bg"></div>
+                <div><label class="text-sm text-sub font-medium">Cell</label><input id="edit-box-cell" class="w-full mt-1 px-4 py-2.5 rounded-lg input-bg"></div>
+            </div>
+            <div><label class="text-sm text-sub font-medium">Link</label><input id="edit-box-link" class="w-full mt-1 px-4 py-2.5 rounded-lg input-bg text-xs"></div>
+            <div><label class="text-sm text-sub font-medium">สีธีม</label>
+                <div class="flex gap-2 mt-1 flex-wrap">
+                    <button onclick="selectEditBoxColor('indigo')" class="w-8 h-8 rounded-full bg-indigo-500 border-2 border-transparent hover:border-white edit-box-color-btn" data-color="indigo"></button>
+                    <button onclick="selectEditBoxColor('red')" class="w-8 h-8 rounded-full bg-red-500 border-2 border-transparent hover:border-white edit-box-color-btn" data-color="red"></button>
+                    <button onclick="selectEditBoxColor('emerald')" class="w-8 h-8 rounded-full bg-emerald-500 border-2 border-transparent hover:border-white edit-box-color-btn" data-color="emerald"></button>
+                    <button onclick="selectEditBoxColor('purple')" class="w-8 h-8 rounded-full bg-purple-500 border-2 border-transparent hover:border-white edit-box-color-btn" data-color="purple"></button>
+                    <button onclick="selectEditBoxColor('pink')" class="w-8 h-8 rounded-full bg-pink-500 border-2 border-transparent hover:border-white edit-box-color-btn" data-color="pink"></button>
+                    <button onclick="selectEditBoxColor('amber')" class="w-8 h-8 rounded-full bg-amber-500 border-2 border-transparent hover:border-white edit-box-color-btn" data-color="amber"></button>
+                    <button onclick="selectEditBoxColor('sky')" class="w-8 h-8 rounded-full bg-sky-500 border-2 border-transparent hover:border-white edit-box-color-btn" data-color="sky"></button>
+                </div>
+            </div>
+            <div class="flex gap-3 pt-2">
+                <button onclick="deleteEditBox()" class="py-2.5 px-4 rounded-lg bg-red-500 hover:bg-red-600 text-white font-semibold transition-colors"><i class="fa-solid fa-trash mr-1"></i>ลบ</button>
+                <div class="flex-1"></div>
+                <button onclick="closeModal('modal-edit-box')" class="py-2.5 px-4 rounded-lg border text-sub hover-bg transition-colors" style="border-color:var(--border-dark)">ยกเลิก</button>
+                <button onclick="saveEditBox()" class="py-2.5 px-4 rounded-lg text-white font-semibold transition-colors" style="background-color:var(--primary)">บันทึก</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL: Notebook (Prompt & Manual) -->
+<div id="modal-notebook" class="modal-overlay hidden" onclick="if(event.target===this)closeModal('modal-notebook')">
+    <div class="section-bg rounded-2xl shadow-2xl p-6 w-full max-w-lg mx-4 fade-in" style="max-height:90vh;overflow-y:auto">
+        <h3 id="notebook-modal-title" class="text-lg font-bold text-main mb-4"><i class="fa-solid fa-file-pen mr-2" style="color:var(--primary)"></i>เพิ่ม Prompt ใหม่</h3>
+        <div class="space-y-4">
+            <div>
+                <label class="text-sm text-sub font-medium">ชื่อ Prompt <span class="text-red-400">*</span></label>
+                <input id="nb-title" class="w-full mt-1 px-4 py-2.5 rounded-lg input-bg" placeholder="เช่น สร้างคลิปดูดวงรายวัน">
+            </div>
+            <div>
+                <label class="text-sm text-sub font-medium">หมวดหมู่ / Tag</label>
+                <input id="nb-tag" class="w-full mt-1 px-4 py-2.5 rounded-lg input-bg" placeholder="เช่น AI Video, ดูดวง, คลิปทั่วไป">
+            </div>
+            <div>
+                <label class="text-sm text-sub font-medium">Prompt <span class="text-red-400">*</span></label>
+                <textarea id="nb-prompt" rows="6" class="w-full mt-1 px-4 py-2.5 rounded-lg input-bg resize-y" placeholder="วาง Prompt ที่ใช้ทำงานที่นี่..."></textarea>
+            </div>
+            <div>
+                <label class="text-sm text-sub font-medium flex items-center gap-2"><i class="fa-solid fa-book text-amber-500"></i> คู่มือ / Manual (ไม่บังคับ)</label>
+                <textarea id="nb-manual" rows="5" class="w-full mt-1 px-4 py-2.5 rounded-lg input-bg resize-y" placeholder="เขียนขั้นตอนการใช้งาน, วิธีใช้, หรือข้อควรระวัง..."></textarea>
+            </div>
+            <div class="flex gap-3 pt-2">
+                <button onclick="closeModal('modal-notebook')" class="flex-1 py-2.5 rounded-lg border text-sub hover-bg transition-colors" style="border-color:var(--border-dark)">ยกเลิก</button>
+                <button onclick="saveNotebookEntry()" class="flex-1 py-2.5 rounded-lg text-white font-semibold transition-colors" style="background:linear-gradient(135deg,var(--primary),#a855f7)">บันทึก</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// ===========================
+// CONFIG & STATE
+// ===========================
+const SPREADSHEET_TON = '1yamIh1Uvb3hlPp3earQglGyUMtsNqPPLLe65lR53rNY';
+const SPREADSHEET_TEE = '14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU';
+const SPREADSHEET_HUB = '1wrWxK-NcPrkY0_cTaeXiTtE6HuGLS8zhk_iai94vdGY';
+const SPREADSHEETS = { main: '14jiUb5-96MY6rCIJTWkbcSBmbvCk_v8HdVRc589MjrU', youtube: '1ZqTDnbals2n-dQA-6-GrvYtaWbBf3nDqEkkBtOwJn8A', yok: '1BGCO3xKKeVmaRQiYmfPnYAhWSz-F3KDr5I89seA3I84' };
+const AI_SOURCES = [
+    { id: '1o_xAHtJgq8RBQbNVZnibrprvpM5E_UBo-7VEkyzoJME', sheetName: 'แนะนำเวป', cell: 'L2', displayName: 'คลิปแนะนำเวป', link: 'https://docs.google.com/spreadsheets/d/1o_xAHtJgq8RBQbNVZnibrprvpM5E_UBo-7VEkyzoJME/edit' },
+    { id: '1o_xAHtJgq8RBQbNVZnibrprvpM5E_UBo-7VEkyzoJME', sheetName: 'ทั้งหมด', cell: 'K2', displayName: 'คำคมAI', link: 'https://docs.google.com/spreadsheets/d/1o_xAHtJgq8RBQbNVZnibrprvpM5E_UBo-7VEkyzoJME/edit#gid=1068625072' },
+    { id: '1Rr0thsqzrLmTKcmAO_z4dKSZpE_5JexWSJxXn4Ot77U', sheetName: 'AI', cell: 'K2', displayName: 'รูปinfo', link: 'https://docs.google.com/spreadsheets/d/1Rr0thsqzrLmTKcmAO_z4dKSZpE_5JexWSJxXn4Ot77U/edit#gid=1137134987' },
+    { id: '1UdHqY_1Huu32aAgAovFuPWkOj7A_dkaSpSVOEqFUnQg', sheetName: 'AI_Clickbait', cell: 'M2', displayName: 'รูปแดงClickbait', link: 'https://docs.google.com/spreadsheets/d/1UdHqY_1Huu32aAgAovFuPWkOj7A_dkaSpSVOEqFUnQg/edit?gid=1527366755' },
+    { id: '1uqJgzxYEJterGP30jMg79oK3mGu-efbXiyXm7VqXIi8', sheetName: 'ข่าวเวปจีน', cell: 'S2', displayName: 'ข่าวwebจีน', link: 'https://docs.google.com/spreadsheets/d/1uqJgzxYEJterGP30jMg79oK3mGu-efbXiyXm7VqXIi8/edit' }
+];
+const HOROSCOPE_SOURCES = [
+    { id: '1yamIh1Uvb3hlPp3earQglGyUMtsNqPPLLe65lR53rNY', sheetName: 'ดูดวง', cell: 'U2', displayName: 'ดูดวง Stock', link: 'https://docs.google.com/spreadsheets/d/1yamIh1Uvb3hlPp3earQglGyUMtsNqPPLLe65lR53rNY/edit' },
+    { id: '1yamIh1Uvb3hlPp3earQglGyUMtsNqPPLLe65lR53rNY', sheetName: 'รูปรีวิวดูดวง', cell: 'L2', displayName: 'รูปรีวิวดูดวง', link: 'https://docs.google.com/spreadsheets/d/1yamIh1Uvb3hlPp3earQglGyUMtsNqPPLLe65lR53rNY/edit' },
+    { id: '1yamIh1Uvb3hlPp3earQglGyUMtsNqPPLLe65lR53rNY', sheetName: 'Reel ดูดวง ทายใจ', cell: 'L2', displayName: 'Reel ดูดวง ทายใจ', link: 'https://docs.google.com/spreadsheets/d/1yamIh1Uvb3hlPp3earQglGyUMtsNqPPLLe65lR53rNY/edit' }
+];
+const OTHERS_SOURCES = [
+    { id: 'MOCK_ID', sheetName: 'Sheet1', cell: 'A2', displayName: 'งานรีวิวสินค้า (จำลอง)', link: '#' },
+    { id: 'MOCK_ID', sheetName: 'Sheet1', cell: 'B2', displayName: 'บทความสปอนเซอร์ (จำลอง)', link: '#' }
+];
+const BUILTIN_TABS = [
+    { id: 'overview', name: 'Dashboard', emoji: '📊', type: 'overview' },
+    { id: 'ton', name: 'งานของต้น', emoji: '🧑‍🚀', type: 'ton' },
+    { id: 'tee', name: 'งานของลุงตี่', emoji: '👔', type: 'tee' }
+];
+
+const EMOJIS = ['📁','📂','📊','📈','📉','📋','📌','📍','✏️','✅','❌','⭐','🌟','💡','🔥','💎','🎯','🎬','🎨','🎵','🎮','🏆','💰','📱','💻','🌐','🔗','🔒','🔑','🔔','📣','💬','❤️','📦','📮','🚀','⚡','🌈','☀️','🌙','🍀','🌸','🎁','🎉','🏠','⏰','📅','📝','📰','🧾','🔍','🧩','🎲','🎯','🏁'];
+
+let currentTab = 'overview';
+let sheetsData = { ton: null, tee: null, hub: null, main: null, youtube: null, yok: null, ai: null, horoscope: null, others: null };
+let chartInstance = null;
+let chartInstances = {};
+let customTabs = JSON.parse(localStorage.getItem('custom_tabs') || '[]');
+let customBoxes = JSON.parse(localStorage.getItem('custom_boxes') || '{}');
+let todoItems = JSON.parse(localStorage.getItem('todo_items') || '[]').map(t => ({...t, category: t.category||'', deadline: t.deadline||'', priority: t.priority||'medium', column: t.column||(t.done?'finished':'waiting'), desc: t.desc||''}));
+
+const TODO_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbxwLyE3JXzPwjaix08Dg0EsGD0Xrx3aXLapCA3zobBoQ7SjZMU2_yJdTxPRyoc24e396g/exec";
+let syncTimeout = null;
+async function syncTodoToSheet() {
+    clearTimeout(syncTimeout);
+    syncTimeout = setTimeout(async () => {
+        const el = document.getElementById('todo-sync-status');
+        if(el) el.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-[10px]"></i> Saving...';
+        try {
+            await fetch(TODO_WEBAPP_URL, { method: 'POST', body: JSON.stringify(todoItems) });
+            if(el) el.innerHTML = '<i class="fa-solid fa-cloud-check text-emerald-500"></i> Synced to Sheet';
+        } catch(err) {
+            console.error(err);
+            if(el) el.innerHTML = '<i class="fa-solid fa-triangle-exclamation text-red-500"></i> Sync Error';
+        }
+    }, 1500);
+}
+async function fetchTodoFromSheet() {
+    const el = document.getElementById('todo-sync-status');
+    if(el) el.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-[10px]"></i> Loading...';
+    try {
+        const res = await fetch(TODO_WEBAPP_URL);
+        const json = await res.json();
+        if (json.status === "success" && json.data) {
+            todoItems = json.data;
+            localStorage.setItem('todo_items', JSON.stringify(todoItems));
+            if (currentTab === 'todo') renderTodoPage();
+            renderSidebars();
+            const newEl = document.getElementById('todo-sync-status');
+            if(newEl) newEl.innerHTML = '<i class="fa-solid fa-cloud-check text-emerald-500"></i> Loaded from Sheet';
+        }
+    } catch (err) {
+        console.error(err);
+        if(el) el.innerHTML = '<i class="fa-solid fa-triangle-exclamation text-red-500"></i> Load Error';
+    }
+}
+let pageNotes = JSON.parse(localStorage.getItem('page_notes') || '{}');
+let notebookEntries = JSON.parse(localStorage.getItem('notebook_entries') || '[]');
+let editingNotebookIdx = -1;
+let notebookFilterTag = '';
+let selectedBoxColor = 'indigo';
+let editBoxColor = 'indigo';
+let editingBoxIndex = -1;
+let editingTabId = '';
+let dragSrcIndex = null;
+
+// ===========================
+// INIT
+// ===========================
+window.onload = () => {
+    const savedTheme = localStorage.getItem('dashboard_theme') || 'slate';
+    document.body.setAttribute('data-theme', savedTheme);
+    const ts = document.getElementById('theme-selector');
+    if(ts) ts.value = savedTheme;
+    populateEmojiPickers();
+    const apiKey = localStorage.getItem('google_api_key');
+    if (apiKey) { renderTabs(); switchTab('overview'); fetchTodoFromSheet(); }
+    else { showSection('login-section'); }
+    
+    // IFRAME INTEGRATION: Hide nested navigation and sync theme automatically
+    if (window.self !== window.top) {
+        document.querySelector('nav')?.classList.add('hidden');
+        setInterval(() => {
+            const parentTheme = localStorage.getItem('theme') || 'linear';
+            const themeMap = {
+                'linear': 'slate', 'midnight': 'dracula', 'cyberpunk': 'dracula', 
+                'spotify': 'dracula', 'stripe': 'slate', 'supabase': 'nord', 
+                'claude': 'light', 'vercel': 'light', 'raycast': 'mocha', 'ferrari': 'dracula', 'neon': 'dracula'
+            };
+            const targetTheme = themeMap[parentTheme] || 'slate';
+            if (document.body.getAttribute('data-theme') !== targetTheme) {
+                document.body.setAttribute('data-theme', targetTheme);
+            }
+        }, 800);
+    }
+};
+
+// ===========================
+// THEME
+// ===========================
+function changeTheme(theme) {
+    document.body.setAttribute('data-theme', theme);
+    localStorage.setItem('dashboard_theme', theme);
+    if(currentTab === 'overview') renderOverviewPage();
+}
+
+// ===========================
+// SECTIONS & LOGIN
+// ===========================
+function showSection(id) { ['login-section','loading-section','dashboard-section'].forEach(s => document.getElementById(s).classList.add('hidden')); document.getElementById(id).classList.remove('hidden'); }
+function saveApiKey() { const v = document.getElementById('api-key-input').value.trim(); if(!v){alert('กรุณากรอก API Key');return;} localStorage.setItem('google_api_key',v); renderTabs(); switchTab('overview'); }
+function logout() { localStorage.removeItem('google_api_key'); document.getElementById('api-key-input').value=''; showSection('login-section'); }
+function updateLoadingText(t,s='') { document.getElementById('loading-text').innerText=t; document.getElementById('loading-subtext').innerText=s; }
+
+// ===========================
+// MODALS & EMOJI
+// ===========================
+function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
+function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+function populateEmojiPickers() {
+    ['new-tab-emoji-picker','new-box-emoji-picker','edit-box-emoji-picker'].forEach(pid => {
+        const el = document.getElementById(pid);
+        if(el) el.innerHTML = EMOJIS.map(e => `<button onclick="pickEmoji('${pid}','${e}')">${e}</button>`).join('');
+    });
+}
+function pickEmoji(pid, emoji) {
+    const map = { 'new-tab-emoji-picker':['new-tab-emoji-input','new-tab-emoji-preview'], 'new-box-emoji-picker':['new-box-emoji-input','new-box-emoji-preview'], 'edit-box-emoji-picker':['edit-box-emoji-input','edit-box-emoji-preview'] };
+    const [inp,prev] = map[pid]; document.getElementById(inp).value=emoji; document.getElementById(prev).innerText=emoji; document.getElementById(pid).classList.add('hidden');
+}
+function selectBoxColor(c) { selectedBoxColor=c; document.querySelectorAll('.box-color-btn').forEach(b=>{b.style.boxShadow=b.dataset.color===c?'0 0 0 3px var(--primary-glow)':''}); }
+function selectEditBoxColor(c) { editBoxColor=c; document.querySelectorAll('.edit-box-color-btn').forEach(b=>{b.style.boxShadow=b.dataset.color===c?'0 0 0 3px var(--primary-glow)':''}); }
+
+// ===========================
+// EXPORT / IMPORT
+// ===========================
+function exportAllData() {
+    const data = { custom_tabs: customTabs, custom_boxes: customBoxes, todo_items: todoItems, page_notes: pageNotes, notebook_entries: notebookEntries, exported_at: new Date().toISOString() };
+    const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
+    const a = document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download = `dashboard-backup-${new Date().toISOString().slice(0,10)}.json`; a.click();
+}
+function importAllData(event) {
+    const file = event.target.files[0]; if(!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const data = JSON.parse(e.target.result);
+            if(data.custom_tabs){customTabs=data.custom_tabs;localStorage.setItem('custom_tabs',JSON.stringify(customTabs));}
+            if(data.custom_boxes){customBoxes=data.custom_boxes;localStorage.setItem('custom_boxes',JSON.stringify(customBoxes));}
+            if(data.todo_items){todoItems=data.todo_items;localStorage.setItem('todo_items',JSON.stringify(todoItems));}
+            if(data.page_notes){pageNotes=data.page_notes;localStorage.setItem('page_notes',JSON.stringify(pageNotes));}
+            if(data.notebook_entries){notebookEntries=data.notebook_entries;localStorage.setItem('notebook_entries',JSON.stringify(notebookEntries));}
+            alert('Import สำเร็จ!'); renderTabs(); switchTab(currentTab);
+        } catch(err) { alert('ไฟล์ไม่ถูกต้อง: '+err.message); }
+    };
+    reader.readAsText(file); event.target.value='';
+}
+
+// ===========================
+// NOTES
+// ===========================
+function getNote(tabId) { return pageNotes[tabId]||''; }
+function saveNote(tabId) { const el=document.getElementById('note-textarea-'+tabId); if(el){pageNotes[tabId]=el.value;localStorage.setItem('page_notes',JSON.stringify(pageNotes));} }
+function renderNoteBox(tabId) {
+    const note=getNote(tabId); const isCollapsed=!note;
+    return `<div class="card-bg rounded-2xl shadow-sm border border-subtle mb-6">
+        <button onclick="document.getElementById('note-body-${tabId}').classList.toggle('hidden');document.getElementById('note-arrow-${tabId}').classList.toggle('rotate-180')" class="w-full flex items-center justify-between p-4 hover-bg rounded-2xl transition-colors">
+            <span class="text-sm font-semibold text-main flex items-center gap-2"><i class="fa-solid fa-sticky-note text-amber-500"></i> โน้ตของหน้านี้</span>
+            <i id="note-arrow-${tabId}" class="fa-solid fa-chevron-down text-sub text-xs transition-transform ${isCollapsed?'':'rotate-180'}"></i>
+        </button>
+        <div id="note-body-${tabId}" class="${isCollapsed?'hidden':''} px-4 pb-4">
+            <textarea id="note-textarea-${tabId}" class="w-full px-3 py-2 rounded-lg input-bg text-sm note-textarea" placeholder="เขียนโน้ตที่นี่..." oninput="saveNote('${tabId}')">${note}</textarea>
+        </div>
+    </div>`;
+}
+
+// ===========================
+// TABS
+// ===========================
+function getAllTabs() { return [...BUILTIN_TABS, ...customTabs]; }
+function renderTabs() {
+    const bar = document.getElementById('tabs-bar');
+    bar.innerHTML = getAllTabs().map(t => {
+        const isActive = currentTab === t.id;
+        return `<button onclick="switchTab('${t.id}')" class="px-4 py-3 font-medium border-b-2 transition-colors flex items-center whitespace-nowrap gap-1.5 text-sm ${isActive?'tab-active font-semibold':'tab-inactive border-transparent'}">${t.emoji} ${t.name}</button>`;
+    }).join('') + `<button onclick="openModal('modal-create-tab')" class="px-4 py-3 text-sub border-b-2 border-transparent transition-colors flex items-center whitespace-nowrap gap-1 text-sm" style="color:var(--primary)"><i class="fa-solid fa-plus"></i> เพิ่ม Tab</button>`;
+}
+function switchTab(tabId) {
+    currentTab = tabId; renderTabs();
+    if(!localStorage.getItem('google_api_key')) { showSection('login-section'); return; }
+    const tab = getAllTabs().find(t=>t.id===tabId); if(!tab) return;
+    showSection('dashboard-section');
+    renderSidebars();
+    if(tab.type==='overview') renderOverviewPage();
+    else if(tab.type==='todo') renderTodoPage();
+    else if(tab.type==='notebook') renderNotebookPage();
+    else if(tab.type==='stockcheck') renderStockCheckPage();
+    else if(tab.type==='ton') { if(sheetsData.ton) renderTonPage(); else fetchTonTeeData('ton'); }
+    else if(tab.type==='tee') { if(sheetsData.tee) renderTeePage(); else fetchTonTeeData('tee'); }
+    else if(tab.type==='hub') { if(sheetsData.hub) renderHubPage(tabId); else fetchHubData(tabId); }
+    else if(tab.type==='sheets') { if(sheetsData[tabId]) renderSheetsPage(tabId); else fetchData(tabId); }
+    else if(tab.type==='custom') renderCustomTabPage(tabId);
+}
+function createCustomTab() {
+    const name=document.getElementById('new-tab-name').value.trim(); if(!name){alert('กรุณาใส่ชื่อ');return;}
+    const emoji=document.getElementById('new-tab-emoji-input').value.trim()||'📁';
+    const id='custom_'+Date.now();
+    customTabs.push({id,name,emoji,type:'custom'}); if(!customBoxes[id])customBoxes[id]=[];
+    localStorage.setItem('custom_tabs',JSON.stringify(customTabs)); localStorage.setItem('custom_boxes',JSON.stringify(customBoxes));
+    document.getElementById('new-tab-name').value=''; document.getElementById('new-tab-emoji-input').value=''; document.getElementById('new-tab-emoji-preview').innerText='📁';
+    closeModal('modal-create-tab'); switchTab(id);
+}
+function deleteCustomTab(tabId) { if(!confirm('ลบ Tab นี้?'))return; customTabs=customTabs.filter(t=>t.id!==tabId); delete customBoxes[tabId]; delete pageNotes[tabId]; localStorage.setItem('custom_tabs',JSON.stringify(customTabs)); localStorage.setItem('custom_boxes',JSON.stringify(customBoxes)); localStorage.setItem('page_notes',JSON.stringify(pageNotes)); switchTab('overview'); }
+
+// ===========================
+// CUSTOM BOXES
+// ===========================
+function createCustomBox() {
+    const name=document.getElementById('new-box-name').value.trim(); if(!name){alert('กรุณาใส่ชื่อ');return;}
+    const emoji=document.getElementById('new-box-emoji-input').value.trim()||'📦';
+    const box={name,emoji,sheetId:document.getElementById('new-box-sheet-id').value.trim(),sheetName:document.getElementById('new-box-sheet-name').value.trim(),cell:document.getElementById('new-box-cell').value.trim(),link:document.getElementById('new-box-link').value.trim(),color:selectedBoxColor,value:null};
+    if(!customBoxes[currentTab])customBoxes[currentTab]=[];
+    customBoxes[currentTab].push(box); localStorage.setItem('custom_boxes',JSON.stringify(customBoxes));
+    ['new-box-name','new-box-sheet-id','new-box-sheet-name','new-box-cell','new-box-link'].forEach(id=>document.getElementById(id).value='');
+    document.getElementById('new-box-emoji-input').value=''; document.getElementById('new-box-emoji-preview').innerText='📦';
+    closeModal('modal-create-box'); switchTab(currentTab);
+}
+function openEditBox(tabId,index) {
+    editingTabId=tabId; editingBoxIndex=index; const box=customBoxes[tabId][index];
+    document.getElementById('edit-box-name').value=box.name; document.getElementById('edit-box-emoji-input').value=box.emoji; document.getElementById('edit-box-emoji-preview').innerText=box.emoji;
+    document.getElementById('edit-box-sheet-id').value=box.sheetId||''; document.getElementById('edit-box-sheet-name').value=box.sheetName||'';
+    document.getElementById('edit-box-cell').value=box.cell||''; document.getElementById('edit-box-link').value=box.link||'';
+    selectEditBoxColor(box.color||'indigo'); openModal('modal-edit-box');
+}
+function saveEditBox() {
+    const box=customBoxes[editingTabId][editingBoxIndex];
+    box.name=document.getElementById('edit-box-name').value.trim()||box.name; box.emoji=document.getElementById('edit-box-emoji-input').value.trim()||box.emoji;
+    box.sheetId=document.getElementById('edit-box-sheet-id').value.trim(); box.sheetName=document.getElementById('edit-box-sheet-name').value.trim();
+    box.cell=document.getElementById('edit-box-cell').value.trim(); box.link=document.getElementById('edit-box-link').value.trim();
+    box.color=editBoxColor; box.value=null;
+    localStorage.setItem('custom_boxes',JSON.stringify(customBoxes)); closeModal('modal-edit-box'); switchTab(currentTab);
+}
+function deleteEditBox() { if(!confirm('ลบกล่องนี้?'))return; customBoxes[editingTabId].splice(editingBoxIndex,1); localStorage.setItem('custom_boxes',JSON.stringify(customBoxes)); closeModal('modal-edit-box'); switchTab(currentTab); }
+function deleteBoxDirect(tabId,idx) { if(!confirm('ลบกล่องนี้?'))return; customBoxes[tabId].splice(idx,1); localStorage.setItem('custom_boxes',JSON.stringify(customBoxes)); switchTab(currentTab); }
+
+async function fetchCustomBoxValues(tabId) {
+    const apiKey=localStorage.getItem('google_api_key'); const boxes=customBoxes[tabId]||[];
+    await Promise.all(boxes.map(async box=>{
+        if(!box.sheetId||!box.sheetName||!box.cell){box.value='-';return;}
+        try { const r=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${box.sheetId}/values/${encodeURIComponent(box.sheetName+'!'+box.cell)}?key=${apiKey}`); if(!r.ok){box.value='Error';return;} const d=await r.json(); box.value=(d.values&&d.values[0]&&d.values[0][0])?d.values[0][0]:'0'; } catch{box.value='Error';}
+    }));
+    localStorage.setItem('custom_boxes',JSON.stringify(customBoxes));
+}
+function renderCustomBoxesHTML(tabId) {
+    const boxes=customBoxes[tabId]||[]; if(boxes.length===0) return '';
+    return `<div class="mb-6"><div class="flex items-center justify-between mb-3"><h3 class="text-sm font-semibold text-sub flex items-center gap-2"><i class="fa-solid fa-box" style="color:var(--primary)"></i> กล่องติดตาม <span class="text-xs font-normal">(ลากจัดลำดับ)</span></h3></div>
+    <div id="custom-boxes-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+    ${boxes.map((box,idx)=>{const c=box.color||'indigo';const val=box.value!==null?box.value:'...';
+    return `<div class="glass-card rounded-2xl p-5 shadow-sm hover:shadow-md transition-all relative overflow-hidden border-l-4 border-l-${c}-500 draggable-box group" data-idx="${idx}">
+        <div class="flex items-center justify-between mb-3"><div class="flex items-center gap-2 min-w-0"><span class="text-2xl flex-shrink-0">${box.emoji}</span><h4 class="font-bold text-main truncate text-sm">${box.name}</h4></div>
+        <div class="flex gap-1.5"><button onclick="event.stopPropagation();openEditBox('${tabId}',${idx})" class="text-sub opacity-0 group-hover:opacity-100 transition-all" style="color:var(--primary)"><i class="fa-solid fa-pen text-xs"></i></button>
+        <button onclick="event.stopPropagation();deleteBoxDirect('${tabId}',${idx})" class="text-sub hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><i class="fa-solid fa-trash text-xs"></i></button></div></div>
+        <div class="text-2xl font-bold text-${c}-500 mb-2">${val}</div>
+        ${box.link?`<a href="${box.link}" target="_blank" onclick="event.stopPropagation()" class="text-xs font-medium flex items-center gap-1" style="color:var(--primary)">เปิดลิงก์ <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:9px"></i></a>`:''}</div>`;}).join('')}</div></div>`;
+}
+function renderCustomBoxesOnly(tabId) { const c=document.getElementById('custom-boxes-section'); if(c){c.innerHTML=renderCustomBoxesHTML(tabId);setupDragAndDrop(tabId);} }
+
+// ===========================
+// DRAG & DROP
+// ===========================
+function setupDragAndDrop(tabId) {
+    const container=document.getElementById('custom-boxes-grid'); if(!container)return;
+    const items=container.querySelectorAll('.draggable-box');
+    items.forEach((item,idx)=>{
+        item.setAttribute('draggable','true');
+        item.addEventListener('dragstart',e=>{dragSrcIndex=idx;item.classList.add('dragging');e.dataTransfer.effectAllowed='move';});
+        item.addEventListener('dragend',()=>{item.classList.remove('dragging');document.querySelectorAll('.drag-over').forEach(el=>el.classList.remove('drag-over'));});
+        item.addEventListener('dragover',e=>{e.preventDefault();e.dataTransfer.dropEffect='move';item.classList.add('drag-over');});
+        item.addEventListener('dragleave',()=>{item.classList.remove('drag-over');});
+        item.addEventListener('drop',e=>{e.preventDefault();item.classList.remove('drag-over');if(dragSrcIndex===null||dragSrcIndex===idx)return;const boxes=customBoxes[tabId];if(!boxes)return;const moved=boxes.splice(dragSrcIndex,1)[0];boxes.splice(idx,0,moved);localStorage.setItem('custom_boxes',JSON.stringify(customBoxes));dragSrcIndex=null;renderCustomBoxesOnly(tabId);});
+    });
+}
+
+// ===========================
+// SIDEBAR
+// ===========================
+function renderSidebars() { renderTodoPreview(); }
+function renderTodoPreview() {
+    const list=document.getElementById('todo-preview-list'); if(!list) return;
+    const pending=todoItems.filter(t=>t.column!=='finished').slice(0,5);
+    if(pending.length===0){list.innerHTML=`<div class="text-center py-6 border border-dashed rounded-xl" style="border-color:var(--border-dark)"><p class="text-xs text-sub">ไม่มีงานค้าง 🎉</p></div>`;return;}
+    list.innerHTML = pending.map(t => `<div class="flex items-center gap-3 p-3 rounded-xl hover-bg transition-colors group" style="background:rgba(0,0,0,0.1);border:1px solid var(--border-dark)">
+        <div class="w-1.5 h-1.5 rounded-full mt-0.5 ${t.priority==='high'?'bg-red-500':t.priority==='medium'?'bg-amber-500':'bg-emerald-500'}"></div>
+        <div class="min-w-0 flex-1"><p class="text-[11px] font-medium text-main truncate">${t.text}</p><p class="text-[9px] text-sub">${t.priority.toUpperCase()} · ${t.date||''}</p></div></div>`).join('');
+}
+function addMiniTodo() {
+    const el=document.getElementById('mini-todo-input'); const val=el.value.trim(); if(!val) return;
+    todoItems.unshift({text:val,priority:'medium',done:false,date:new Date().toLocaleDateString('th-TH'),category:'',deadline:'',column:'waiting'});
+    localStorage.setItem('todo_items',JSON.stringify(todoItems)); el.value=''; renderSidebars(); syncTodoToSheet();
+}
+
+// ===========================
+// FORCE SYNC ALL
+// ===========================
+async function forceSyncAll() {
+    const icon=document.getElementById('sync-icon'); if(icon)icon.classList.add('animate-spin');
+    try {
+        await fetchTonTeeSilent('ton',SPREADSHEET_TON,true);
+        await fetchTonTeeSilent('tee',SPREADSHEET_TEE,false);
+        await fetchHubSilent();
+        if(currentTab==='overview') renderOverviewPage();
+        else if(currentTab==='ton') renderTonPage();
+        else if(currentTab==='tee') renderTeePage();
+        else if(currentTab.startsWith('hub')) renderHubPage(currentTab);
+    } catch(e){}
+    if(icon)icon.classList.remove('animate-spin');
+}
+
+// ===========================
+// FETCH: TON / TEE
+// ===========================
+async function fetchTonTeeData(targetId) {
+    showSection('loading-section');
+    updateLoadingText(`กำลังดึงข้อมูล ${targetId==='ton'?'งานของต้น':'งานของลุงตี่'}...`);
+    try {
+        const sid = targetId==='ton' ? SPREADSHEET_TON : SPREADSHEET_TEE;
+        await fetchTonTeeSilent(targetId, sid, targetId==='ton');
+        if(targetId==='ton') renderTonPage(); else renderTeePage();
+        showSection('dashboard-section');
+    } catch(err) { alert('เกิดข้อผิดพลาด: '+err.message); showSection('dashboard-section'); switchTab('overview'); }
+}
+async function fetchTonTeeSilent(targetId, spreadsheetId, isTon) {
+    const apiKey=localStorage.getItem('google_api_key'); if(!apiKey) return;
+    const meta=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?key=${apiKey}`);
+    if(!meta.ok) throw new Error('API Error: '+meta.status);
+    const metaData=await meta.json(); let names=metaData.sheets.map(s=>s.properties.title); let tabData=[];
+    for(let i=0;i<names.length;i+=20){
+        const ch=names.slice(i,i+20);
+        let rangesQuery;
+        rangesQuery = ch.map(n => `ranges=${encodeURIComponent("'"+n+"'!2:2")}`).join('&');
+        const bResp = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?${rangesQuery}&key=${apiKey}`, { cache: "no-store" });
+        if(!bResp.ok) {
+            const errText = await bResp.text();
+            console.error("Batch Get Failed for", targetId, errText);
+            tabData.push({ title: 'API Error ' + bResp.status, readyCount: 0, sheetId: spreadsheetId });
+            continue; 
+        }
+        const bData = await bResp.json();
+        for(let j=0; j<ch.length; j++){
+            let ready = 0;
+            const row = (bData.valueRanges[j] && bData.valueRanges[j].values && bData.valueRanges[j].values[0]) ? bData.valueRanges[j].values[0] : [];
+            try {
+                const kVal = (row[10] != null ? row[10] : '').toString().replace(/,/g,'').trim();
+                const uVal = (row[20] != null ? row[20] : '').toString().replace(/,/g,'').trim();
+                const yVal = (row[24] != null ? row[24] : '').toString().replace(/,/g,'').trim();
+                const zVal = (row[25] != null ? row[25] : '').toString().replace(/,/g,'').trim();
+                
+                if (zVal !== '' && !isNaN(Number(zVal))) ready = parseFloat(zVal);
+                else if (yVal !== '' && !isNaN(Number(yVal))) ready = parseFloat(yVal);
+                else if (uVal !== '' && !isNaN(Number(uVal))) ready = parseFloat(uVal);
+                else if (kVal !== '' && !isNaN(Number(kVal))) ready = parseFloat(kVal);
+            } catch(err) {
+                console.error("Error parsing row for sheet:", ch[j], err);
+            }
+            tabData.push({title:ch[j],readyCount:ready,sheetId:spreadsheetId});
+        }
+    }
+    sheetsData[targetId]=tabData.sort((a,b)=>b.readyCount-a.readyCount);
+}
+
+// ===========================
+// FETCH: HUB
+// ===========================
+async function fetchHubData(tabId) {
+    showSection('loading-section'); updateLoadingText('กำลังดึงข้อมูลลิงก์เพจ...');
+    try { await fetchHubSilent(); renderHubPage(tabId); showSection('dashboard-section'); }
+    catch(err) { alert('เกิดข้อผิดพลาด: '+err.message); showSection('dashboard-section'); }
+}
+async function fetchHubSilent() {
+    const apiKey=localStorage.getItem('google_api_key'); if(!apiKey) return;
+    const meta=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_HUB}?key=${apiKey}`);
+    if(!meta.ok) throw new Error('API Error: '+meta.status);
+    const metaData=await meta.json(); let names=metaData.sheets.map(s=>s.properties.title); let allLinks=[];
+    for(let i=0;i<names.length;i+=20){
+        const ch=names.slice(i,i+20);
+        const rq=ch.map(n=>`ranges=${encodeURIComponent("'"+n+"'!A2:C")}`).join('&');
+        const bResp=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_HUB}/values:batchGet?${rq}&key=${apiKey}`);
+        if(!bResp.ok) continue; const bData=await bResp.json();
+        for(let j=0;j<ch.length;j++){
+            const rows=bData.valueRanges[j].values||[];
+            rows.forEach(r=>{const title=r[0]?r[0].toString().trim():'';const link=r[1]?r[1].toString().trim():'';const plan=r[2]?r[2].toString().trim():'';if(title)allLinks.push({title,link,plan,category:ch[j]});});
+        }
+    }
+    sheetsData.hub=allLinks;
+}
+
+// ===========================
+// FETCH: SHEETS (main/youtube/yok/ai/horoscope/others)
+// ===========================
+async function fetchData(tab) {
+    const apiKey=localStorage.getItem('google_api_key'); showSection('loading-section');
+    try {
+        if(['ai','horoscope','others'].includes(tab)){
+            updateLoadingText('กำลังดาวน์โหลดข้อมูล...');
+            let sources=tab==='ai'?AI_SOURCES:tab==='horoscope'?HOROSCOPE_SOURCES:OTHERS_SOURCES; let tabData=[];
+            const results=await Promise.all(sources.map(src=>{if(src.id==='MOCK_ID')return Promise.resolve({source:src,data:{values:[[Math.floor(Math.random()*50)+5]]}});return fetch(`https://sheets.googleapis.com/v4/spreadsheets/${src.id}/values/${encodeURIComponent(src.sheetName+'!'+src.cell)}?key=${apiKey}`).then(r=>{if(!r.ok)throw new Error('err');return r.json();}).then(d=>({source:src,data:d}));}));
+            results.forEach(r=>{let v=0;if(r.data.values&&r.data.values[0]&&r.data.values[0][0])v=parseInt(r.data.values[0][0].toString().replace(/,/g,''),10)||0;tabData.push({title:r.source.displayName,readyCount:v,waitingCount:0,link:r.source.link});});
+            sheetsData[tab]=tabData; renderSheetsPage(tab); showSection('dashboard-section'); return;
+        }
+        const sheetId=SPREADSHEETS[tab]; updateLoadingText('กำลังตรวจสอบชีท...');
+        const meta=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?key=${apiKey}`);
+        if(!meta.ok)throw new Error('API Error: '+meta.status); const metaData=await meta.json();
+        let names=metaData.sheets.map(s=>s.properties.title);
+        if(tab==='yok')names=names.filter(n=>n.includes('ClickBait')||n.toLowerCase().includes('info'));
+        let tabData=[];
+        for(let i=0;i<names.length;i+=20){
+            const ch=names.slice(i,i+20); updateLoadingText(`ดาวน์โหลดชุดที่ ${Math.floor(i/20)+1}/${Math.ceil(names.length/20)}...`);
+            const ranges=ch.map(n=>{if(tab==='main')return `ranges=${encodeURIComponent(n+'!F:F')}&ranges=${encodeURIComponent(n+'!K2')}`;if(tab==='youtube')return `ranges=${encodeURIComponent(n+'!P2')}`;if(tab==='yok'){const c=n.includes('ClickBait')?'H2':'M2';return `ranges=${encodeURIComponent(n+'!'+c)}`;}}).join('&');
+            const bResp=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchGet?${ranges}&key=${apiKey}`);
+            if(!bResp.ok) continue; const bData=await bResp.json();
+            for(let j=0;j<ch.length;j++){let ready=0,waiting=0;
+                if(tab==='main'){const colF=bData.valueRanges[j*2].values||[];const colK=bData.valueRanges[j*2+1].values||[];colF.forEach(r=>{if(r[0]&&r[0].toString().trim().toUpperCase()==='N')waiting++;});if(colK[0]&&colK[0][0])ready=parseInt(colK[0][0].toString().replace(/,/g,''),10)||0;}
+                else{const d=bData.valueRanges[j].values||[];if(d[0]&&d[0][0])ready=parseInt(d[0][0].toString().replace(/,/g,''),10)||0;}
+                tabData.push({title:ch[j],readyCount:ready,waitingCount:waiting,sheetId});
+            }
+        }
+        sheetsData[tab]=tabData; renderSheetsPage(tab); showSection('dashboard-section');
+    } catch(e){console.error(e);alert('เกิดข้อผิดพลาด: '+e.message);showSection('dashboard-section');}
+}
+async function fetchDataSilent(tab) {
+    const apiKey=localStorage.getItem('google_api_key');
+    if(['ai','horoscope','others'].includes(tab)){let sources=tab==='ai'?AI_SOURCES:tab==='horoscope'?HOROSCOPE_SOURCES:OTHERS_SOURCES;let tabData=[];
+        const results=await Promise.all(sources.map(src=>{if(src.id==='MOCK_ID')return Promise.resolve({source:src,data:{values:[[Math.floor(Math.random()*50)+5]]}});return fetch(`https://sheets.googleapis.com/v4/spreadsheets/${src.id}/values/${encodeURIComponent(src.sheetName+'!'+src.cell)}?key=${apiKey}`).then(r=>r.json()).then(d=>({source:src,data:d}));}));
+        results.forEach(r=>{let v=0;if(r.data.values&&r.data.values[0]&&r.data.values[0][0])v=parseInt(r.data.values[0][0].toString().replace(/,/g,''),10)||0;tabData.push({title:r.source.displayName,readyCount:v,waitingCount:0,link:r.source.link});});
+        sheetsData[tab]=tabData;return;}
+    const sheetId=SPREADSHEETS[tab];const meta=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?key=${apiKey}`);if(!meta.ok)return;const metaData=await meta.json();
+    let names=metaData.sheets.map(s=>s.properties.title);if(tab==='yok')names=names.filter(n=>n.includes('ClickBait')||n.toLowerCase().includes('info'));
+    let tabData=[];
+    for(let i=0;i<names.length;i+=20){const ch=names.slice(i,i+20);
+        const ranges=ch.map(n=>{if(tab==='main')return `ranges=${encodeURIComponent(n+'!F:F')}&ranges=${encodeURIComponent(n+'!K2')}`;if(tab==='youtube')return `ranges=${encodeURIComponent(n+'!P2')}`;if(tab==='yok'){const c=n.includes('ClickBait')?'H2':'M2';return `ranges=${encodeURIComponent(n+'!'+c)}`;}}).join('&');
+        const bResp=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchGet?${ranges}&key=${apiKey}`);if(!bResp.ok)continue;const bData=await bResp.json();
+        for(let j=0;j<ch.length;j++){let ready=0,waiting=0;if(tab==='main'){const colF=bData.valueRanges[j*2].values||[];const colK=bData.valueRanges[j*2+1].values||[];colF.forEach(r=>{if(r[0]&&r[0].toString().trim().toUpperCase()==='N')waiting++;});if(colK[0]&&colK[0][0])ready=parseInt(colK[0][0].toString().replace(/,/g,''),10)||0;}else{const d=bData.valueRanges[j].values||[];if(d[0]&&d[0][0])ready=parseInt(d[0][0].toString().replace(/,/g,''),10)||0;}tabData.push({title:ch[j],readyCount:ready,waitingCount:waiting,sheetId});}
+    }
+    sheetsData[tab]=tabData;
+}
+async function loadAllData() {
+    const apiKey=localStorage.getItem('google_api_key'); if(!apiKey)return;
+    
+    // Process Ton & Tee sequentially first
+    if(!sheetsData.ton) {
+        try { await fetchTonTeeSilent('ton', SPREADSHEET_TON, true); } catch(e){}
+    }
+    if(!sheetsData.tee) {
+        try { await fetchTonTeeSilent('tee', SPREADSHEET_TEE, false); } catch(e){}
+    }
+    
+    // Process remaining tabs carefully one-by-one to avoid clogging connection pool
+    const bgTabs = ['main','youtube','yok','ai','horoscope'];
+    for(const t of bgTabs) {
+        if(!sheetsData[t]) {
+            try { await fetchDataSilent(t); } catch(e) {}
+        }
+    }
+}
+
+// ===========================
+// RENDER: OVERVIEW
+// ===========================
+async function renderOverviewPage() {
+    const content=document.getElementById('tab-content');
+    content.innerHTML=`<div class="text-center py-20"><div class="inline-block animate-spin rounded-full h-10 w-10 border-4 border-t-transparent mb-4" style="border-color:var(--primary);border-top-color:transparent;"></div><p class="text-sub">กำลังโหลดข้อมูลภาพรวม...</p></div>`;
+    await loadAllData();
+    if(customBoxes['overview']) await fetchCustomBoxValues('overview');
+
+    const tonData=sheetsData.ton||[]; const teeData=sheetsData.tee||[];
+    const totalTon=tonData.reduce((s,i)=>s+i.readyCount,0); const totalTee=teeData.reduce((s,i)=>s+i.readyCount,0);
+
+    const tabs2=['main','youtube','yok','ai','horoscope'];
+    const tabNames={main:'📝 บทความ/โพสต์',youtube:'🎬 Youtube',yok:'💎 หยก',ai:'🤖 AI',horoscope:'⭐ ดูดวง'};
+    const tabColors={main:'indigo',youtube:'red',yok:'emerald',ai:'purple',horoscope:'pink'};
+    let totalStock=0,totalWaiting=0;let tabSummaries=[];
+    tabs2.forEach(t=>{const d=sheetsData[t];if(!d)return;const ready=d.reduce((s,i)=>s+i.readyCount,0);const waiting=d.reduce((s,i)=>s+i.waitingCount,0);totalStock+=ready;totalWaiting+=waiting;tabSummaries.push({id:t,name:tabNames[t],color:tabColors[t],ready,waiting,count:d.length});});
+
+    const rootStyle=getComputedStyle(document.body);
+    const textColor=rootStyle.getPropertyValue('--text-main').trim()||'#f8fafc';
+    const gridColor=rootStyle.getPropertyValue('--border-dark').trim()||'rgba(255,255,255,0.05)';
+
+    content.innerHTML=`
+    <div class="fade-in space-y-10">
+        ${renderNoteBox('overview')}
+        <div id="custom-boxes-section">${renderCustomBoxesHTML('overview')}</div>
+
+        <!-- Ton & Tee Overview -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="glass-card rounded-2xl p-6 relative overflow-hidden group">
+                <p class="text-sub text-xs font-bold uppercase tracking-wider">🧑‍🚀 Ton's Total Stock</p>
+                <h2 class="text-4xl font-extrabold text-main mt-2 group-hover:scale-105 transition-transform origin-left">${totalTon.toLocaleString()}</h2>
+            </div>
+            <div class="glass-card rounded-2xl p-6 relative overflow-hidden group">
+                <p class="text-sub text-xs font-bold uppercase tracking-wider">👔 Tee's Total Stock</p>
+                <h2 class="text-4xl font-extrabold text-main mt-2 group-hover:scale-105 transition-transform origin-left">${totalTee.toLocaleString()}</h2>
+            </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="glass-card rounded-2xl p-6 flex flex-col">
+                <h2 class="text-lg font-bold text-main mb-4"><i class="fa-solid fa-chart-bar" style="color:var(--primary)"></i> Stock งานของต้น</h2>
+                <div class="flex-1 overflow-y-auto custom-scrollbar pr-2" style="height: 400px;">
+                    <div style="height:${Math.max(350, tonData.length * 35)}px; min-height:100%; position:relative; width:100%"><canvas id="tonChart"></canvas></div>
+                </div>
+            </div>
+            <div class="glass-card rounded-2xl p-6 flex flex-col">
+                <h2 class="text-lg font-bold text-main mb-4"><i class="fa-solid fa-chart-bar text-sky-400"></i> Stock งานลุงตี่</h2>
+                <div class="flex-1 overflow-y-auto custom-scrollbar pr-2" style="height: 400px;">
+                    <div style="height:${Math.max(350, teeData.length * 35)}px; min-height:100%; position:relative; width:100%"><canvas id="teeChart"></canvas></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Category Stats -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="card-bg rounded-2xl shadow-sm p-5 border border-subtle border-l-4 border-l-indigo-500 relative overflow-hidden"><p class="text-sub text-xs font-medium uppercase">Stock รวมหมวด</p><h2 class="text-3xl font-bold text-main mt-1">${totalStock.toLocaleString()}</h2></div>
+            <div class="card-bg rounded-2xl shadow-sm p-5 border border-subtle border-l-4 border-l-amber-500 relative overflow-hidden"><p class="text-sub text-xs font-medium uppercase">รอสร้างทั้งหมด</p><h2 class="text-3xl font-bold text-main mt-1">${totalWaiting.toLocaleString()}</h2></div>
+            <div class="card-bg rounded-2xl shadow-sm p-5 border border-subtle border-l-4 border-l-rose-500 relative overflow-hidden"><p class="text-sub text-xs font-medium uppercase">Tasks: กำลังทำ</p><h2 class="text-3xl font-bold text-main mt-1">${todoItems.filter(t=>t.column==='processing').length}</h2></div>
+            <div class="card-bg rounded-2xl shadow-sm p-5 border border-subtle border-l-4 border-l-emerald-500 relative overflow-hidden"><p class="text-sub text-xs font-medium uppercase">Tasks: เสร็จแล้ว</p><h2 class="text-3xl font-bold text-main mt-1">${todoItems.filter(t=>t.column==='finished').length}</h2></div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            ${tabSummaries.map(t=>`
+            <div class="card-bg rounded-2xl shadow-sm p-5 border border-subtle cursor-pointer hover-bg transition-colors" onclick="switchTab('${t.id}')">
+                <div class="flex justify-between items-center mb-3"><h3 class="font-semibold text-main text-sm">${t.name}</h3><span class="text-xs text-sub">${t.count} รายการ</span></div>
+                <div class="flex items-end gap-4"><div><p class="text-xs text-sub">Stock</p><p class="text-2xl font-bold text-${t.color}-500">${t.ready.toLocaleString()}</p></div>${t.waiting>0?`<div><p class="text-xs text-sub">รอสร้าง</p><p class="text-lg font-bold text-amber-500">${t.waiting}</p></div>`:''}</div>
+            </div>`).join('')}
+        </div>
+        <div class="flex gap-2">
+            <button onclick="openModal('modal-create-box')" class="text-white px-3 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-1" style="background-color:var(--primary)"><i class="fa-solid fa-plus"></i> เพิ่มกล่อง</button>
+            <button onclick="sheetsData={ton:null,tee:null,hub:null,main:null,youtube:null,yok:null,ai:null,horoscope:null,others:null};renderOverviewPage()" class="card-bg text-main px-4 py-2 rounded-lg shadow border border-subtle hover-bg transition-colors flex items-center gap-2"><i class="fa-solid fa-rotate-right"></i> รีเฟรช</button>
+        </div>
+    </div>`;
+    setupDragAndDrop('overview');
+    setTimeout(()=>{renderBarChart('tonChart',tonData,textColor,gridColor);renderBarChart('teeChart',teeData,textColor,gridColor);},150);
+}
+
+function renderBarChart(canvasId, dataArr, textColor, gridColor) {
+    if(chartInstances[canvasId]) chartInstances[canvasId].destroy();
+    const ctx=document.getElementById(canvasId); if(!ctx) return;
+    const cData=[...dataArr].sort((a,b)=>b.readyCount-a.readyCount);
+    Chart.defaults.color=textColor; Chart.defaults.font.family="'Outfit','Prompt',sans-serif";
+    
+    const datalabelPlugin = {
+        id: 'datalabel',
+        afterDatasetsDraw(chart) {
+            const { ctx, data } = chart;
+            ctx.save();
+            ctx.font = 'bold 12px "Outfit", "Prompt", sans-serif';
+            ctx.textBaseline = 'middle';
+            chart.getDatasetMeta(0).data.forEach((datapoint, index) => {
+                const val = data.datasets[0].data[index];
+                if (val === 0) return;
+                ctx.fillStyle = val >= 100 ? textColor : '#f59e0b';
+                ctx.fillText(val.toLocaleString(), datapoint.x + 8, datapoint.y);
+            });
+            ctx.restore();
+        }
+    };
+
+    chartInstances[canvasId]=new Chart(ctx.getContext('2d'),{
+        type:'bar',
+        data:{labels:cData.map(d=>d.title),datasets:[{label:'Stock',data:cData.map(d=>d.readyCount),backgroundColor:cData.map(v=>v.readyCount>=100?'rgba(16,185,129,0.9)':'rgba(245,158,11,0.9)'),borderRadius:4,barThickness:'flex',maxBarThickness:32}]},
+        options:{layout:{padding:{right:40}},indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{color:gridColor},border:{display:false}},y:{grid:{display:false},border:{display:false},ticks:{autoSkip:false,font:{size:12},color:textColor}}},animation:{duration:1200,easing:'easeOutQuart'}},
+        plugins:[datalabelPlugin]
+    });
+}
+
+// ===========================
+// RENDER: TON / TEE PAGES
+// ===========================
+function renderTonPage() { renderPersonCards(sheetsData.ton||[],'งานของต้น','fa-user-astronaut',SPREADSHEET_TON); }
+function renderTeePage() { renderPersonCards(sheetsData.tee||[],'งานของลุงตี่','fa-user-tie',SPREADSHEET_TEE); }
+function renderPersonCards(data,title,icon,sid) {
+    const content=document.getElementById('tab-content');
+    content.innerHTML=`<div class="fade-in">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-end mb-6 gap-4">
+            <div><h1 class="text-2xl font-bold text-main flex items-center gap-3"><i class="fa-solid ${icon}" style="color:var(--primary)"></i> ${title}</h1><p class="text-sub text-sm mt-1">ติดตาม Stock ชีทที่เชื่อมต่อ</p></div>
+            <div class="relative w-full sm:w-72"><i class="fa-solid fa-search absolute left-4 top-1/2 -translate-y-1/2 text-sub"></i><input type="text" id="card-search" onkeyup="filterCards()" placeholder="ค้นหางาน..." class="w-full pl-11 pr-4 py-2.5 rounded-xl input-bg text-sm"></div>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 search-container">
+            ${data.map(sheet=>{
+                const sc=sheet.readyCount>=100?'emerald':(sheet.readyCount===0?'rose':'amber');
+                return `<div class="glass-card rounded-2xl p-5 relative group data-card transition-all hover:-translate-y-1">
+                    <div class="absolute top-0 right-0 w-1.5 h-full rounded-r-2xl bg-${sc}-500 opacity-80"></div>
+                    <h3 class="font-bold text-base text-main truncate mb-4 pr-2 card-title" title="${sheet.title}">${sheet.title}</h3>
+                    <div class="rounded-xl p-4 border mb-5 text-center" style="background:rgba(0,0,0,0.15);border-color:var(--border-dark)">
+                        <span class="text-[11px] text-sub uppercase font-bold tracking-wider">Stock Available</span><br>
+                        <span class="text-4xl font-extrabold text-${sc}-400">${sheet.readyCount}</span>
+                    </div>
+                    <a href="https://docs.google.com/spreadsheets/d/${sid}/edit" target="_blank" class="w-full py-2.5 rounded-lg text-xs text-center block text-sub hover:text-main transition-colors border font-bold" style="background:rgba(255,255,255,0.03);border-color:var(--border-dark)"><i class="fa-solid fa-table mr-1"></i> เปิดชีทงาน</a>
+                </div>`;
+            }).join('')}
+        </div></div>`;
+}
+function filterCards() { const q=document.getElementById('card-search').value.toLowerCase(); document.querySelectorAll('.data-card').forEach(card=>{card.style.display=card.querySelector('.card-title').innerText.toLowerCase().includes(q)?'block':'none';}); }
+
+// ===========================
+// RENDER: HUB PAGES
+// ===========================
+function renderHubPage(targetId) {
+    const isTon=targetId==='hub-ton'; const keyword=isTon?'ต้น':'ตี่';
+    let data=(sheetsData.hub||[]).filter(item=>item.category.includes(keyword));
+    const pageTitle=isTon?'รวมLinkเพจของต้น':'รวมLinkเพจของพี่ตี่';
+    const iconColor=isTon?'var(--primary)':'#38bdf8';
+    const content=document.getElementById('tab-content');
+    content.innerHTML=`<div class="fade-in">
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 gap-4">
+            <div><h1 class="text-2xl font-bold text-main flex items-center gap-3"><i class="fa-solid fa-link" style="color:${iconColor}"></i> ${pageTitle}</h1></div>
+            <div class="relative w-full sm:w-72"><i class="fa-solid fa-search absolute left-4 top-1/2 -translate-y-1/2 text-sub"></i><input type="text" id="hub-search" onkeyup="filterHubCards()" placeholder="ค้นหาชื่อเพจ..." class="w-full pl-11 pr-4 py-2.5 rounded-xl input-bg text-sm"></div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            ${data.map(item=>`<div class="glass-card rounded-2xl p-6 relative group hub-card transition-all hover:-translate-y-1 flex flex-col h-full">
+                <div class="flex-1">
+                    <span class="text-[10px] text-sub uppercase font-bold tracking-wider mb-2 inline-block px-2 py-1 rounded-md border" style="background:rgba(0,0,0,0.15);border-color:var(--border-dark)">${item.category}</span>
+                    <h3 class="font-bold text-xl text-main mb-4 hub-title leading-tight">${item.title}</h3>
+                    <div class="rounded-xl p-4 border mb-6" style="background:rgba(0,0,0,0.15);border-color:var(--border-dark)">
+                        <h4 class="text-[10px] text-sub uppercase font-bold tracking-wider mb-1 flex items-center gap-1.5"><i class="fa-solid fa-clipboard-list" style="color:${iconColor}"></i> แผนงาน</h4>
+                        <p class="text-sm text-main break-words font-medium hub-plan leading-relaxed">${item.plan||'- ไม่มีแผนงาน -'}</p>
+                    </div>
+                </div>
+                <a href="${item.link||'#'}" target="${item.link?'_blank':'_self'}" class="w-full py-3 rounded-lg text-white text-sm text-center block transition-colors font-bold shadow-lg ${!item.link?'opacity-50 cursor-not-allowed pointer-events-none':''}" style="background-color:${iconColor}"><i class="fa-solid fa-up-right-from-square mr-1"></i> ไปที่ลิงก์</a>
+            </div>`).join('')}
+            ${data.length===0?`<div class="col-span-full text-center py-24 text-sub italic glass-card rounded-2xl">ไม่พบข้อมูล...</div>`:''}
+        </div></div>`;
+}
+function filterHubCards() { const q=document.getElementById('hub-search').value.toLowerCase(); document.querySelectorAll('.hub-card').forEach(card=>{const t=card.querySelector('.hub-title').innerText.toLowerCase();const p=card.querySelector('.hub-plan').innerText.toLowerCase();card.style.display=(t.includes(q)||p.includes(q))?'flex':'none';}); }
+
+// ===========================
+// RENDER: SHEETS PAGE
+// ===========================
+async function renderSheetsPage(tab) {
+    let data=sheetsData[tab]; if(!data)return;
+    const hiddenCards=JSON.parse(localStorage.getItem('hidden_cards')||'{}');
+    const hiddenList=hiddenCards[tab]||[];
+    data=data.filter(s=>!hiddenList.includes(s.title));
+    const totalReady=data.reduce((s,i)=>s+i.readyCount,0);const totalWaiting=data.reduce((s,i)=>s+i.waitingCount,0);const showWaiting=tab==='main';
+    const colorMap={main:'indigo',youtube:'red',yok:'emerald',ai:'purple',horoscope:'pink',others:'slate'};const color=colorMap[tab]||'indigo';
+    if(customBoxes[tab]) await fetchCustomBoxValues(tab);
+    const content=document.getElementById('tab-content');
+    content.innerHTML=`<div class="fade-in">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+            <h1 class="text-2xl font-bold text-main">${tab}</h1>
+            <div class="flex gap-2">
+                <button onclick="openModal('modal-create-box')" class="text-white px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-1" style="background-color:var(--primary)"><i class="fa-solid fa-plus"></i> เพิ่มกล่อง</button>
+                <button onclick="sheetsData['${tab}']=null;fetchData('${tab}')" class="card-bg text-main px-4 py-2 rounded-lg shadow border border-subtle hover-bg flex items-center gap-2"><i class="fa-solid fa-rotate-right"></i> อัปเดต</button>
+            </div>
+        </div>
+        ${renderNoteBox(tab)}
+        <div id="custom-boxes-section">${renderCustomBoxesHTML(tab)}</div>
+        <div class="grid ${showWaiting?'grid-cols-1 md:grid-cols-2':'grid-cols-1'} gap-6 mb-8">
+            <div class="card-bg rounded-2xl shadow-sm p-6 border border-subtle flex items-center gap-4 border-l-4 border-l-emerald-500"><div class="bg-emerald-500/20 p-4 rounded-xl text-emerald-400 text-2xl"><i class="fa-solid fa-boxes-stacked"></i></div><div><p class="text-sm text-sub">รวม Stock</p><h2 class="text-3xl font-bold text-main">${totalReady.toLocaleString()}</h2></div></div>
+            ${showWaiting?`<div class="card-bg rounded-2xl shadow-sm p-6 border border-subtle flex items-center gap-4 border-l-4 border-l-amber-500"><div class="bg-amber-500/20 p-4 rounded-xl text-amber-400 text-2xl"><i class="fa-solid fa-hourglass-half"></i></div><div><p class="text-sm text-sub">รอสร้าง</p><h2 class="text-3xl font-bold text-main">${totalWaiting.toLocaleString()}</h2></div></div>`:''}
+        </div>
+        <div class="card-bg rounded-2xl shadow-sm p-6 border border-subtle mb-8"><h2 class="text-lg font-bold text-main mb-4"><i class="fa-solid fa-ranking-star text-yellow-500 mr-2"></i>Top 10 Stock</h2><div class="relative h-72 w-full"><canvas id="sheetChart"></canvas></div></div>
+        <div class="mb-6 relative"><i class="fa-solid fa-search absolute left-4 top-3.5 text-sub"></i><input type="text" id="sheet-search" onkeyup="filterSheetCards()" placeholder="ค้นหาชื่องาน..." class="w-full pl-11 pr-4 py-3 rounded-xl input-bg shadow-sm text-sm"></div>
+        <div id="sheets-cards-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+    </div>`;
+    setupDragAndDrop(tab);
+    // Chart
+    const sortedTop=[...data].sort((a,b)=>b.readyCount-a.readyCount).slice(0,10);
+    const ctx=document.getElementById('sheetChart'); if(ctx){
+        if(chartInstance)chartInstance.destroy();
+        const rs=getComputedStyle(document.body);const tc=rs.getPropertyValue('--text-main').trim();const gc=rs.getPropertyValue('--border-dark').trim();
+        chartInstance=new Chart(ctx.getContext('2d'),{type:'bar',data:{labels:sortedTop.map(i=>i.title),datasets:[{label:'Stock',data:sortedTop.map(i=>i.readyCount),backgroundColor:`rgba(99,102,241,0.6)`,borderRadius:6}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,grid:{color:gc}},x:{grid:{display:false},ticks:{callback:function(v){const l=this.getLabelForValue(v);return l.length>15?l.substr(0,15)+'...':l;}}}}}});
+    }
+    // Cards
+    const grid=document.getElementById('sheets-cards-grid');
+    data.forEach(sheet=>{
+        const hasReady=sheet.readyCount>0;const sc=hasReady?'emerald':'rose';
+        const url=sheet.link||`https://docs.google.com/spreadsheets/d/${sheet.sheetId}/edit`;
+        grid.innerHTML+=`<div class="glass-card rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden group sheet-card">
+            ${hasReady?`<div class="absolute top-0 right-0 w-2 h-full bg-${color}-500"></div>`:''}
+            <div class="flex justify-between items-start mb-4"><h3 class="font-bold text-lg text-main truncate sheet-title pr-4">${sheet.title}</h3>
+            <button onclick="event.stopPropagation();deleteSheetCard('${tab}','${sheet.title.replace(/'/g,"\\'")}')" class="text-sub hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><i class="fa-solid fa-trash"></i></button></div>
+            <div><div class="flex justify-between items-center"><div><span class="text-sm text-sub">Stock</span><br><span class="text-2xl font-bold text-${color}-500">${sheet.readyCount}</span></div><div><span class="px-2.5 py-1 text-xs font-semibold rounded-full ${hasReady?'bg-emerald-500/20 text-emerald-400':'text-sub'}">${hasReady?'มี Stock':'ไม่มี Stock'}</span></div></div>
+            ${tab==='main'&&sheet.waitingCount>0?`<div class="flex justify-between items-center mt-3 pt-3 border-t border-subtle"><div><span class="text-sm text-sub">รอสร้าง</span><br><span class="text-2xl font-bold text-amber-500">${sheet.waitingCount}</span></div></div>`:''}</div>
+            <div class="mt-5 pt-3 border-t border-subtle"><a href="${url}" target="_blank" class="text-sm flex items-center gap-1 font-medium transition-colors" style="color:var(--primary)">เปิดใน Sheets <i class="fa-solid fa-arrow-up-right-from-square text-xs ml-1"></i></a></div>
+        </div>`;
+    });
+}
+function filterSheetCards(){const q=document.getElementById('sheet-search').value.toLowerCase();document.querySelectorAll('.sheet-card').forEach(c=>{c.style.display=c.querySelector('.sheet-title').innerText.toLowerCase().includes(q)?'block':'none';});}
+function deleteSheetCard(tab,title){if(!confirm('ลบกล่อง "'+title+'"?'))return;let h=JSON.parse(localStorage.getItem('hidden_cards')||'{}');if(!h[tab])h[tab]=[];h[tab].push(title);localStorage.setItem('hidden_cards',JSON.stringify(h));renderSheetsPage(tab);}
+
+// ===========================
+// RENDER: STOCK CHECK
+// ===========================
+async function renderStockCheckPage() {
+    const content=document.getElementById('tab-content');
+    content.innerHTML=`<div class="text-center py-10"><div class="inline-block animate-spin rounded-full h-10 w-10 border-4 border-t-transparent mb-3" style="border-color:var(--primary);border-top-color:transparent;"></div><p class="text-sub">กำลังตรวจสอบ Stock...</p></div>`;
+    await loadAllData();
+    const tabs2=['main','youtube','yok','ai','horoscope'];
+    const tabNames={main:'📝 บทความ',youtube:'🎬 Youtube',yok:'💎 หยก',ai:'🤖 AI',horoscope:'⭐ ดูดวง'};
+    let allItems=[];tabs2.forEach(t=>{const d=sheetsData[t];if(!d)return;d.forEach(item=>allItems.push({...item,tab:t,tabName:tabNames[t]}));});
+    const zeroStock=allItems.filter(i=>i.readyCount===0);const lowStock=allItems.filter(i=>i.readyCount>0&&i.readyCount<=5);
+    const rg=(items,title,icon,cc,bc)=>{if(items.length===0)return '';return `<div class="card-bg rounded-2xl shadow-sm p-6 border border-subtle ${bc} mb-6"><h2 class="text-lg font-bold text-main mb-4"><i class="${icon} ${cc} mr-2"></i>${title} <span class="text-sm font-normal text-sub">(${items.length})</span></h2>
+        <div class="space-y-2 max-h-80 overflow-y-auto">${items.map(item=>{const url=item.link||`https://docs.google.com/spreadsheets/d/${item.sheetId}/edit`;return `<div class="flex items-center justify-between py-2.5 px-4 rounded-lg hover-bg transition-colors border border-subtle"><div class="flex-1 min-w-0"><span class="text-sm text-main font-medium truncate block">${item.title}</span><span class="text-xs text-sub">${item.tabName}</span></div>
+            <div class="flex items-center gap-3 ml-3"><span class="text-sm font-bold ${item.readyCount===0?'text-red-500':'text-amber-500'}">Stock: ${item.readyCount}</span><a href="${url}" target="_blank" style="color:var(--primary)"><i class="fa-solid fa-arrow-up-right-from-square text-xs"></i></a></div></div>`;}).join('')}</div></div>`;};
+    content.innerHTML=`<div class="fade-in">
+        <div class="flex justify-between items-center mb-6"><div><h1 class="text-2xl font-bold text-main">🔍 ตรวจ Stock</h1><p class="text-sub text-sm mt-1">งานที่เหลือน้อยควรทำเพิ่ม</p></div>
+        <button onclick="renderStockCheckPage()" class="card-bg text-main px-4 py-2 rounded-lg shadow border border-subtle hover-bg flex items-center gap-2"><i class="fa-solid fa-rotate-right"></i> รีเฟรช</button></div>
+        ${renderNoteBox('stockcheck')}
+        <div class="grid grid-cols-2 gap-4 mb-8">
+            <div class="card-bg rounded-2xl shadow-sm p-4 border border-subtle text-center border-t-4 border-t-red-500"><p class="text-3xl font-bold text-red-500">${zeroStock.length}</p><p class="text-xs text-sub mt-1">หมด Stock</p></div>
+            <div class="card-bg rounded-2xl shadow-sm p-4 border border-subtle text-center border-t-4 border-t-amber-500"><p class="text-3xl font-bold text-amber-500">${lowStock.length}</p><p class="text-xs text-sub mt-1">Stock ต่ำ (1-5)</p></div>
+        </div>
+        ${rg(zeroStock,'หมด Stock ต้องทำด่วน','fa-solid fa-circle-exclamation','text-red-500','border-l-4 border-l-red-500')}
+        ${rg(lowStock,'Stock เหลือน้อย (1-5)','fa-solid fa-triangle-exclamation','text-amber-500','border-l-4 border-l-amber-500')}
+    </div>`;
+}
+
+// ===========================
+// RENDER: TODO KANBAN
+// ===========================
+function renderTodoPage() {
+    const content=document.getElementById('tab-content');
+    const cols={waiting:{title:'🕒 รอดำเนินการ',items:todoItems.filter(t=>t.column==='waiting')},processing:{title:'⚡ กำลังทำ',items:todoItems.filter(t=>t.column==='processing')},finished:{title:'✅ เสร็จแล้ว',items:todoItems.filter(t=>t.column==='finished')}};
+    content.innerHTML=`<div class="fade-in">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+            <div class="flex items-center gap-4">
+                <h1 class="text-2xl font-bold text-main">✅ Smart Task Center</h1>
+                <span id="todo-sync-status" class="text-[11px] font-medium text-sub bg-black/20 px-2.5 py-1 rounded-md border border-subtle flex items-center gap-1"><i class="fa-solid fa-cloud-check text-emerald-500"></i> Connected</span>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="fetchTodoFromSheet()" class="text-xs text-sub bg-black/10 hover-bg px-3 py-1.5 rounded-lg border border-subtle transition-colors"><i class="fa-solid fa-rotate"></i> โหลดข้อมูล Sheet</button>
+                <button onclick="clearDoneTodos()" class="text-xs text-red-500 bg-red-500/10 hover:bg-red-500/20 transition-colors px-3 py-1.5 rounded-lg border border-red-500/20">ล้างงานเสร็จแล้ว</button>
+            </div>
+        </div>
+        ${renderNoteBox('todo')}
+        <div class="card-bg rounded-2xl shadow-sm p-6 border border-subtle mb-8 glass-card">
+            <h3 class="text-sm font-bold text-main mb-4 flex items-center gap-2"><i class="fa-solid fa-pen-to-square text-indigo-400"></i> สร้างงานใหม่</h3>
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <div class="lg:col-span-4 space-y-4">
+                    <div>
+                        <label class="block text-xs text-sub mb-1.5 font-medium">หัวข้องาน <span class="text-red-500">*</span></label>
+                        <input id="todo-input" class="w-full px-4 py-2.5 rounded-xl input-bg border border-subtle focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all" placeholder="ระบุหัวข้องานหลัก...">
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs text-sub mb-1.5 font-medium">หมวดหมู่</label>
+                            <input id="todo-category" class="w-full px-4 py-2.5 rounded-xl input-bg text-sm border border-subtle focus:border-indigo-500 outline-none" placeholder="เช่น ตัดต่อ, รีวิว">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-sub mb-1.5 font-medium">ความสำคัญ</label>
+                            <select id="todo-priority" class="w-full px-3 py-2.5 rounded-xl input-bg text-sm border border-subtle outline-none">
+                                <option value="medium">🟡 ปานกลาง</option>
+                                <option value="high">🔴 ด่วนมาก</option>
+                                <option value="low">🟢 ไม่รีบ</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-sub mb-1.5 font-medium">กำหนดส่ง</label>
+                        <input id="todo-deadline" type="date" class="w-full px-4 py-2.5 rounded-xl input-bg text-sm border border-subtle outline-none">
+                    </div>
+                </div>
+                <div class="lg:col-span-8 flex flex-col h-full">
+                    <label class="block text-xs text-sub mb-1.5 font-medium">รายละเอียดงานแบบครบถ้วน</label>
+                    <textarea id="todo-desc" class="w-full h-full min-h-[120px] px-4 py-3 rounded-xl input-bg border border-subtle focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all resize-none" placeholder="ใส่รายละเอียดเนื้อหา, ราคา, เงื่อนไข, หรือลิงก์อ้างอิง..."></textarea>
+                    <div class="mt-4 flex justify-end">
+                        <button onclick="addTodo()" class="text-white px-8 py-3 rounded-xl font-bold transition-all shadow-lg hover:opacity-90 flex items-center gap-2" style="background-color:var(--primary)">
+                            <i class="fa-solid fa-paper-plane text-sm"></i> บันทึกงานใหม่
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="kanban-grid">
+            ${Object.entries(cols).map(([id,col])=>`
+                <div class="kanban-col border" style="background:rgba(0,0,0,0.1);border-color:var(--border-dark)" ondragover="event.preventDefault()" ondrop="dropToColumn(event,'${id}')">
+                    <div class="flex items-center justify-between mb-4 px-2"><h3 class="font-bold text-sm text-main uppercase tracking-wider">${col.title}</h3><span class="text-[10px] px-2 py-0.5 rounded-full font-bold" style="background:var(--primary-glow);color:var(--primary)">${col.items.length}</span></div>
+                    <div class="space-y-3" id="col-${id}">
+                        ${col.items.map(t=>renderTodoCard(t)).join('')}
+                        ${col.items.length===0?`<div class="text-center py-10 text-[10px] text-sub border-2 border-dashed rounded-xl" style="border-color:var(--border-dark)">วางงานที่นี่</div>`:''}
+                    </div>
+                </div>`).join('')}
+        </div>
+    </div>`;
+}
+function renderTodoCard(t) {
+    const idx=todoItems.indexOf(t);
+    const pClass={high:'border-l-rose-500',medium:'border-l-amber-500',low:'border-l-emerald-500'};
+    let isUrgent=false; if(t.deadline&&t.column!=='finished'){const today=new Date().toISOString().split('T')[0];if(t.deadline<=today)isUrgent=true;}
+    return `<div class="glass-card p-4 rounded-2xl shadow-sm border-l-4 ${pClass[t.priority]} kanban-item group relative" draggable="true" ondragstart="dragTodo(event,${idx})">
+        <div class="flex flex-col gap-2">
+            <div class="flex items-center justify-between">
+                ${t.category?`<span class="badge ${t.priority==='high'?'badge-urgent':'badge-normal'}">${t.category}</span>`:'<span></span>'}
+                <button onclick="deleteTodo(${idx})" class="text-sub hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><i class="fa-solid fa-trash text-[10px]"></i></button>
+            </div>
+            <p class="text-sm font-semibold text-main ${t.column==='finished'?'line-through opacity-50':''}">${t.text}</p>
+            ${t.desc?`<p class="text-[11px] text-sub ${t.column==='finished'?'line-through opacity-50':''}">${t.desc}</p>`:''}
+            <div class="flex items-center justify-between mt-1">
+                <div class="flex items-center gap-1.5 text-[9px] ${isUrgent?'deadline-warning':'text-sub'}"><i class="fa-solid fa-clock"></i><span>${t.deadline||'ไม่มีกำหนด'}</span></div>
+                <div class="flex gap-1">
+                    ${t.column!=='waiting'?`<button onclick="moveTodoColumn(${idx},'waiting')" class="text-sub hover:text-indigo-500"><i class="fa-solid fa-arrow-left text-[9px]"></i></button>`:''}
+                    ${t.column!=='finished'?`<button onclick="moveTodoColumn(${idx},'finished')" class="text-sub hover:text-emerald-500"><i class="fa-solid fa-check text-[9px]"></i></button>`:''}
+                    ${t.column==='waiting'?`<button onclick="moveTodoColumn(${idx},'processing')" class="text-sub hover:text-amber-500"><i class="fa-solid fa-arrow-right text-[9px]"></i></button>`:''}
+                </div>
+            </div>
+        </div>
+    </div>`;
+}
+function dragTodo(ev,idx){ev.dataTransfer.setData("todoIdx",idx);}
+function dropToColumn(ev,col){ev.preventDefault();const idx=ev.dataTransfer.getData("todoIdx");moveTodoColumn(parseInt(idx),col);}
+function moveTodoColumn(idx,col){todoItems[idx].column=col;todoItems[idx].done=(col==='finished');localStorage.setItem('todo_items',JSON.stringify(todoItems));renderTodoPage();renderSidebars();syncTodoToSheet();}
+function addTodo(){const input=document.getElementById('todo-input');const text=input.value.trim();if(!text)return;const descInput=document.getElementById('todo-desc');const desc=descInput?descInput.value.trim():'';const category=document.getElementById('todo-category').value.trim();const deadline=document.getElementById('todo-deadline').value;const priority=document.getElementById('todo-priority').value;todoItems.unshift({text,desc,priority,done:false,date:new Date().toLocaleDateString('th-TH'),category,deadline,column:'waiting'});localStorage.setItem('todo_items',JSON.stringify(todoItems));input.value='';if(descInput)descInput.value='';document.getElementById('todo-category').value='';document.getElementById('todo-deadline').value='';renderTodoPage();renderSidebars();syncTodoToSheet();}
+function deleteTodo(i){if(!confirm('ลบงานนี้?'))return;todoItems.splice(i,1);localStorage.setItem('todo_items',JSON.stringify(todoItems));renderTodoPage();renderSidebars();syncTodoToSheet();}
+function clearDoneTodos(){if(!confirm('ลบงานเสร็จแล้วทั้งหมด?'))return;todoItems=todoItems.filter(t=>t.column!=='finished');localStorage.setItem('todo_items',JSON.stringify(todoItems));renderTodoPage();renderSidebars();syncTodoToSheet();}
+
+// ===========================
+// RENDER: CUSTOM TAB PAGE
+// ===========================
+async function renderCustomTabPage(tabId) {
+    const content=document.getElementById('tab-content');const tab=getAllTabs().find(t=>t.id===tabId);const boxes=customBoxes[tabId]||[];
+    content.innerHTML=`<div class="text-center py-10"><div class="inline-block animate-spin rounded-full h-10 w-10 border-4 border-t-transparent mb-3" style="border-color:var(--primary);border-top-color:transparent;"></div><p class="text-sub">กำลังโหลด...</p></div>`;
+    await fetchCustomBoxValues(tabId);
+    content.innerHTML=`<div class="fade-in">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+            <div><h1 class="text-2xl font-bold text-main">${tab?tab.emoji:''} ${tab?tab.name:tabId}</h1><p class="text-sub text-sm mt-1">กล่องติดตามงานที่กำหนดเอง</p></div>
+            <div class="flex gap-2">
+                <button onclick="openModal('modal-create-box')" class="text-white px-4 py-2 rounded-lg font-semibold flex items-center gap-2" style="background-color:var(--primary)"><i class="fa-solid fa-plus"></i> เพิ่มกล่อง</button>
+                <button onclick="renderCustomTabPage('${tabId}')" class="card-bg text-main px-4 py-2 rounded-lg shadow border border-subtle hover-bg"><i class="fa-solid fa-rotate-right"></i></button>
+                <button onclick="deleteCustomTab('${tabId}')" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg"><i class="fa-solid fa-trash"></i></button>
+            </div>
+        </div>
+        ${renderNoteBox(tabId)}
+        ${boxes.length===0?`<div class="text-center py-16"><div class="text-6xl mb-4">📦</div><h3 class="text-lg font-semibold text-main mb-2">ยังไม่มีกล่อง</h3><button onclick="openModal('modal-create-box')" class="text-white px-6 py-3 rounded-lg font-semibold" style="background-color:var(--primary)"><i class="fa-solid fa-plus mr-2"></i>สร้างกล่องแรก</button></div>`:`
+        <div id="custom-boxes-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            ${boxes.map((box,idx)=>{const c=box.color||'indigo';const val=box.value!==null?box.value:'...';return `
+            <div class="glass-card rounded-2xl p-6 shadow-sm hover:shadow-md transition-all relative overflow-hidden border-l-4 border-l-${c}-500 draggable-box group" data-idx="${idx}">
+                <div class="flex items-center justify-between mb-3"><div class="flex items-center gap-2 min-w-0"><span class="text-2xl flex-shrink-0">${box.emoji}</span><h4 class="font-bold text-main truncate">${box.name}</h4></div>
+                <div class="flex gap-1.5"><button onclick="event.stopPropagation();openEditBox('${tabId}',${idx})" class="text-sub opacity-0 group-hover:opacity-100" style="color:var(--primary)"><i class="fa-solid fa-pen text-xs"></i></button>
+                <button onclick="event.stopPropagation();deleteBoxDirect('${tabId}',${idx})" class="text-sub hover:text-red-500 opacity-0 group-hover:opacity-100"><i class="fa-solid fa-trash text-xs"></i></button></div></div>
+                <div class="text-3xl font-bold text-${c}-500 mb-2">${val}</div>
+                ${box.link?`<a href="${box.link}" target="_blank" onclick="event.stopPropagation()" class="text-xs font-medium flex items-center gap-1" style="color:var(--primary)">เปิดลิงก์ <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:9px"></i></a>`:''}</div>`;}).join('')}
+        </div>`}
+    </div>`;
+    setupDragAndDrop(tabId);
+}
+
+// ===========================
+// RENDER: NOTEBOOK (Prompt & Manual)
+// ===========================
+function saveNotebook() { localStorage.setItem('notebook_entries', JSON.stringify(notebookEntries)); }
+
+function getAllNotebookTags() {
+    const tags = new Set();
+    notebookEntries.forEach(e => { if(e.tag) tags.add(e.tag); });
+    return [...tags];
+}
+
+function renderNotebookPage() {
+    const content = document.getElementById('tab-content');
+    const searchTerm = (document.getElementById('notebook-search-input')?.value || '').toLowerCase();
+    let filtered = notebookEntries.filter(e => {
+        const matchSearch = !searchTerm || e.title.toLowerCase().includes(searchTerm) || e.prompt.toLowerCase().includes(searchTerm) || (e.tag||'').toLowerCase().includes(searchTerm);
+        const matchTag = !notebookFilterTag || e.tag === notebookFilterTag;
+        return matchSearch && matchTag;
+    });
+    const allTags = getAllNotebookTags();
+    const totalEntries = notebookEntries.length;
+    const totalWithManual = notebookEntries.filter(e => e.manual && e.manual.trim()).length;
+
+    content.innerHTML = `<div class="fade-in">
+        <!-- Header -->
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+            <div>
+                <h1 class="text-2xl font-bold text-main flex items-center gap-3"><i class="fa-solid fa-notebook" style="color:var(--primary)"></i> Prompt & Manual Notebook</h1>
+                <p class="text-sub text-sm mt-1">บันทึก Prompt และคู่มือที่ใช้ในการทำงาน</p>
+            </div>
+            <button onclick="openNotebookModal()" class="text-white px-5 py-2.5 rounded-xl font-semibold flex items-center gap-2 shadow-lg transition-all hover:shadow-xl" style="background:linear-gradient(135deg,var(--primary),#a855f7)">
+                <i class="fa-solid fa-plus"></i> เพิ่ม Prompt
+            </button>
+        </div>
+
+        <!-- Stats -->
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6">
+            <div class="glass-card rounded-2xl p-4 border-l-4" style="border-left-color:var(--primary)">
+                <p class="text-sub text-xs font-bold uppercase tracking-wider">Prompt ทั้งหมด</p>
+                <h2 class="text-3xl font-extrabold text-main mt-1">${totalEntries}</h2>
+            </div>
+            <div class="glass-card rounded-2xl p-4 border-l-4 border-l-amber-500">
+                <p class="text-sub text-xs font-bold uppercase tracking-wider">มีคู่มือแนบ</p>
+                <h2 class="text-3xl font-extrabold text-amber-500 mt-1">${totalWithManual}</h2>
+            </div>
+            <div class="glass-card rounded-2xl p-4 border-l-4 border-l-emerald-500 hidden sm:block">
+                <p class="text-sub text-xs font-bold uppercase tracking-wider">หมวดหมู่</p>
+                <h2 class="text-3xl font-extrabold text-emerald-500 mt-1">${allTags.length}</h2>
+            </div>
+        </div>
+
+        <!-- Search + Tags -->
+        <div class="glass-card rounded-2xl p-4 mb-6">
+            <div class="notebook-search mb-3">
+                <i class="fa-solid fa-magnifying-glass text-sub"></i>
+                <input id="notebook-search-input" oninput="renderNotebookPage()" class="w-full pl-11 pr-4 py-2.5 rounded-xl input-bg text-sm" placeholder="ค้นหา Prompt หรือคู่มือ..." value="${searchTerm}">
+            </div>
+            ${allTags.length > 0 ? `<div class="flex flex-wrap gap-2">
+                <button onclick="notebookFilterTag='';renderNotebookPage()" class="tag-chip ${!notebookFilterTag?'active':''}" style="background:var(--hover-bg);color:var(--text-main);border:1px solid var(--border-dark)">🏷️ ทั้งหมด</button>
+                ${allTags.map(tag => `<button onclick="notebookFilterTag=notebookFilterTag==='${tag.replace(/'/g,"\\'")}' ? '' : '${tag.replace(/'/g,"\\'")}';renderNotebookPage()" class="tag-chip ${notebookFilterTag===tag?'active':''}" style="background:var(--primary-glow);color:var(--primary);border:1px solid var(--border-dark)">${tag}</button>`).join('')}
+            </div>` : ''}
+        </div>
+
+        <!-- Cards -->
+        ${filtered.length === 0 ? `
+        <div class="text-center py-20 glass-card rounded-2xl">
+            <div class="text-6xl mb-4">📝</div>
+            <h3 class="text-lg font-semibold text-main mb-2">${totalEntries===0?'ยังไม่มี Prompt':'ไม่พบผลลัพธ์'}</h3>
+            <p class="text-sub text-sm mb-6">${totalEntries===0?'เริ่มต้นบันทึก Prompt แรกของคุณ':'ลองค้นหาด้วยคำอื่น'}</p>
+            ${totalEntries===0?`<button onclick="openNotebookModal()" class="text-white px-6 py-3 rounded-xl font-semibold" style="background-color:var(--primary)"><i class="fa-solid fa-plus mr-2"></i>สร้าง Prompt แรก</button>`:''}
+        </div>
+        ` : `
+        <div class="space-y-4">
+            ${filtered.map((entry, dispIdx) => {
+                const realIdx = notebookEntries.indexOf(entry);
+                const hasManual = entry.manual && entry.manual.trim();
+                return `
+                <div class="prompt-card glass-card rounded-2xl overflow-hidden" id="prompt-card-${realIdx}">
+                    <div class="p-5 sm:p-6">
+                        <div class="flex items-start justify-between gap-3 mb-3">
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 flex-wrap mb-1">
+                                    ${entry.tag ? `<span class="tag-chip" style="background:var(--primary-glow);color:var(--primary);border:1px solid rgba(99,102,241,0.2)">${entry.tag}</span>` : ''}
+                                    <span class="text-[10px] text-sub">${entry.createdAt || ''}</span>
+                                </div>
+                                <h3 class="text-lg font-bold text-main leading-tight">${entry.title}</h3>
+                            </div>
+                            <div class="flex items-center gap-1.5 flex-shrink-0">
+                                <button onclick="copyPromptToClipboard(${realIdx})" class="copy-btn p-2 rounded-lg hover-bg transition-all" title="คัดลอก Prompt" style="color:var(--primary)"><i class="fa-solid fa-copy text-sm"></i></button>
+                                <button onclick="openEditNotebookModal(${realIdx})" class="copy-btn p-2 rounded-lg hover-bg transition-all" style="color:var(--primary)"><i class="fa-solid fa-pen text-sm"></i></button>
+                                <button onclick="deleteNotebookEntry(${realIdx})" class="copy-btn p-2 rounded-lg hover-bg transition-all text-red-500"><i class="fa-solid fa-trash text-sm"></i></button>
+                            </div>
+                        </div>
+                        <div class="prompt-content rounded-xl p-4 mb-3" style="background:rgba(0,0,0,0.2);border:1px solid var(--border-dark)">${escapeHTML(entry.prompt)}</div>
+                        ${hasManual ? `
+                        <button onclick="toggleManual(${realIdx})" class="w-full flex items-center justify-between py-2.5 px-4 rounded-xl hover-bg transition-colors" style="background:rgba(0,0,0,0.1);border:1px solid var(--border-dark)">
+                            <span class="text-sm font-semibold text-main flex items-center gap-2"><i class="fa-solid fa-book text-amber-500"></i> คู่มือ / Manual</span>
+                            <i id="manual-arrow-${realIdx}" class="fa-solid fa-chevron-down text-sub text-xs transition-transform"></i>
+                        </button>
+                        <div id="manual-body-${realIdx}" class="manual-section mt-2">
+                            <div class="rounded-xl p-4" style="background:rgba(0,0,0,0.12);border:1px solid var(--border-dark)">
+                                <div class="prompt-content text-sub">${escapeHTML(entry.manual)}</div>
+                            </div>
+                        </div>
+                        ` : ''}
+                    </div>
+                </div>`;
+            }).join('')}
+        </div>
+        `}
+    </div>`;
+}
+
+function escapeHTML(str) {
+    if (!str) return '';
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/\n/g,'<br>');
+}
+
+function toggleManual(idx) {
+    const body = document.getElementById('manual-body-' + idx);
+    const arrow = document.getElementById('manual-arrow-' + idx);
+    if (body) { body.classList.toggle('open'); }
+    if (arrow) { arrow.classList.toggle('rotate-180'); }
+}
+
+function copyPromptToClipboard(idx) {
+    const entry = notebookEntries[idx];
+    if (!entry) return;
+    navigator.clipboard.writeText(entry.prompt).then(() => {
+        const card = document.getElementById('prompt-card-' + idx);
+        if (card) {
+            const btn = card.querySelector('.copy-btn');
+            if (btn) { const origHTML = btn.innerHTML; btn.innerHTML = '<i class="fa-solid fa-check text-sm text-emerald-500"></i>'; setTimeout(() => { btn.innerHTML = origHTML; }, 1500); }
+        }
+    });
+}
+
+function openNotebookModal() {
+    editingNotebookIdx = -1;
+    document.getElementById('notebook-modal-title').innerText = 'เพิ่ม Prompt ใหม่';
+    document.getElementById('nb-title').value = '';
+    document.getElementById('nb-tag').value = '';
+    document.getElementById('nb-prompt').value = '';
+    document.getElementById('nb-manual').value = '';
+    openModal('modal-notebook');
+}
+
+function openEditNotebookModal(idx) {
+    editingNotebookIdx = idx;
+    const entry = notebookEntries[idx];
+    document.getElementById('notebook-modal-title').innerText = 'แก้ไข Prompt';
+    document.getElementById('nb-title').value = entry.title || '';
+    document.getElementById('nb-tag').value = entry.tag || '';
+    document.getElementById('nb-prompt').value = entry.prompt || '';
+    document.getElementById('nb-manual').value = entry.manual || '';
+    openModal('modal-notebook');
+}
+
+function saveNotebookEntry() {
+    const title = document.getElementById('nb-title').value.trim();
+    const tag = document.getElementById('nb-tag').value.trim();
+    const prompt = document.getElementById('nb-prompt').value.trim();
+    const manual = document.getElementById('nb-manual').value.trim();
+    if (!title) { alert('กรุณาใส่ชื่อ Prompt'); return; }
+    if (!prompt) { alert('กรุณาใส่เนื้อหา Prompt'); return; }
+    if (editingNotebookIdx >= 0) {
+        notebookEntries[editingNotebookIdx].title = title;
+        notebookEntries[editingNotebookIdx].tag = tag;
+        notebookEntries[editingNotebookIdx].prompt = prompt;
+        notebookEntries[editingNotebookIdx].manual = manual;
+        notebookEntries[editingNotebookIdx].updatedAt = new Date().toLocaleDateString('th-TH');
+    } else {
+        notebookEntries.unshift({ title, tag, prompt, manual, createdAt: new Date().toLocaleDateString('th-TH'), updatedAt: '' });
+    }
+    saveNotebook();
+    closeModal('modal-notebook');
+    renderNotebookPage();
+}
+
+function deleteNotebookEntry(idx) {
+    if (!confirm('ลบ Prompt "' + notebookEntries[idx].title + '"?')) return;
+    notebookEntries.splice(idx, 1);
+    saveNotebook();
+    renderNotebookPage();
+}
+</script>
+</body>
+</html>
