@@ -1470,6 +1470,23 @@ input[type=number] {
   opacity: 0.68;
 }
 
+.page-stock-trend-box {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, #38bdf8 34%, var(--border-color));
+  border-radius: 8px;
+  background: color-mix(in srgb, #38bdf8 10%, transparent);
+}
+
+.page-stock-trend-box span {
+  overflow: hidden;
+  font-size: 0.76rem;
+  opacity: 0.68;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .page-stock-number-row {
   display: grid;
   grid-template-columns: minmax(0, 160px) minmax(170px, 1fr);

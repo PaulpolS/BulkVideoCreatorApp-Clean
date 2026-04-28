@@ -390,6 +390,8 @@ export function PageStockTab() {
   const [completedResults, setCompletedResults] = useState<PageStockResult[]>([]);
   const [manualCsvName, setManualCsvName] = useState('');
   const [manualCsvText, setManualCsvText] = useState('');
+  const [manualTrendCsvName, setManualTrendCsvName] = useState('');
+  const [manualTrendCsvText, setManualTrendCsvText] = useState('');
   const [manualBrainKey, setManualBrainKey] = useState('');
   const [manualBrains, setManualBrains] = useState<Record<string, ManualPromptBrain>>({});
   const [manualFeedback, setManualFeedback] = useState('');
@@ -621,6 +623,13 @@ export function PageStockTab() {
     setManualTopics([]);
   };
 
+  const handleManualTrendCsvUpload = async (file?: File | null) => {
+    if (!file) return;
+    const text = await file.text();
+    setManualTrendCsvName(file.name);
+    setManualTrendCsvText(text);
+  };
+
   const startAnalyzeManualCsv = () => {
     if (!manualCsvText.trim() || !activeProfile?.openRouterKey) return;
     const rows = parseCsvTable(manualCsvText);
@@ -715,6 +724,10 @@ ${csvSample}
     if (!manualBrain || !activeProfile?.openRouterKey) return;
     const total = Number(manualTopicCount);
     if (!Number.isFinite(total) || total <= 0) return;
+    const trendRows = manualTrendCsvText.trim() ? parseCsvTable(manualTrendCsvText) : [];
+    const trendSample = trendRows.length > 0
+      ? JSON.stringify(trendRows.slice(0, 120), null, 2).slice(0, 32000)
+      : '';
     const nextTaskId = `manual-topics-${Date.now()}`;
     const taskId = globalTaskStore.enqueueTask({
       id: nextTaskId,
@@ -726,12 +739,25 @@ ${csvSample}
       const batchSize = 12;
       const nextTopics: string[] = [];
       const brainText = JSON.stringify(manualBrain, null, 2);
+      if (trendRows.length > 0) {
+        ctx.log(`อ่าน CSV เทรนด์ล่าสุด: ${manualTrendCsvName || 'trend.csv'} (${trendRows.length} แถว)`);
+      } else {
+        ctx.log('ไม่มี CSV เทรนด์ล่าสุด: ใช้สมอง Prompt เดิมเป็นหลัก');
+      }
       for (let start = 0; start < total; start += batchSize) {
         if (ctx.isCancelled()) break;
         await waitIfManualPaused(ctx);
         const amount = Math.min(batchSize, total - start);
         ctx.log(`สร้างหัวข้อ batch ${Math.floor(start / batchSize) + 1}: ขอ ${amount} หัวข้อจาก AI`);
-        const answer = await askOpenRouter(`จากสมองเพจนี้:\n${brainText}\n\nสร้างหัวข้อใหม่ ${amount} หัวข้อสำหรับ "${manualBrain.pageName}" ห้ามซ้ำกับรายการนี้:\n${[...manualTopics, ...nextTopics].join('\n')}\n\nตอบเป็น JSON array ของ string เท่านั้น`, ctx.signal);
+        const answer = await askOpenRouter(`จากสมองเพจนี้:\n${brainText}
+
+${trendSample ? `ข้อมูลเทรนด์ล่าสุดจาก CSV ให้ใช้ประกอบการเลือกหัวข้อ:\n${trendSample}\n\nวิธีใช้เทรนด์:\n- เลือกหัวข้อที่เข้ากับสมองเพจและมีโอกาสทันกระแส\n- อย่าคัดลอก trend row ตรงๆ แบบแข็งๆ ให้แปลงเป็นหัวข้อใหม่ที่น่าสนใจ\n- ถ้าเทรนด์ไม่เข้ากับเพจ ให้ลดน้ำหนักเทรนด์นั้น` : 'ไม่มีข้อมูลเทรนด์เพิ่มเติม'}
+
+สร้างหัวข้อใหม่ ${amount} หัวข้อสำหรับ "${manualBrain.pageName}"
+ห้ามซ้ำกับรายการนี้:
+${[...manualTopics, ...nextTopics].join('\n')}
+
+ตอบเป็น JSON array ของ string เท่านั้น`, ctx.signal);
         const parsed = extractJsonPayload<string[]>(answer, []);
         const clean = parsed.map(item => String(item).trim()).filter(Boolean);
         nextTopics.push(...clean.slice(0, amount));
@@ -1557,7 +1583,24 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
 
             <div className="page-stock-manual-card">
               <h3>2. สร้างหัวข้อ</h3>
-              <p>ใส่จำนวนที่ต้องการ ระบบจะแบ่งส่งให้ AI ทีละชุดและรวมผลลัพธ์ให้</p>
+              <p>ใส่จำนวนที่ต้องการ ระบบจะแบ่งส่งให้ AI ทีละชุด และถ้ามี CSV เทรนด์ ระบบจะใช้ประกอบการเลือกหัวข้อ</p>
+              <label>
+                <span>CSV เทรนด์ล่าสุด / ข้อมูลกระแส</span>
+                <label className="page-stock-upload">
+                  <input
+                    type="file"
+                    accept=".csv,text/csv"
+                    onChange={event => handleManualTrendCsvUpload(event.target.files?.[0])}
+                  />
+                  <span>{manualTrendCsvName || 'เลือกไฟล์ CSV เทรนด์'}</span>
+                </label>
+              </label>
+              {manualTrendCsvText.trim() && (
+                <div className="page-stock-trend-box">
+                  <strong>ใช้ข้อมูลเทรนด์ร่วมในการสร้างหัวข้อ</strong>
+                  <span>{parseCsvTable(manualTrendCsvText).length} แถว · {manualTrendCsvName}</span>
+                </div>
+              )}
               <div className="page-stock-number-row">
                 <input
                   type="number"
