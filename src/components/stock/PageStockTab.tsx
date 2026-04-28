@@ -430,8 +430,10 @@ export function PageStockTab() {
   const [manualBrains, setManualBrains] = useState<Record<string, ManualPromptBrain>>({});
   const [manualFeedback, setManualFeedback] = useState('');
   const [manualTopicCount, setManualTopicCount] = useState('10');
+  const [manualTopicsText, setManualTopicsText] = useState('');
   const [manualTopics, setManualTopics] = useState<string[]>([]);
   const [manualPromptResults, setManualPromptResults] = useState<ManualPromptResult[]>([]);
+  const [manualPromptsCopied, setManualPromptsCopied] = useState(false);
   const [manualTaskId, setManualTaskId] = useState('');
   const [manualPaused, setManualPaused] = useState(false);
   const manualPausedRef = useRef(false);
@@ -498,6 +500,11 @@ export function PageStockTab() {
       ...rows.map(row => [csvEscape(row['หัวข้อ']), csvEscape(row['Prompt สร้างรูป'])].join(',')),
     ].join('\n');
   }, [manualPromptResults]);
+  const editableManualTopics = useMemo(() => getTopics(manualTopicsText), [manualTopicsText]);
+  const manualPromptCopyText = useMemo(
+    () => manualPromptResults.map(result => result.imagePrompt).join('\n\n'),
+    [manualPromptResults],
+  );
 
   useEffect(() => {
     fetch('/api/get-app-data?key=api_profiles')
@@ -667,6 +674,7 @@ export function PageStockTab() {
     setManualBrainKey(brainKey);
     setManualPromptResults([]);
     setManualTopics([]);
+    setManualTopicsText('');
   };
 
   const handleManualTrendCsvUpload = async (file?: File | null) => {
@@ -830,7 +838,9 @@ ${[...manualTopics, ...nextTopics].join('\n')}
         const parsed = extractJsonPayload<string[]>(answer, []);
         const clean = parsed.map(item => String(item).trim()).filter(Boolean);
         nextTopics.push(...clean.slice(0, amount));
-        setManualTopics(prev => [...prev, ...clean.slice(0, amount)]);
+        const accepted = clean.slice(0, amount);
+        setManualTopics(prev => [...prev, ...accepted]);
+        setManualTopicsText(prev => [...getTopics(prev), ...accepted].join('\n'));
         ctx.log(`ได้หัวข้อเพิ่ม ${clean.slice(0, amount).length} หัวข้อ รวม ${nextTopics.length}/${total}`);
       }
       ctx.log(`สร้างหัวข้อเสร็จ: ได้ ${nextTopics.length}/${total} หัวข้อ`);
@@ -840,17 +850,18 @@ ${[...manualTopics, ...nextTopics].join('\n')}
   };
 
   const startGenerateManualPrompts = () => {
-    if (!manualBrain || manualTopics.length === 0 || !activeProfile?.openRouterKey) return;
+    const topicsForPrompt = editableManualTopics;
+    if (!manualBrain || topicsForPrompt.length === 0 || !activeProfile?.openRouterKey) return;
     const nextTaskId = `manual-prompts-${Date.now()}`;
     const taskId = globalTaskStore.enqueueTask({
       id: nextTaskId,
       title: `🎨 สร้าง Prompt รูป: ${manualBrain.pageName}`,
       category: 'page-stock-manual',
-      progress: `เตรียมสร้าง Prompt รูป ${manualTopics.length} หัวข้อ`,
+      progress: `เตรียมสร้าง Prompt รูป ${topicsForPrompt.length} หัวข้อ`,
     }, async ctx => {
       setManualTaskId(nextTaskId);
       const existing = new Map(manualPromptResults.map(result => [result.topic, result.imagePrompt]));
-      const pendingTopics = manualTopics.filter(topic => !existing.has(topic));
+      const pendingTopics = topicsForPrompt.filter(topic => !existing.has(topic));
       const batchSize = 6;
       const brainText = JSON.stringify(manualBrain, null, 2);
       for (let start = 0; start < pendingTopics.length; start += batchSize) {
@@ -858,19 +869,21 @@ ${[...manualTopics, ...nextTopics].join('\n')}
         await waitIfManualPaused(ctx);
         const batch = pendingTopics.slice(start, start + batchSize);
         ctx.log(`สร้าง Prompt รูป batch ${Math.floor(start / batchSize) + 1}: ${batch.length} หัวข้อ`);
-        const answer = await askOpenRouter(`คุณคือ expert image prompt engineer
+        const answer = await askOpenRouter(`คุณคือ AI ที่มีหน้าที่เขียน Prompt ตาม Pattern เดิมแบบเข้มงวด
 
 ใช้สมองเพจนี้เป็นกฎหลัก:
 ${brainText}
 
-สร้าง prompt รูปภาษาอังกฤษสำหรับแต่ละหัวข้อต่อไปนี้ โดยต้องตรง pattern ตัวอย่างของเพจ ห้ามใส่คำอธิบายเพิ่ม:
+สร้าง Prompt สร้างรูปสำหรับแต่ละหัวข้อต่อไปนี้ โดยต้องตรง Pattern ตัวอย่างของเพจแบบเป๊ะที่สุด:
 ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
 
-ข้อกำหนด:
-- prompt ต้องละเอียดพอสำหรับ text-to-image
-- มีองค์ประกอบภาพ layout mood color typography ชัดเจน
-- ถ้าพาดพิงคนจริง/บุคคลสาธารณะ ให้ใช้สัญลักษณ์ ไม่ทำหน้าคล้ายคนจริง
-- ใส่ข้อความไทยในภาพเท่าที่จำเป็นและอ่านง่าย
+ข้อบังคับสำคัญมาก:
+- ห้ามเขียน Prompt เป็นภาษาอังกฤษยาวๆ แบบ image prompt engineer
+- ห้ามเริ่มด้วย "A futuristic infographic", "Create an image", "1080x1080 resolution" หรือบรรยายสี/แสงเองนอก pattern
+- ต้องเขียนเป็นภาษาไทยในรูปแบบเดียวกับ examplePrompts/promptRules ในสมอง
+- ถ้า examplePrompts มีรูปแบบเช่น "สร้างรูปอินโฟอธิบายเป็นภาษาไทย รูปขนาด 1080x1080 มีเครดิทเพจคือ thailand-ai.com หัวข้อ Infographic คือ...รายละเอียด/ไอเดีย...พร้อมเขียนโพส..." ให้ใช้รูปแบบนั้น
+- เปลี่ยนเฉพาะ "หัวข้อ Infographic" และ "รายละเอียด/ไอเดีย" ให้เหมาะกับหัวข้อใหม่
+- ต้องพร้อมเอาไปใช้ต่อได้ทันที
 
 ตอบเป็น JSON array เท่านั้น:
 [{"topic":"หัวข้อเดิม","imagePrompt":"prompt..."}]`, ctx.signal);
@@ -912,7 +925,15 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
     const nextKey = Object.keys(nextBrains)[0] || '';
     setManualBrainKey(nextKey);
     setManualTopics([]);
+    setManualTopicsText('');
     setManualPromptResults([]);
+  };
+
+  const copyManualPrompts = async () => {
+    if (!manualPromptCopyText) return;
+    await navigator.clipboard.writeText(manualPromptCopyText);
+    setManualPromptsCopied(true);
+    window.setTimeout(() => setManualPromptsCopied(false), 1500);
   };
 
   const downloadManualPromptCsv = () => {
@@ -1707,10 +1728,16 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
                 </button>
               </div>
               <div className="page-stock-manual-actions">
+                <button
+                  className="page-stock-danger"
+                  disabled={!manualHasRunningTask}
+                  onClick={stopManualTask}
+                >
+                  หยุดสร้างหัวข้อ
+                </button>
                 <button disabled={!manualHasRunningTask} onClick={toggleManualPause}>
                   {manualPaused ? 'Resume' : 'Pause'}
                 </button>
-                <button disabled={!manualHasRunningTask} onClick={stopManualTask}>Stop</button>
               </div>
             </div>
 
@@ -1761,22 +1788,33 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
             <div className="page-stock-manual-card page-stock-manual-wide">
               <div className="page-stock-manual-headline">
                 <h3>หัวข้อที่สร้างแล้ว</h3>
-                <span>{manualTopics.length} หัวข้อ</span>
+                <span>{editableManualTopics.length} หัวข้อ</span>
               </div>
-              <div className="page-stock-result-list">
-                {manualTopics.length === 0 ? (
-                  <em>ยังไม่มีหัวข้อ</em>
-                ) : manualTopics.map((topic, index) => (
-                  <div key={`${topic}-${index}`}>{index + 1}. {topic}</div>
-                ))}
+              <textarea
+                className="page-stock-textarea page-stock-topics-editor"
+                value={manualTopicsText}
+                onChange={event => {
+                  setManualTopicsText(event.target.value);
+                  setManualTopics(getTopics(event.target.value));
+                }}
+                placeholder={`พิมพ์หัวข้อเองได้ หัวข้อละ 1 บรรทัด\nหรือกดสร้างหัวข้อ แล้วมาแก้ตรงนี้ก่อนสร้าง Prompt`}
+              />
+              <div className="page-stock-manual-actions">
+                <button
+                  className="page-stock-primary"
+                  disabled={editableManualTopics.length === 0 || !manualBrain || !hasOpenRouterKey || manualHasRunningTask}
+                  onClick={startGenerateManualPrompts}
+                >
+                  สร้างPrompt สร้างรูป
+                </button>
+                <button
+                  className="page-stock-danger"
+                  disabled={!manualHasRunningTask}
+                  onClick={stopManualTask}
+                >
+                  หยุดสร้างPrompt
+                </button>
               </div>
-              <button
-                className="page-stock-primary"
-                disabled={manualTopics.length === 0 || !manualBrain || !hasOpenRouterKey || manualHasRunningTask}
-                onClick={startGenerateManualPrompts}
-              >
-                สร้างPrompt สร้างรูป
-              </button>
             </div>
 
             <div className="page-stock-manual-card page-stock-manual-wide">
@@ -1794,9 +1832,14 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
                   </article>
                 ))}
               </div>
-              <button disabled={manualPromptResults.length === 0} onClick={downloadManualPromptCsv}>
-                Export CSV: หัวข้อ | Prompt สร้างรูป
-              </button>
+              <div className="page-stock-manual-actions">
+                <button disabled={manualPromptResults.length === 0} onClick={copyManualPrompts}>
+                  {manualPromptsCopied ? 'คัดลอกแล้ว' : 'คัดลอก Prompt ทั้งหมด'}
+                </button>
+                <button disabled={manualPromptResults.length === 0} onClick={downloadManualPromptCsv}>
+                  Export CSV: หัวข้อ | Prompt สร้างรูป
+                </button>
+              </div>
             </div>
           </div>
         </section>

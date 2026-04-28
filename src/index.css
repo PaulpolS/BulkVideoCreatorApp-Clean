@@ -1585,6 +1585,12 @@ input[type=number] {
   margin: 0;
 }
 
+.page-stock-topics-editor {
+  width: 100%;
+  min-height: 180px;
+  margin: 0;
+}
+
 .page-stock-manual-headline {
   display: flex;
   align-items: center;
