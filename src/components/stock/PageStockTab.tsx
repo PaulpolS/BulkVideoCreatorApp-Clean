@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import workflow from '../../../[All Pages] ทำรูปStock ทุกเพจ.json';
 import { globalTaskStore } from '../../hooks/useBackgroundTasks';
 
@@ -82,6 +82,25 @@ interface PageStockResult {
   resolution: ImageResolution;
 }
 
+interface ManualPromptBrain {
+  pageName: string;
+  updatedAt: string;
+  sourceFileName?: string;
+  sourceRowCount: number;
+  summary: string;
+  topicPatterns: string[];
+  promptRules: string[];
+  visualStyleRules: string[];
+  negativeRules: string[];
+  feedbackNotes: string[];
+  rawAnalysis?: string;
+}
+
+interface ManualPromptResult {
+  topic: string;
+  imagePrompt: string;
+}
+
 const workflowNodes = (workflow as any).nodes ?? [];
 
 function extractPageConfigs(): PageConfig[] {
@@ -100,6 +119,7 @@ function extractPageConfigs(): PageConfig[] {
 
 const PAGE_CONFIGS = extractPageConfigs();
 const OUTPUT_SETTINGS_KEY = 'page_stock_output_settings';
+const MANUAL_PROMPT_BRAINS_KEY = 'page_stock_prompt_brains';
 
 const DEFAULT_OUTPUT_SETTINGS: OutputSettings = {
   profileId: '',
@@ -115,6 +135,61 @@ const DEFAULT_OUTPUT_SETTINGS: OutputSettings = {
 };
 
 const wait = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms));
+
+function parseCsvTable(text: string): Record<string, string>[] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let quoted = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    const next = text[i + 1];
+    if (char === '"' && quoted && next === '"') {
+      cell += '"';
+      i++;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (char === ',' && !quoted) {
+      row.push(cell.trim());
+      cell = '';
+    } else if ((char === '\n' || char === '\r') && !quoted) {
+      if (char === '\r' && next === '\n') i++;
+      row.push(cell.trim());
+      if (row.some(Boolean)) rows.push(row);
+      row = [];
+      cell = '';
+    } else {
+      cell += char;
+    }
+  }
+  row.push(cell.trim());
+  if (row.some(Boolean)) rows.push(row);
+
+  const headers = rows.shift()?.map((header, index) => header || `column_${index + 1}`) ?? [];
+  return rows.map(values => Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ''])));
+}
+
+function extractJsonPayload<T>(text: string, fallback: T): T {
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
+  const target = fenced || trimmed;
+  const start = Math.min(
+    ...[target.indexOf('{'), target.indexOf('[')].filter(index => index >= 0),
+  );
+  if (!Number.isFinite(start)) return fallback;
+  const candidate = target.slice(start);
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    try {
+      const end = Math.max(candidate.lastIndexOf('}'), candidate.lastIndexOf(']'));
+      return JSON.parse(candidate.slice(0, end + 1));
+    } catch {
+      return fallback;
+    }
+  }
+}
 
 function getTopics(input: string): string[] {
   return input
@@ -305,6 +380,16 @@ export function PageStockTab() {
   const [csvCopied, setCsvCopied] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [completedResults, setCompletedResults] = useState<PageStockResult[]>([]);
+  const [manualCsvName, setManualCsvName] = useState('');
+  const [manualCsvText, setManualCsvText] = useState('');
+  const [manualBrains, setManualBrains] = useState<Record<string, ManualPromptBrain>>({});
+  const [manualFeedback, setManualFeedback] = useState('');
+  const [manualTopicCount, setManualTopicCount] = useState('10');
+  const [manualTopics, setManualTopics] = useState<string[]>([]);
+  const [manualPromptResults, setManualPromptResults] = useState<ManualPromptResult[]>([]);
+  const [manualTaskId, setManualTaskId] = useState('');
+  const [manualPaused, setManualPaused] = useState(false);
+  const manualPausedRef = useRef(false);
   const [settings, setSettings] = useState<OutputSettings>(() => {
     try {
       return { ...DEFAULT_OUTPUT_SETTINGS, ...JSON.parse(localStorage.getItem(OUTPUT_SETTINGS_KEY) || '{}') };
@@ -350,6 +435,18 @@ export function PageStockTab() {
   const hasOpenRouterKey = Boolean(activeProfile?.openRouterKey);
   const hasDropboxAuth = Boolean(activeProfile?.dropboxKey || activeProfile?.dropboxRefreshToken);
   const runnableCount = totalQueuedTopics || topics.length;
+  const manualBrain = selectedPageName ? manualBrains[selectedPageName] : undefined;
+  const manualHasRunningTask = Boolean(manualTaskId);
+  const manualPromptCsv = useMemo(() => {
+    const rows = manualPromptResults.map(result => ({
+      'หัวข้อ': result.topic,
+      'Prompt สร้างรูป': result.imagePrompt,
+    }));
+    return [
+      'หัวข้อ,Prompt สร้างรูป',
+      ...rows.map(row => [csvEscape(row['หัวข้อ']), csvEscape(row['Prompt สร้างรูป'])].join(',')),
+    ].join('\n');
+  }, [manualPromptResults]);
 
   useEffect(() => {
     fetch('/api/get-app-data?key=api_profiles')
@@ -380,6 +477,20 @@ export function PageStockTab() {
         try {
           const data = JSON.parse(localStorage.getItem('page_stock_results') || '[]');
           if (Array.isArray(data)) setCompletedResults(data);
+        } catch {}
+      });
+  }, []);
+
+  useEffect(() => {
+    fetch(`/api/get-app-data?key=${MANUAL_PROMPT_BRAINS_KEY}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data && typeof data === 'object' && !Array.isArray(data)) setManualBrains(data);
+      })
+      .catch(() => {
+        try {
+          const data = JSON.parse(localStorage.getItem(MANUAL_PROMPT_BRAINS_KEY) || '{}');
+          if (data && typeof data === 'object' && !Array.isArray(data)) setManualBrains(data);
         } catch {}
       });
   }, []);
@@ -440,6 +551,252 @@ export function PageStockTab() {
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error?.message || `OpenRouter error ${res.status}`);
     return data.choices?.[0]?.message?.content?.trim() || '';
+  };
+
+  const askOpenRouter = async (prompt: string, signal?: AbortSignal) => {
+    if (!activeProfile?.openRouterKey) throw new Error('ไม่พบ OpenRouter API Key');
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      signal,
+      headers: {
+        'Authorization': `Bearer ${activeProfile.openRouterKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: settings.openRouterModel || 'google/gemini-2.5-pro',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.72,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error?.message || `OpenRouter error ${res.status}`);
+    return data.choices?.[0]?.message?.content?.trim() || '';
+  };
+
+  const saveManualBrains = async (nextBrains: Record<string, ManualPromptBrain>) => {
+    setManualBrains(nextBrains);
+    localStorage.setItem(MANUAL_PROMPT_BRAINS_KEY, JSON.stringify(nextBrains));
+    await fetch('/api/save-app-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: MANUAL_PROMPT_BRAINS_KEY, data: nextBrains }),
+    }).catch(() => undefined);
+  };
+
+  const waitIfManualPaused = async (ctx: { isCancelled: () => boolean; log: (message: string) => void }) => {
+    let logged = false;
+    while (manualPausedRef.current && !ctx.isCancelled()) {
+      if (!logged) {
+        ctx.log('Pause: หยุดพักงานไว้ชั่วคราว กด Resume เพื่อทำต่อ');
+        logged = true;
+      }
+      await wait(600);
+    }
+    if (logged && !ctx.isCancelled()) ctx.log('Resume: กลับมาทำงานต่อ');
+  };
+
+  const handleManualCsvUpload = async (file?: File | null) => {
+    if (!file) return;
+    const text = await file.text();
+    setManualCsvName(file.name);
+    setManualCsvText(text);
+    setManualPromptResults([]);
+    setManualTopics([]);
+  };
+
+  const startAnalyzeManualCsv = () => {
+    if (!selectedPage || !manualCsvText.trim() || !activeProfile?.openRouterKey) return;
+    const rows = parseCsvTable(manualCsvText);
+    const csvSample = JSON.stringify(rows.slice(0, 80), null, 2).slice(0, 32000);
+    const nextTaskId = `manual-brain-${Date.now()}`;
+    const taskId = globalTaskStore.enqueueTask({
+      id: nextTaskId,
+      title: `🧠 แกะสมอง Prompt: ${selectedPage.name}`,
+      category: 'page-stock-manual',
+      progress: 'เตรียมส่ง CSV ให้ AI วิเคราะห์ตัวอย่าง',
+    }, async ctx => {
+      setManualTaskId(ctx.signal.aborted ? '' : nextTaskId);
+      ctx.log(`1/5 อ่าน CSV: ${manualCsvName || 'ไฟล์อัปโหลด'} (${rows.length} แถว)`);
+      await waitIfManualPaused(ctx);
+      const prompt = `คุณคือ AI strategist ที่เก่งมากในการแกะ pattern คอนเทนต์และ prompt สร้างรูปจากตัวอย่าง CSV
+
+เพจ: ${selectedPage.name}
+ข้อมูล config เดิมของเพจ:
+- image theme: ${selectedPage.image_theme}
+- image font: ${selectedPage.image_font}
+- post persona: ${selectedPage.post_persona}
+- post length: ${selectedPage.post_length}
+
+ตัวอย่างข้อมูลจาก CSV เป็น JSON rows:
+${csvSample}
+
+งานของคุณ:
+1. วิเคราะห์ว่าหัวข้อของเพจนี้มักเป็นแนวไหน
+2. วิเคราะห์ว่ารายละเอียด/มุมเล่าเรื่องเป็นแบบไหน
+3. วิเคราะห์ว่า prompt สร้างรูปที่ดีควรเขียนโครงสร้างแบบไหน
+4. แยกกฎภาพ สี อารมณ์ องค์ประกอบ ฟอนต์ layout และข้อห้าม
+5. สร้างเป็น "สมองเพจ" สำหรับใช้สร้างหัวข้อและ prompt รูปในอนาคต
+
+ตอบเป็น JSON เท่านั้น:
+{
+  "summary": "สรุปสั้นๆ",
+  "topicPatterns": ["..."],
+  "promptRules": ["..."],
+  "visualStyleRules": ["..."],
+  "negativeRules": ["..."]
+}`;
+      ctx.log('2/5 ส่งให้ OpenRouter วิเคราะห์ CSV และ Prompt ตัวอย่าง');
+      const answer = await askOpenRouter(prompt, ctx.signal);
+      ctx.log(`3/5 AI วิเคราะห์กลับมาแล้ว (${answer.length.toLocaleString()} ตัวอักษร)`);
+      const parsed = extractJsonPayload<any>(answer, {});
+      const brain: ManualPromptBrain = {
+        pageName: selectedPage.name,
+        updatedAt: new Date().toISOString(),
+        sourceFileName: manualCsvName,
+        sourceRowCount: rows.length,
+        summary: String(parsed.summary || 'AI วิเคราะห์ไฟล์ CSV แล้ว แต่ไม่ได้ส่ง summary เป็น JSON ชัดเจน'),
+        topicPatterns: Array.isArray(parsed.topicPatterns) ? parsed.topicPatterns.map(String) : [],
+        promptRules: Array.isArray(parsed.promptRules) ? parsed.promptRules.map(String) : [],
+        visualStyleRules: Array.isArray(parsed.visualStyleRules) ? parsed.visualStyleRules.map(String) : [],
+        negativeRules: Array.isArray(parsed.negativeRules) ? parsed.negativeRules.map(String) : [],
+        feedbackNotes: manualBrain?.feedbackNotes || [],
+        rawAnalysis: answer,
+      };
+      ctx.log('4/5 บันทึกสมองเพจลง app_data และ localStorage');
+      await saveManualBrains({ ...manualBrains, [selectedPage.name]: brain });
+      ctx.log('5/5 สมองเพจพร้อมใช้สำหรับสร้างหัวข้อและ Prompt รูป');
+      setManualTaskId('');
+    });
+    setManualTaskId(taskId);
+  };
+
+  const saveManualFeedbackToBrain = async () => {
+    if (!selectedPage || !manualFeedback.trim()) return;
+    const base: ManualPromptBrain = manualBrain || {
+      pageName: selectedPage.name,
+      updatedAt: new Date().toISOString(),
+      sourceRowCount: 0,
+      summary: 'สร้างสมองจาก feedback โดยตรง',
+      topicPatterns: [],
+      promptRules: [],
+      visualStyleRules: [],
+      negativeRules: [],
+      feedbackNotes: [],
+    };
+    const nextBrain = {
+      ...base,
+      updatedAt: new Date().toISOString(),
+      feedbackNotes: [...base.feedbackNotes, manualFeedback.trim()],
+    };
+    await saveManualBrains({ ...manualBrains, [selectedPage.name]: nextBrain });
+    setManualFeedback('');
+  };
+
+  const startGenerateManualTopics = () => {
+    if (!selectedPage || !manualBrain || !activeProfile?.openRouterKey) return;
+    const total = Number(manualTopicCount);
+    if (!Number.isFinite(total) || total <= 0) return;
+    const nextTaskId = `manual-topics-${Date.now()}`;
+    const taskId = globalTaskStore.enqueueTask({
+      id: nextTaskId,
+      title: `🧠 สร้างหัวข้อ: ${selectedPage.name}`,
+      category: 'page-stock-manual',
+      progress: `เตรียมสร้างหัวข้อ ${total} หัวข้อ`,
+    }, async ctx => {
+      setManualTaskId(nextTaskId);
+      const batchSize = 12;
+      const nextTopics: string[] = [];
+      const brainText = JSON.stringify(manualBrain, null, 2);
+      for (let start = 0; start < total; start += batchSize) {
+        if (ctx.isCancelled()) break;
+        await waitIfManualPaused(ctx);
+        const amount = Math.min(batchSize, total - start);
+        ctx.log(`สร้างหัวข้อ batch ${Math.floor(start / batchSize) + 1}: ขอ ${amount} หัวข้อจาก AI`);
+        const answer = await askOpenRouter(`จากสมองเพจนี้:\n${brainText}\n\nสร้างหัวข้อใหม่ ${amount} หัวข้อสำหรับเพจ "${selectedPage.name}" ห้ามซ้ำกับรายการนี้:\n${[...manualTopics, ...nextTopics].join('\n')}\n\nตอบเป็น JSON array ของ string เท่านั้น`, ctx.signal);
+        const parsed = extractJsonPayload<string[]>(answer, []);
+        const clean = parsed.map(item => String(item).trim()).filter(Boolean);
+        nextTopics.push(...clean.slice(0, amount));
+        setManualTopics(prev => [...prev, ...clean.slice(0, amount)]);
+        ctx.log(`ได้หัวข้อเพิ่ม ${clean.slice(0, amount).length} หัวข้อ รวม ${nextTopics.length}/${total}`);
+      }
+      ctx.log(`สร้างหัวข้อเสร็จ: ได้ ${nextTopics.length}/${total} หัวข้อ`);
+      setManualTaskId('');
+    });
+    setManualTaskId(taskId);
+  };
+
+  const startGenerateManualPrompts = () => {
+    if (!selectedPage || !manualBrain || manualTopics.length === 0 || !activeProfile?.openRouterKey) return;
+    const nextTaskId = `manual-prompts-${Date.now()}`;
+    const taskId = globalTaskStore.enqueueTask({
+      id: nextTaskId,
+      title: `🎨 สร้าง Prompt รูป: ${selectedPage.name}`,
+      category: 'page-stock-manual',
+      progress: `เตรียมสร้าง Prompt รูป ${manualTopics.length} หัวข้อ`,
+    }, async ctx => {
+      setManualTaskId(nextTaskId);
+      const existing = new Map(manualPromptResults.map(result => [result.topic, result.imagePrompt]));
+      const pendingTopics = manualTopics.filter(topic => !existing.has(topic));
+      const batchSize = 6;
+      const brainText = JSON.stringify(manualBrain, null, 2);
+      for (let start = 0; start < pendingTopics.length; start += batchSize) {
+        if (ctx.isCancelled()) break;
+        await waitIfManualPaused(ctx);
+        const batch = pendingTopics.slice(start, start + batchSize);
+        ctx.log(`สร้าง Prompt รูป batch ${Math.floor(start / batchSize) + 1}: ${batch.length} หัวข้อ`);
+        const answer = await askOpenRouter(`คุณคือ expert image prompt engineer
+
+ใช้สมองเพจนี้เป็นกฎหลัก:
+${brainText}
+
+สร้าง prompt รูปภาษาอังกฤษสำหรับแต่ละหัวข้อต่อไปนี้ โดยต้องตรง pattern ตัวอย่างของเพจ ห้ามใส่คำอธิบายเพิ่ม:
+${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
+
+ข้อกำหนด:
+- prompt ต้องละเอียดพอสำหรับ text-to-image
+- มีองค์ประกอบภาพ layout mood color typography ชัดเจน
+- ถ้าพาดพิงคนจริง/บุคคลสาธารณะ ให้ใช้สัญลักษณ์ ไม่ทำหน้าคล้ายคนจริง
+- ใส่ข้อความไทยในภาพเท่าที่จำเป็นและอ่านง่าย
+
+ตอบเป็น JSON array เท่านั้น:
+[{"topic":"หัวข้อเดิม","imagePrompt":"prompt..."}]`, ctx.signal);
+        const parsed = extractJsonPayload<ManualPromptResult[]>(answer, []);
+        const clean = parsed
+          .map(item => ({ topic: String(item.topic || '').trim(), imagePrompt: String(item.imagePrompt || '').trim() }))
+          .filter(item => item.topic && item.imagePrompt);
+        setManualPromptResults(prev => [...prev, ...clean]);
+        ctx.log(`ได้ Prompt รูปเพิ่ม ${clean.length} รายการ รวม ${start + clean.length}/${pendingTopics.length}`);
+      }
+      ctx.log('สร้าง Prompt รูปเสร็จ: พร้อม Export CSV');
+      setManualTaskId('');
+    });
+    setManualTaskId(taskId);
+  };
+
+  const toggleManualPause = () => {
+    manualPausedRef.current = !manualPausedRef.current;
+    setManualPaused(manualPausedRef.current);
+    if (manualTaskId) {
+      globalTaskStore.logTask(manualTaskId, manualPausedRef.current ? 'Pause: ผู้ใช้สั่งหยุดพักงาน' : 'Resume: ผู้ใช้สั่งทำงานต่อ');
+    }
+  };
+
+  const stopManualTask = () => {
+    if (!manualTaskId) return;
+    globalTaskStore.removeTask(manualTaskId);
+    setManualTaskId('');
+    manualPausedRef.current = false;
+    setManualPaused(false);
+  };
+
+  const downloadManualPromptCsv = () => {
+    if (manualPromptResults.length === 0) return;
+    const blob = new Blob(['\uFEFF' + manualPromptCsv], { type: 'text/csv;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `manual-image-prompts-${selectedPage?.name || 'page'}-${Date.now()}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
   };
 
   const createKieImage = async (prompt: string, log: (message: string) => Promise<void>, label = 'หลัก') => {
@@ -1127,8 +1484,115 @@ export function PageStockTab() {
         <section className="page-stock-panel page-stock-manual-prompt">
           <div className="page-stock-panel-head">
             <h2>สร้างรูปเองด้วยPrompt</h2>
+            <span>{manualBrain ? 'มีสมองเพจแล้ว' : 'ยังไม่มีสมองเพจ'}</span>
           </div>
-          <div className="page-stock-manual-empty" />
+          <div className="page-stock-manual-grid">
+            <div className="page-stock-manual-card">
+              <h3>1. อัปโหลด CSV ตัวอย่าง</h3>
+              <p>ไฟล์ควรมีหัวข้อ รายละเอียด และ Prompt สร้างรูป เพื่อให้ AI แกะ pattern ของเพจนี้</p>
+              <label className="page-stock-upload">
+                <input
+                  type="file"
+                  accept=".csv,text/csv"
+                  onChange={event => handleManualCsvUpload(event.target.files?.[0])}
+                />
+                <span>{manualCsvName || 'เลือกไฟล์ CSV'}</span>
+              </label>
+              <button
+                className="page-stock-primary"
+                disabled={!manualCsvText.trim() || !hasOpenRouterKey || manualHasRunningTask}
+                onClick={startAnalyzeManualCsv}
+              >
+                แกะ CSV และ Save เป็นสมอง
+              </button>
+              {manualBrain && (
+                <div className="page-stock-brain-box">
+                  <strong>{manualBrain.summary}</strong>
+                  <span>{manualBrain.sourceRowCount} แถว · อัปเดต {new Date(manualBrain.updatedAt).toLocaleString('th-TH')}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="page-stock-manual-card">
+              <h3>2. สร้างหัวข้อ</h3>
+              <p>ใส่จำนวนที่ต้องการ ระบบจะแบ่งส่งให้ AI ทีละชุดและรวมผลลัพธ์ให้</p>
+              <div className="page-stock-number-row">
+                <input
+                  type="number"
+                  min="0"
+                  inputMode="numeric"
+                  value={manualTopicCount}
+                  onChange={event => setManualTopicCount(event.target.value)}
+                  placeholder="จำนวนหัวข้อ"
+                />
+                <button
+                  className="page-stock-primary"
+                  disabled={!manualBrain || !hasOpenRouterKey || manualHasRunningTask || !Number(manualTopicCount)}
+                  onClick={startGenerateManualTopics}
+                >
+                  สร้างหัวข้อ
+                </button>
+              </div>
+              <div className="page-stock-manual-actions">
+                <button disabled={!manualHasRunningTask} onClick={toggleManualPause}>
+                  {manualPaused ? 'Resume' : 'Pause'}
+                </button>
+                <button disabled={!manualHasRunningTask} onClick={stopManualTask}>Stop</button>
+              </div>
+            </div>
+
+            <div className="page-stock-manual-card page-stock-manual-wide">
+              <h3>3. ติชมและสอนสมองเพิ่ม</h3>
+              <textarea
+                className="page-stock-textarea page-stock-feedback"
+                value={manualFeedback}
+                onChange={event => setManualFeedback(event.target.value)}
+                placeholder="เขียนติชม/แนวทางเพิ่ม เช่น หัวข้อควรคมกว่านี้, ห้ามใช้คำซ้ำ, Prompt ต้องเน้นแสงแบบไหน..."
+              />
+              <button disabled={!manualFeedback.trim()} onClick={saveManualFeedbackToBrain}>Save Feedback เข้าสมอง</button>
+            </div>
+
+            <div className="page-stock-manual-card page-stock-manual-wide">
+              <div className="page-stock-manual-headline">
+                <h3>หัวข้อที่สร้างแล้ว</h3>
+                <span>{manualTopics.length} หัวข้อ</span>
+              </div>
+              <div className="page-stock-result-list">
+                {manualTopics.length === 0 ? (
+                  <em>ยังไม่มีหัวข้อ</em>
+                ) : manualTopics.map((topic, index) => (
+                  <div key={`${topic}-${index}`}>{index + 1}. {topic}</div>
+                ))}
+              </div>
+              <button
+                className="page-stock-primary"
+                disabled={manualTopics.length === 0 || !manualBrain || !hasOpenRouterKey || manualHasRunningTask}
+                onClick={startGenerateManualPrompts}
+              >
+                สร้างPrompt สร้างรูป
+              </button>
+            </div>
+
+            <div className="page-stock-manual-card page-stock-manual-wide">
+              <div className="page-stock-manual-headline">
+                <h3>ผลลัพธ์ Prompt รูป</h3>
+                <span>{manualPromptResults.length} รายการ</span>
+              </div>
+              <div className="page-stock-result-list page-stock-prompt-results">
+                {manualPromptResults.length === 0 ? (
+                  <em>ยังไม่มี Prompt รูป</em>
+                ) : manualPromptResults.map((result, index) => (
+                  <article key={`${result.topic}-${index}`}>
+                    <strong>{index + 1}. {result.topic}</strong>
+                    <p>{result.imagePrompt}</p>
+                  </article>
+                ))}
+              </div>
+              <button disabled={manualPromptResults.length === 0} onClick={downloadManualPromptCsv}>
+                Export CSV: หัวข้อ | Prompt สร้างรูป
+              </button>
+            </div>
+          </div>
         </section>
       )}
     </div>
