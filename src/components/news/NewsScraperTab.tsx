@@ -19,7 +19,7 @@ interface ArticleItem {
 
 interface NewsScraperProps {
   onSendToStock: (data: any) => void;
-  onSendToAIPage?: (items: { rawArticle: string; sourceUrl: string; title: string; tags?: string[] }[]) => void;
+  onSendToAIPage?: (items: { rawArticle: string; sourceUrl: string; title: string; tags?: string[]; images?: string[]; sourceType?: string; domain?: string }[]) => void;
   initialYoutubeUrls?: string[];
   onYoutubeUrlsConsumed?: () => void;
 }
@@ -1193,7 +1193,7 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
                         addLog(`🚀 กำลังดึงเนื้อหาดิบ ${selected.length} ข่าวเพื่อส่งไปทำโพสต์ AI...`);
                         const aiSendTaskId = `news_ai_${Date.now()}`;
                         globalTaskStore.addTask({ id: aiSendTaskId, title: `📰 ส่งข่าวไป AI Page ${selected.length} ข่าว`, category: 'news-save', progress: `ดึงเนื้อหา 0/${selected.length}...`, status: 'running' });
-                        const results: { rawArticle: string; sourceUrl: string; title: string; tags?: string[] }[] = [];
+                        const results: { rawArticle: string; sourceUrl: string; title: string; tags?: string[]; images?: string[]; sourceType?: string; domain?: string }[] = [];
                         const stockItems: any[] = [];
                         const sentToAIPageAt = new Date().toISOString();
                         for (let i = 0; i < selected.length; i++) {
@@ -1216,7 +1216,7 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
                                 setArticles(prev => prev.map(a => a.id === art.id ? { ...a, rawText } : a));
                               }
                             }
-                            results.push({ rawArticle: rawText || art.title, sourceUrl: art.url, title: art.thaiTitle || art.title, tags: art.tags || [] });
+                            results.push({ rawArticle: rawText || art.title, sourceUrl: art.url, title: art.thaiTitle || art.title, tags: art.tags || [], images: [], sourceType: 'news', domain: art.domain });
                             stockItems.push({
                               id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
                               title: art.thaiTitle || art.title,
@@ -1231,7 +1231,7 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
                             });
                           } catch (e: any) {
                             addLog(`⚠️ ดึงเนื้อหา ${art.title.substring(0,30)} ไม่ได้: ${e.message}`);
-                            results.push({ rawArticle: art.title, sourceUrl: art.url, title: art.thaiTitle || art.title, tags: art.tags || [] });
+                            results.push({ rawArticle: art.title, sourceUrl: art.url, title: art.thaiTitle || art.title, tags: art.tags || [], images: [], sourceType: 'news', domain: art.domain });
                           }
                         }
                         // Also save to Article Stock for persistence

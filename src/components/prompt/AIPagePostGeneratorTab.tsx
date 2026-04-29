@@ -54,6 +54,7 @@ interface BulkArticleItem {
   sourceUrl: string;
   images?: string[];
   sourceType?: string;
+  domain?: string;
   channelName?: string;
   channelLogoUrl?: string;
   channelAvatar?: string;
@@ -128,6 +129,7 @@ interface AIPagePostGeneratorProps {
     tags?: string[];
     images?: string[];
     sourceType?: string;
+    domain?: string;
     channelName?: string;
     channelLogoUrl?: string;
     channelAvatar?: string;
@@ -300,6 +302,7 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
   const [bulkItems, setBulkItems] = useState<BulkArticleItem[]>([]);
   const [isBulkProcessing, setIsBulkProcessing] = useState(false);
   const [bulkProcessLog, setBulkProcessLog] = useState('');
+  const [newsImageLoadingIds, setNewsImageLoadingIds] = useState<Set<string>>(new Set());
   const [isSmartConfigRunning, setIsSmartConfigRunning] = useState(false);
   const [isPickingKeywords, setIsPickingKeywords] = useState(false);
   const [smartConfigLog, setSmartConfigLog] = useState('');
@@ -322,6 +325,7 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
     sourceUrl: '',
     images: [],
     sourceType: '',
+    domain: '',
     channelName: '',
     channelLogoUrl: '',
     channelAvatar: '',
@@ -374,6 +378,7 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
         sourceUrl: item.sourceUrl,
         images: item.images || [],
         sourceType: item.sourceType,
+        domain: item.domain,
         channelName: item.channelName,
         channelLogoUrl: item.channelLogoUrl,
         channelAvatar: item.channelAvatar,
@@ -1782,6 +1787,63 @@ Return ONLY valid JSON format.`;
 
   const updateBulkItem = (id: string, updates: Partial<BulkArticleItem>) => {
     setBulkItems(prev => prev.map(item => item.id === id ? { ...item, ...updates } : item));
+  };
+
+  const isNewsBulkItem = (item: BulkArticleItem) => {
+    const source = (item.sourceType || '').toLowerCase();
+    const tags = (item.tags || []).join(' ').toLowerCase();
+    return source === 'news' || source === 'rss' || tags.includes('ข่าว');
+  };
+
+  const fetchNewsImages = async (id: string) => {
+    const item = bulkItems.find(b => b.id === id);
+    if (!item?.sourceUrl) {
+      alert('ไม่มีลิงก์ข่าวให้ดูดรูป');
+      return;
+    }
+    setNewsImageLoadingIds(prev => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+    updateBulkItem(id, { imageErrorMsg: '' });
+    try {
+      const res = await fetch('/api/website-extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: item.sourceUrl }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'ดูดรูปข่าวไม่สำเร็จ');
+      }
+      const mergedImages = Array.from(new Set([...(data.images || []), ...(item.images || [])]))
+        .filter((img): img is string => typeof img === 'string' && img.startsWith('http'));
+      if (mergedImages.length === 0) {
+        throw new Error('ไม่พบรูปประกอบข่าวจากเว็บไซต์นี้');
+      }
+      const keepSelected = item.selectedImageUrl && mergedImages.includes(item.selectedImageUrl);
+      updateBulkItem(id, {
+        images: mergedImages,
+        sourceType: item.sourceType || 'news',
+        useAttachedImage: true,
+        selectedImageUrl: keepSelected ? item.selectedImageUrl : mergedImages[0],
+        smartSelectedImageIndex: keepSelected ? mergedImages.indexOf(item.selectedImageUrl) : 0,
+        smartSelectedImageReason: keepSelected ? item.smartSelectedImageReason || 'ใช้รูปที่เลือกไว้เดิม' : 'ดูดรูปข่าวจากเว็บไซต์และเลือกรูปแรกไว้ก่อน',
+        smartConfigNote: `ดูดรูปข่าวจากเว็บไซต์สำเร็จ ${mergedImages.length} รูป เลือกรูปที่เหมาะก่อนสร้างภาพ`,
+        imageErrorMsg: '',
+      });
+    } catch (err: any) {
+      const msg = err?.message || 'ดูดรูปข่าวไม่สำเร็จ';
+      updateBulkItem(id, { imageErrorMsg: msg, sourceType: item.sourceType || 'news' });
+      alert(`ดูดรูปข่าวไม่สำเร็จ: ${msg}`);
+    } finally {
+      setNewsImageLoadingIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
   };
 
   const toggleSelectBulk = (id: string) => setBulkItems(prev => prev.map(item => item.id === id ? { ...item, isSelected: !item.isSelected } : item));
@@ -3520,6 +3582,8 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                   item.status === 'generating-image' ? '⏳ กำลังส่งคิวสร้างภาพ...' :
                   item.status === 'queued' ? '🚀 อยู่ในคิวแล้ว' :
                   item.status === 'error' ? '❌ ผิดพลาด' : '';
+                const isNewsItem = isNewsBulkItem(item);
+                const isFetchingNewsImages = newsImageLoadingIds.has(item.id);
 
                 return (
                   <div key={item.id} className={`bg-black/30 rounded-xl border ${statusColor} p-4 transition-all`}>
@@ -3540,6 +3604,11 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-sm font-bold text-gray-300">#{idx + 1}</span>
                             {item.title && <span className="text-xs text-gray-500 truncate max-w-[200px]">{item.title}</span>}
+                            {isNewsItem && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full font-black bg-red-600/25 text-red-300 border border-red-500/40">
+                                📰 ข่าว
+                              </span>
+                            )}
                             {statusLabel && (
                               <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
                                 item.status === 'error' ? 'bg-red-600/30 text-red-400' :
@@ -3718,6 +3787,25 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                             </div>
                           )}
                         </div>
+
+                        {isNewsItem && (
+                          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-red-500/25 bg-red-950/20 p-2.5">
+                            <span className="text-[10px] font-bold text-red-300">
+                              ข่าวจากเว็บ{item.domain ? `: ${item.domain}` : ''}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => fetchNewsImages(item.id)}
+                              disabled={isFetchingNewsImages || item.status === 'queued' || !item.sourceUrl}
+                              className="rounded-lg bg-red-600 px-3 py-1.5 text-[10px] font-black text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {isFetchingNewsImages ? 'กำลังดูดรูป...' : 'ดูดรูปข่าวจากwebsite'}
+                            </button>
+                            <span className="text-[10px] text-slate-400">
+                              {item.images?.length ? `มีรูปให้เลือก ${item.images.length} รูป` : 'ยังไม่มีรูปข่าว กดปุ่มเพื่อดึงจากหน้าเว็บ'}
+                            </span>
+                          </div>
+                        )}
 
                         {/* Image picker */}
                         {item.useAttachedImage && item.images && item.images.length > 0 && (
