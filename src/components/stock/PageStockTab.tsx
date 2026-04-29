@@ -31,7 +31,7 @@ type StockMode = 'image-and-post' | 'image-only' | 'post-only';
 type ImageProvider = 'kie-gpt-image-2';
 type AspectRatio = 'auto' | '1:1' | '9:16' | '16:9' | '4:3' | '3:4';
 type ImageResolution = '1K' | '2K' | '4K';
-type PageStockBuilderTab = 'api' | 'prompt' | 'local-image-article';
+type PageStockBuilderTab = 'api' | 'prompt' | 'local-image-article' | 'canvas';
 
 interface ApiProfile {
   id: string;
@@ -135,6 +135,15 @@ interface LocalImageArticleBrain {
   negativeRules: string[];
   feedbackNotes: string[];
   rawAnalysis?: string;
+}
+
+interface StockCanvasImage {
+  id: string;
+  fileName: string;
+  dataUrl: string;
+  width: number;
+  height: number;
+  selected: boolean;
 }
 
 const workflowNodes = (workflow as any).nodes ?? [];
@@ -367,6 +376,48 @@ function cleanAiPostPreamble(text: string) {
   return output.trim();
 }
 
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('อ่านไฟล์ไม่สำเร็จ'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadCanvasImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('โหลดรูปไม่สำเร็จ'));
+    img.src = src;
+  });
+}
+
+function wrapCanvasLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
+  const paragraphs = String(text || '').split('\n');
+  const lines: string[] = [];
+  paragraphs.forEach(paragraph => {
+    const words = paragraph.split(/\s+/).filter(Boolean);
+    if (words.length === 0) {
+      lines.push('');
+      return;
+    }
+    let line = '';
+    words.forEach(word => {
+      const test = line ? `${line} ${word}` : word;
+      if (ctx.measureText(test).width > maxWidth && line) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = test;
+      }
+    });
+    if (line) lines.push(line);
+  });
+  return lines;
+}
+
 function getTopics(input: string): string[] {
   return input
     .split('\n')
@@ -585,6 +636,21 @@ export function PageStockTab() {
   const [localImageBrainAnalyzing, setLocalImageBrainAnalyzing] = useState(false);
   const [localImageCopied, setLocalImageCopied] = useState(false);
   const localImageStopRef = useRef(false);
+  const [canvasImages, setCanvasImages] = useState<StockCanvasImage[]>([]);
+  const [canvasSelectedImageId, setCanvasSelectedImageId] = useState('');
+  const [canvasText, setCanvasText] = useState('คำเตือน การลงทุนมีความเสี่ยง');
+  const [canvasTextX, setCanvasTextX] = useState(50);
+  const [canvasTextY, setCanvasTextY] = useState(90);
+  const [canvasTextSize, setCanvasTextSize] = useState(4.2);
+  const [canvasTextColor, setCanvasTextColor] = useState('#ffffff');
+  const [canvasAccentColor, setCanvasAccentColor] = useState('#f59e0b');
+  const [canvasTextEffect, setCanvasTextEffect] = useState<'shadow' | 'outline' | 'bar' | 'badge' | 'none'>('bar');
+  const [canvasActiveLayer, setCanvasActiveLayer] = useState<'text' | 'logo'>('text');
+  const [canvasLogoDataUrl, setCanvasLogoDataUrl] = useState('');
+  const [canvasLogoX, setCanvasLogoX] = useState(88);
+  const [canvasLogoY, setCanvasLogoY] = useState(10);
+  const [canvasLogoSize, setCanvasLogoSize] = useState(12);
+  const canvasPreviewRef = useRef<HTMLCanvasElement>(null);
   const [settings, setSettings] = useState<OutputSettings>(() => {
     try {
       return { ...DEFAULT_OUTPUT_SETTINGS, ...JSON.parse(localStorage.getItem(OUTPUT_SETTINGS_KEY) || '{}') };
@@ -677,6 +743,14 @@ export function PageStockTab() {
   const localImageBrainRowsCount = useMemo(
     () => localImageBrainCsvText.trim() ? parseCsvTable(localImageBrainCsvText).length : 0,
     [localImageBrainCsvText],
+  );
+  const selectedCanvasImage = useMemo(
+    () => canvasImages.find(image => image.id === canvasSelectedImageId) || canvasImages[0],
+    [canvasImages, canvasSelectedImageId],
+  );
+  const canvasSelectedCount = useMemo(
+    () => canvasImages.filter(image => image.selected).length,
+    [canvasImages],
   );
 
   useEffect(() => {
@@ -1626,6 +1700,174 @@ ${NO_AI_PREAMBLE_RULE}
     URL.revokeObjectURL(link.href);
   };
 
+  const handleCanvasFolderUpload = async (files?: FileList | null) => {
+    if (!files?.length) return;
+    const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
+    const nextImages = await Promise.all(imageFiles.map(async (file, index) => {
+      const dataUrl = await readFileAsDataUrl(file);
+      const img = await loadCanvasImage(dataUrl);
+      return {
+        id: `stock-canvas-${Date.now()}-${index}-${file.name}`,
+        fileName: file.name,
+        dataUrl,
+        width: img.naturalWidth || img.width,
+        height: img.naturalHeight || img.height,
+        selected: true,
+      };
+    }));
+    setCanvasImages(nextImages);
+    setCanvasSelectedImageId(nextImages[0]?.id || '');
+  };
+
+  const handleCanvasLogoUpload = async (file?: File | null) => {
+    if (!file) return;
+    setCanvasLogoDataUrl(await readFileAsDataUrl(file));
+  };
+
+  const setCanvasTextPreset = (preset: string) => {
+    const presets: Record<string, [number, number]> = {
+      'top-left': [12, 10],
+      'top-center': [50, 10],
+      'top-right': [88, 10],
+      'center': [50, 50],
+      'bottom-left': [12, 90],
+      'bottom-center': [50, 90],
+      'bottom-right': [88, 90],
+    };
+    const next = presets[preset];
+    if (next) {
+      setCanvasTextX(next[0]);
+      setCanvasTextY(next[1]);
+    }
+  };
+
+  const setCanvasLogoPreset = (preset: string) => {
+    const presets: Record<string, [number, number]> = {
+      'top-left': [10, 10],
+      'top-right': [90, 10],
+      'bottom-left': [10, 90],
+      'bottom-right': [90, 90],
+      'center': [50, 50],
+    };
+    const next = presets[preset];
+    if (next) {
+      setCanvasLogoX(next[0]);
+      setCanvasLogoY(next[1]);
+    }
+  };
+
+  const renderStockCanvasImage = async (image: StockCanvasImage, targetCanvas?: HTMLCanvasElement) => {
+    const canvas = targetCanvas || document.createElement('canvas');
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas ไม่พร้อมใช้งาน');
+    const base = await loadCanvasImage(image.dataUrl);
+    ctx.clearRect(0, 0, image.width, image.height);
+    ctx.drawImage(base, 0, 0, image.width, image.height);
+
+    if (canvasText.trim()) {
+      const fontSize = Math.max(18, Math.round(image.width * (canvasTextSize / 100)));
+      const x = image.width * (canvasTextX / 100);
+      const y = image.height * (canvasTextY / 100);
+      const maxWidth = image.width * 0.82;
+      ctx.font = `700 ${fontSize}px "Noto Sans Thai", "Sarabun", sans-serif`;
+      ctx.textAlign = canvasTextX < 25 ? 'left' : canvasTextX > 75 ? 'right' : 'center';
+      ctx.textBaseline = 'middle';
+      const lines = wrapCanvasLines(ctx, canvasText, maxWidth);
+      const lineHeight = fontSize * 1.28;
+      const blockH = lines.length * lineHeight;
+      const widest = Math.min(maxWidth, Math.max(...lines.map(line => ctx.measureText(line).width), 0));
+      const alignOffset = ctx.textAlign === 'left' ? widest / 2 : ctx.textAlign === 'right' ? -widest / 2 : 0;
+      if (canvasTextEffect === 'bar' || canvasTextEffect === 'badge') {
+        const padX = fontSize * (canvasTextEffect === 'badge' ? 0.9 : 1.1);
+        const padY = fontSize * 0.55;
+        const bgX = x + alignOffset - widest / 2 - padX;
+        const bgY = y - blockH / 2 - padY;
+        const bgW = widest + padX * 2;
+        const bgH = blockH + padY * 2;
+        ctx.fillStyle = canvasTextEffect === 'badge' ? canvasAccentColor : 'rgba(0,0,0,0.68)';
+        ctx.beginPath();
+        ctx.roundRect(bgX, bgY, bgW, bgH, canvasTextEffect === 'badge' ? fontSize * 0.45 : 0);
+        ctx.fill();
+        if (canvasTextEffect === 'bar') {
+          ctx.fillStyle = canvasAccentColor;
+          ctx.fillRect(bgX, bgY, Math.max(8, image.width * 0.01), bgH);
+        }
+      }
+      lines.forEach((line, index) => {
+        const lineY = y - blockH / 2 + lineHeight * index + lineHeight / 2;
+        if (canvasTextEffect === 'outline' || canvasTextEffect === 'shadow') {
+          ctx.strokeStyle = canvasTextEffect === 'outline' ? 'rgba(0,0,0,0.92)' : 'rgba(0,0,0,0.55)';
+          ctx.lineWidth = canvasTextEffect === 'outline' ? fontSize * 0.14 : fontSize * 0.08;
+          ctx.strokeText(line, x, lineY);
+        }
+        if (canvasTextEffect === 'shadow') {
+          ctx.shadowColor = 'rgba(0,0,0,0.75)';
+          ctx.shadowBlur = fontSize * 0.25;
+          ctx.shadowOffsetY = fontSize * 0.08;
+        }
+        ctx.fillStyle = canvasTextColor;
+        ctx.fillText(line, x, lineY);
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetY = 0;
+      });
+    }
+
+    if (canvasLogoDataUrl) {
+      const logo = await loadCanvasImage(canvasLogoDataUrl);
+      const logoW = image.width * (canvasLogoSize / 100);
+      const logoH = logoW * ((logo.naturalHeight || logo.height) / (logo.naturalWidth || logo.width));
+      const x = image.width * (canvasLogoX / 100) - logoW / 2;
+      const y = image.height * (canvasLogoY / 100) - logoH / 2;
+      ctx.drawImage(logo, x, y, logoW, logoH);
+    }
+
+    return canvas.toDataURL('image/png');
+  };
+
+  const drawStockCanvasPreview = async () => {
+    if (!selectedCanvasImage || !canvasPreviewRef.current) return;
+    await renderStockCanvasImage(selectedCanvasImage, canvasPreviewRef.current);
+  };
+
+  useEffect(() => {
+    drawStockCanvasPreview().catch(() => undefined);
+  }, [selectedCanvasImage, canvasText, canvasTextX, canvasTextY, canvasTextSize, canvasTextColor, canvasAccentColor, canvasTextEffect, canvasLogoDataUrl, canvasLogoX, canvasLogoY, canvasLogoSize]);
+
+  const handleCanvasPreviewClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = event.currentTarget;
+    const rect = canvas.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / rect.width) * 100;
+    const y = ((event.clientY - rect.top) / rect.height) * 100;
+    if (canvasActiveLayer === 'logo') {
+      setCanvasLogoX(Math.max(0, Math.min(100, x)));
+      setCanvasLogoY(Math.max(0, Math.min(100, y)));
+    } else {
+      setCanvasTextX(Math.max(0, Math.min(100, x)));
+      setCanvasTextY(Math.max(0, Math.min(100, y)));
+    }
+  };
+
+  const downloadStockCanvasImage = async (image?: StockCanvasImage) => {
+    const target = image || selectedCanvasImage;
+    if (!target) return;
+    const dataUrl = await renderStockCanvasImage(target);
+    const link = document.createElement('a');
+    link.href = dataUrl;
+    link.download = `${target.fileName.replace(/\.[^.]+$/, '')}_canvas.png`;
+    link.click();
+  };
+
+  const downloadAllStockCanvasImages = async () => {
+    const targets = canvasImages.filter(image => image.selected);
+    for (const image of targets) {
+      await downloadStockCanvasImage(image);
+      await wait(250);
+    }
+  };
+
   const createKieImage = async (prompt: string, log: (message: string) => Promise<void>, label = 'หลัก') => {
     if (!activeProfile?.kieKey) throw new Error('ไม่พบ KIE API Key');
     const createRes = await fetch('/api/kie-create', {
@@ -2058,6 +2300,15 @@ ${NO_AI_PREAMBLE_RULE}
           aria-selected={builderTab === 'local-image-article'}
         >
           เขียนบทความจากรูป Dropbox
+        </button>
+        <button
+          type="button"
+          className={builderTab === 'canvas' ? 'active' : ''}
+          onClick={() => setBuilderTab('canvas')}
+          role="tab"
+          aria-selected={builderTab === 'canvas'}
+        >
+          Canvas
         </button>
       </div>
 
@@ -2532,7 +2783,7 @@ ${NO_AI_PREAMBLE_RULE}
             </div>
           </div>
         </section>
-      ) : (
+      ) : builderTab === 'local-image-article' ? (
         <section className="page-stock-panel page-stock-manual-prompt">
           <div className="page-stock-panel-head">
             <h2>เขียนบทความจากรูป Dropbox</h2>
@@ -2763,6 +3014,159 @@ ${NO_AI_PREAMBLE_RULE}
                 </button>
                 <button disabled={localImageDoneCount === 0} onClick={downloadLocalImageArticleCsv}>
                   Export CSV
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      ) : (
+        <section className="page-stock-panel page-stock-manual-prompt">
+          <div className="page-stock-panel-head">
+            <h2>Canvas</h2>
+            <span>{canvasImages.length} รูป · เลือกอยู่ {canvasSelectedCount}</span>
+          </div>
+          <div className="page-stock-manual-grid">
+            <div className="page-stock-manual-card">
+              <h3>1. เลือกโฟลเดอร์รูป</h3>
+              <p>เลือกรูปที่สร้างเสร็จจากเครื่อง ระบบจะ export เป็น PNG ขนาดเดิมของแต่ละรูป เช่น 1080x1080 ก็ออก 1080x1080</p>
+              <label className="page-stock-upload">
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  {...({ webkitdirectory: '', directory: '' } as any)}
+                  onChange={event => {
+                    handleCanvasFolderUpload(event.target.files);
+                    event.currentTarget.value = '';
+                  }}
+                />
+                <span>เลือก Folder รูป</span>
+              </label>
+              <div className="page-stock-manual-actions">
+                <button disabled={canvasImages.length === 0} onClick={() => setCanvasImages(prev => prev.map(image => ({ ...image, selected: true })))}>
+                  เลือกทั้งหมด
+                </button>
+                <button disabled={canvasImages.length === 0} onClick={() => setCanvasImages(prev => prev.map(image => ({ ...image, selected: false })))}>
+                  ยกเลิกทั้งหมด
+                </button>
+                <button className="page-stock-danger" disabled={canvasImages.length === 0} onClick={() => { setCanvasImages([]); setCanvasSelectedImageId(''); }}>
+                  ล้างรูป
+                </button>
+              </div>
+              <div className="page-stock-result-list page-stock-prompt-results" style={{ maxHeight: 420, overflow: 'auto' }}>
+                {canvasImages.length === 0 ? (
+                  <em>ยังไม่มีรูปจากโฟลเดอร์</em>
+                ) : canvasImages.map(image => (
+                  <article key={image.id} onClick={() => setCanvasSelectedImageId(image.id)} style={{ cursor: 'pointer', borderColor: selectedCanvasImage?.id === image.id ? 'var(--accent-color)' : undefined }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '72px 1fr', gap: 12, alignItems: 'center' }}>
+                      <img src={image.dataUrl} alt="" style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 8 }} />
+                      <div>
+                        <label style={{ display: 'flex', gap: 10, alignItems: 'center' }} onClick={event => event.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={image.selected}
+                            onChange={event => setCanvasImages(prev => prev.map(item => item.id === image.id ? { ...item, selected: event.target.checked } : item))}
+                          />
+                          <strong>{image.fileName}</strong>
+                        </label>
+                        <p>{image.width}x{image.height}</p>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+
+            <div className="page-stock-manual-card">
+              <h3>2. ข้อความ / Logo</h3>
+              <label>
+                <span>ข้อความบนรูป</span>
+                <textarea
+                  className="page-stock-textarea"
+                  value={canvasText}
+                  onChange={event => setCanvasText(event.target.value)}
+                  placeholder="เช่น คำเตือน การลงทุนมีความเสี่ยง"
+                />
+              </label>
+              <div className="page-stock-manual-actions">
+                <button className={canvasActiveLayer === 'text' ? 'page-stock-primary' : ''} onClick={() => setCanvasActiveLayer('text')}>วางข้อความ</button>
+                <button className={canvasActiveLayer === 'logo' ? 'page-stock-primary' : ''} onClick={() => setCanvasActiveLayer('logo')}>วาง Logo</button>
+              </div>
+              <label>
+                <span>ตำแหน่งข้อความ</span>
+                <select className="page-stock-manual-input" onChange={event => setCanvasTextPreset(event.target.value)} defaultValue="bottom-center">
+                  <option value="top-left">บนซ้าย</option>
+                  <option value="top-center">บนกลาง</option>
+                  <option value="top-right">บนขวา</option>
+                  <option value="center">กลาง</option>
+                  <option value="bottom-left">ล่างซ้าย</option>
+                  <option value="bottom-center">ล่างกลาง</option>
+                  <option value="bottom-right">ล่างขวา</option>
+                </select>
+              </label>
+              <label><span>X ข้อความ {canvasTextX.toFixed(0)}%</span><input type="range" min="0" max="100" value={canvasTextX} onChange={event => setCanvasTextX(Number(event.target.value))} /></label>
+              <label><span>Y ข้อความ {canvasTextY.toFixed(0)}%</span><input type="range" min="0" max="100" value={canvasTextY} onChange={event => setCanvasTextY(Number(event.target.value))} /></label>
+              <label><span>ขนาดตัวอักษร {canvasTextSize.toFixed(1)}%</span><input type="range" min="1.6" max="10" step="0.1" value={canvasTextSize} onChange={event => setCanvasTextSize(Number(event.target.value))} /></label>
+              <label>
+                <span>เอฟเฟกต์ตัวอักษร</span>
+                <select className="page-stock-manual-input" value={canvasTextEffect} onChange={event => setCanvasTextEffect(event.target.value as any)}>
+                  <option value="bar">แถบดำ + เส้นสี</option>
+                  <option value="badge">ป้ายสี</option>
+                  <option value="outline">ขอบดำ</option>
+                  <option value="shadow">เงา</option>
+                  <option value="none">ไม่มี</option>
+                </select>
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <label><span>สีตัวอักษร</span><input type="color" value={canvasTextColor} onChange={event => setCanvasTextColor(event.target.value)} /></label>
+                <label><span>สีแถบ/ป้าย</span><input type="color" value={canvasAccentColor} onChange={event => setCanvasAccentColor(event.target.value)} /></label>
+              </div>
+              <label>
+                <span>Logo</span>
+                <label className="page-stock-upload">
+                  <input type="file" accept="image/*" onChange={event => handleCanvasLogoUpload(event.target.files?.[0])} />
+                  <span>{canvasLogoDataUrl ? 'เปลี่ยน Logo' : 'อัปโหลด Logo'}</span>
+                </label>
+              </label>
+              {canvasLogoDataUrl && (
+                <>
+                  <div className="page-stock-manual-actions">
+                    <button onClick={() => setCanvasLogoDataUrl('')}>ลบ Logo</button>
+                    <button onClick={() => setCanvasLogoPreset('top-left')}>บนซ้าย</button>
+                    <button onClick={() => setCanvasLogoPreset('top-right')}>บนขวา</button>
+                    <button onClick={() => setCanvasLogoPreset('bottom-left')}>ล่างซ้าย</button>
+                    <button onClick={() => setCanvasLogoPreset('bottom-right')}>ล่างขวา</button>
+                  </div>
+                  <label><span>X Logo {canvasLogoX.toFixed(0)}%</span><input type="range" min="0" max="100" value={canvasLogoX} onChange={event => setCanvasLogoX(Number(event.target.value))} /></label>
+                  <label><span>Y Logo {canvasLogoY.toFixed(0)}%</span><input type="range" min="0" max="100" value={canvasLogoY} onChange={event => setCanvasLogoY(Number(event.target.value))} /></label>
+                  <label><span>ขนาด Logo {canvasLogoSize.toFixed(0)}%</span><input type="range" min="3" max="35" value={canvasLogoSize} onChange={event => setCanvasLogoSize(Number(event.target.value))} /></label>
+                </>
+              )}
+            </div>
+
+            <div className="page-stock-manual-card page-stock-manual-wide">
+              <div className="page-stock-manual-headline">
+                <h3>Preview และ Export</h3>
+                <span>{selectedCanvasImage ? `${selectedCanvasImage.width}x${selectedCanvasImage.height}` : 'ยังไม่เลือกรูป'}</span>
+              </div>
+              <p>คลิกบน Preview เพื่อย้ายตำแหน่ง layer ที่เลือกอยู่: {canvasActiveLayer === 'text' ? 'ข้อความ' : 'Logo'}</p>
+              <div style={{ display: 'flex', justifyContent: 'center', background: 'rgba(0,0,0,.32)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 8, padding: 16 }}>
+                {selectedCanvasImage ? (
+                  <canvas
+                    ref={canvasPreviewRef}
+                    onClick={handleCanvasPreviewClick}
+                    style={{ maxWidth: '100%', maxHeight: '72vh', borderRadius: 8, cursor: 'crosshair' }}
+                  />
+                ) : (
+                  <em>เลือกรูปจากโฟลเดอร์ก่อน</em>
+                )}
+              </div>
+              <div className="page-stock-manual-actions">
+                <button disabled={!selectedCanvasImage} onClick={() => downloadStockCanvasImage()}>
+                  Export รูปนี้
+                </button>
+                <button className="page-stock-primary" disabled={canvasSelectedCount === 0} onClick={downloadAllStockCanvasImages}>
+                  Export ทั้งหมดที่เลือก ({canvasSelectedCount})
                 </button>
               </div>
             </div>
