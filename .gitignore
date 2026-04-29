@@ -16,6 +16,7 @@ pnpm-debug.log*
 # Runtime/generated app data (keep folders, never commit contents)
 public/app_data/*
 !public/app_data/.gitkeep
+!public/app_data/page_stock_prompt_brains.json
 public/Image_stock/*
 !public/Image_stock/.gitkeep
 public/Sound_stock/*

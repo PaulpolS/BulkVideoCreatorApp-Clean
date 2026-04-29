@@ -1,0 +1,77 @@
+{
+  "Thailand-ai ล่าสุด": {
+    "pageName": "New GEN JADE: ศาสตร์แห่งหยก",
+    "updatedAt": "2026-04-28T16:06:13.613Z",
+    "sourceFileName": "Promptหยก - ชีต1.csv",
+    "sourceRowCount": 298,
+    "trendFileName": "เทรน.csv",
+    "trendRowCount": 1058,
+    "summary": "สมองนี้ถูกออกแบบมาเพื่อสร้างคอนเทนต์เกี่ยวกับ 'หยก' โดยเฉพาะ โดยผสมผสานความรู้เชิงลึก (Gemology) เข้ากับความเชื่อและเรื่องราวมงคล (Feng Shui/Mythology) นำเสนอในรูปแบบ Infographic ที่มีสไตล์ 'Modern Chinese aesthetic' ดูทันสมัย หรูหรา และเข้าใจง่าย เหมาะสำหรับคนรุ่นใหม่ที่สนใจหยก",
+    "keywords": [
+      "หยก",
+      "Jade",
+      "กำไลหยก",
+      "หยกพม่า",
+      "วิธีดูหยกแท้",
+      "ความหมายหยก",
+      "ปี่เซียะหยก",
+      "หยกมงคล",
+      "หยกจักรพรรดิ",
+      "Jadeite",
+      "Nephrite",
+      "เครื่องประดับหยก"
+    ],
+    "contentAngles": [
+      "ให้ความรู้ (Educational): เปรียบเทียบชนิด, เกรด, สี, แหล่งกำเนิด, การอ่านใบเซอร์",
+      "ความเชื่อและสิ่งมงคล (Beliefs & Auspicious): ความหมายของสีและสัญลักษณ์ต่างๆ, หยกกับนักษัตร/ธาตุ, การเสริมดวง",
+      "ฮาวทูและไลฟ์สไตล์ (How-to & Lifestyle): วิธีวัดไซซ์, วิธีการใส่, การดูแลรักษา, การเลือกซื้อ",
+      "ไขข้อสงสัย (Myth-busting): หยกเปลี่ยนสีจริงไหม? หยกแตกหมายความว่าอะไร?",
+      "คอนเทนต์เชิงโต้ตอบ (Interactive - ตามเทรนด์): สร้างคอนเทนต์แนว 'เลือกหยก 1 ชิ้นเพื่อทำนาย...' หรือ 'ราศีของคุณเหมาะกับหยกแบบไหน' เพื่อเพิ่ม Engagement"
+    ],
+    "toneGuidelines": [
+      "น่าเชื่อถือและให้ความรู้: ใช้ข้อมูลที่ถูกต้อง อธิบายเรื่องยากให้เป็นเรื่องง่าย",
+      "ทันสมัยและหรูหรา (Modern & Sophisticated): ใช้คำที่แสดงถึงความพรีเมียม ไม่ดูโบราณ",
+      "เข้าถึงง่าย: ใช้หัวข้อเป็นคำถามที่คนสงสัย หรือประโยคสั้นๆ ที่ดึงดูดความสนใจ",
+      "แฝงความมงคล: สอดแทรกเรื่องราวความเชื่อและความเป็นมงคลเข้าไปในคอนเทนต์อย่างเป็นธรรมชาติ"
+    ],
+    "topicPatterns": [
+      "เปรียบเทียบ (X vs Y): เช่น 'หยกแข็ง vs หยกอ่อน', 'ตำหนิธรรมชาติ vs รอยร้าว'",
+      "ลิสต์รายการ (Listicles): เช่น '5 วิธีเช็กหยก', '3 ศัพท์วงการหยก'",
+      "ไขความหมาย (Symbolism): เช่น 'ความหมายมงคลของสีหยก', 'จักจั่นหยก: สัญลักษณ์แห่ง...'",
+      "ฮาวทู (How-to Guide): เช่น 'วิธีวัดไซซ์กำไลหยก', 'วิธีล้างหยกให้เงา'"
+    ],
+    "promptRules": [
+      "เริ่มต้นด้วย Format: 'Infographic square image, 1080x1080.' เสมอ",
+      "กำหนดสุนทรียศาสตร์หลัก: 'Modern Chinese aesthetic.' เป็นแกนกลาง อาจเสริมด้วย 'sophisticated', 'High Luxury' หรือ 'New GEN JADE style'",
+      "ระบุหัวข้อภาษาไทยชัดเจน: 'Title at top in Thai: \"[หัวข้อภาษาไทยที่ต้องการ]\"'",
+      "อธิบายองค์ประกอบภาพและ Layout: บรรยายการจัดวางอย่างละเอียด เช่น 'Split screen comparison', 'Five numbered circular sections', 'A central realistic mockup' พร้อมระบุว่าแต่ละส่วนมีภาพอะไร ไอคอนอะไร",
+      "ระบุข้อความประกอบ: ใช้คำว่า 'Thai text' เพื่อบอกให้ AI รู้ว่าจะมีข้อความภาษาไทยในส่วนต่างๆ เช่น 'Thai text labels', 'Thai text descriptions'",
+      "กำหนด Mood & Tone ของภาพ: ใช้คำคุณศัพท์ช่วย เช่น 'Clean and legible style', 'Elegant layout', 'Luxurious mood', 'Mystical but clean vibe'",
+      "อาจระบุสีหลัก: ถ้าต้องการคุมโทนสีเป็นพิเศษ ให้ระบุ เช่น 'Deep jade green and gold color palette.'"
+    ],
+    "visualStyleRules": [],
+    "negativeRules": [
+      "ห้ามใช้สไตล์จีนโบราณ จ๋าๆ หรือดูเก่า",
+      "ห้ามออกแบบให้ดูรกหรืออัดแน่นจนเกินไป",
+      "ห้ามใช้สีสันที่ฉูดฉาด ไม่เข้ากับโทนหรูหรา (เช่น สีสะท้อนแสง)",
+      "ห้ามใช้ภาพสต็อกที่ดูไม่สมจริงหรือคุณภาพต่ำ",
+      "รูปที่สร้างต้องไม่มีตัวอักษรภาษาอังกฤษที่ผิดเพี้ยน (หาก AI สร้างขึ้นมาเอง) ต้องเน้นการเว้นที่ว่างสำหรับใส่ข้อความไทย"
+    ],
+    "trendInsights": [
+      "ข้อมูล CSV เทรนด์ชี้ว่าคอนเทนต์ที่เกี่ยวกับการ 'ทำนาย' 'ทายนิสัย' และ 'ความเป็นส่วนตัว' (Personalization) ได้รับความนิยมสูงมาก เช่น ดูดวงตามราศี, วันเกิด, เลือกไพ่",
+      "กลยุทธ์ที่ควรทำคือการ 'ผสมผสาน' เรื่อง 'หยก' เข้ากับฟอร์แมตตามเทรนด์เหล่านี้",
+      "ตัวอย่างการประยุกต์: จากเดิมทำหัวข้อ 'หยกกับ 12 นักษัตร' ให้เปลี่ยนเป็น 'จัดอันดับ! 3 นักษัตรที่ใส่ \"กำไลหยก\" แล้วดวงการเงินพุ่งแรงที่สุด' เพื่อสร้างความน่าสนใจและกระตุ้นการมีส่วนร่วม",
+      "สร้างคอนเทนต์แนว 'Pick A Jade' (เลียนแบบ Pick A Card) โดยให้เลือกรูปหยก 1 ชิ้น แล้วทำนายดวงด้านต่างๆ เช่น การงาน, ความรัก, สุขภาพ เพื่อเพิ่ม Engagement ในคอมเมนต์"
+    ],
+    "examplePrompts": [
+      "Infographic square image, 1080x1080. Modern Chinese aesthetic, mystical and engaging. Title at top in Thai: \"เลือก 'หยก' 1 ชิ้น: ทำนายโชคลาภที่กำลังจะมาถึง\". Below the title, four different beautiful jade carvings are displayed on luxurious silk cushions, labeled A, B, C, D. A: A Jade Pixiu. B: A Jade Cicada. C: A Jade Ruyi scepter. D: A Jade Gourd (Wu Lou). The background is a dark, elegant jade green with subtle golden sparkles. The layout encourages user interaction.",
+      "Infographic square image, 1080x1080. Modern Chinese aesthetic, sophisticated 'New GEN JADE' style. Title at top in Thai: \"จัดอันดับ! 3 ราศีที่ 'หยก' เสริมดวงความรักได้ดีที่สุด\". A minimalist podium design with 1st, 2nd, and 3rd places. On each step, a beautiful jade pendant (e.g., heart-shaped, dragon & phoenix) is displayed next to a zodiac sign icon (e.g., Libra, Taurus, Pisces). Thai text descriptions below each. Elegant rose gold and light jade color palette.",
+      "Infographic square image, 1080x1080. Modern Chinese aesthetic. Title at top in Thai: \"หยกเนื้อน้ำแข็ง (Icy Jade) VS หยกเนื้อแอปเปิ้ล (Apple Green)\". A vertical split comparison. Left side header 'หยกเนื้อน้ำแข็ง (Icy Jade)' features a highly translucent, near-colorless jade bangle with a snowflake icon, symbolizing clarity and purity. Right side header 'หยกเนื้อแอปเปิ้ล (Apple Green)' features a vibrant, opaque, bright green jade pendant with an apple icon, symbolizing vitality. Thai text bullet points below each. Clean, high-contrast layout.",
+      "Infographic square image, 1080x1080. Modern Chinese aesthetic. Title at top in Thai: \"เช็คด่วน! หยกที่เหมาะกับ 'ธาตุ' ของคุณ (เสริมดวง x10)\". A central diagram of the Wu Xing (5 Elements) cycle. From each element (Wood, Fire, Earth, Metal, Water), an arrow points to a corresponding type/color of jade. E.g., Wood -> Green Jade, Water -> Black/Dark Jade, Metal -> White Jade. Icons for each element. Thai text explaining the synergy. Balanced and educational design."
+    ],
+    "feedbackNotes": [
+      "เรื่องรูปทรงหยกต่างๆอย่าทำออกมาเลย คือมันเป็นเพจขายหยกจริงๆ แล้วผมไม่ได้มีหยกที่หน้าตาแบบที่คุณสร้างมาให้ดูหรอก พยายามเลี่ยงรูปร่างนะ รูปทรงด้วย"
+    ],
+    "rawAnalysis": "```json\n{\n  \"pageName\": \"New GEN JADE: ศาสตร์แห่งหยก\",\n  \"summary\": \"สมองนี้ถูกออกแบบมาเพื่อสร้างคอนเทนต์เกี่ยวกับ 'หยก' โดยเฉพาะ โดยผสมผสานความรู้เชิงลึก (Gemology) เข้ากับความเชื่อและเรื่องราวมงคล (Feng Shui/Mythology) นำเสนอในรูปแบบ Infographic ที่มีสไตล์ 'Modern Chinese aesthetic' ดูทันสมัย หรูหรา และเข้าใจง่าย เหมาะสำหรับคนรุ่นใหม่ที่สนใจหยก\",\n  \"keywords\": [\n    \"หยก\",\n    \"Jade\",\n    \"กำไลหยก\",\n    \"หยกพม่า\",\n    \"วิธีดูหยกแท้\",\n    \"ความหมายหยก\",\n    \"ปี่เซียะหยก\",\n    \"หยกมงคล\",\n    \"หยกจักรพรรดิ\",\n    \"Jadeite\",\n    \"Nephrite\",\n    \"เครื่องประดับหยก\"\n  ],\n  \"contentAngles\": [\n    \"ให้ความรู้ (Educational): เปรียบเทียบชนิด, เกรด, สี, แหล่งกำเนิด, การอ่านใบเซอร์\",\n    \"ความเชื่อและสิ่งมงคล (Beliefs & Auspicious): ความหมายของสีและสัญลักษณ์ต่างๆ, หยกกับนักษัตร/ธาตุ, การเสริมดวง\",\n    \"ฮาวทูและไลฟ์สไตล์ (How-to & Lifestyle): วิธีวัดไซซ์, วิธีการใส่, การดูแลรักษา, การเลือกซื้อ\",\n    \"ไขข้อสงสัย (Myth-busting): หยกเปลี่ยนสีจริงไหม? หยกแตกหมายความว่าอะไร?\",\n    \"คอนเทนต์เชิงโต้ตอบ (Interactive - ตามเทรนด์): สร้างคอนเทนต์แนว 'เลือกหยก 1 ชิ้นเพื่อทำนาย...' หรือ 'ราศีของคุณเหมาะกับหยกแบบไหน' เพื่อเพิ่ม Engagement\"\n  ],\n  \"toneGuidelines\": [\n    \"น่าเชื่อถือและให้ความรู้: ใช้ข้อมูลที่ถูกต้อง อธิบายเรื่องยากให้เป็นเรื่องง่าย\",\n    \"ทันสมัยและหรูหรา (Modern & Sophisticated): ใช้คำที่แสดงถึงความพรีเมียม ไม่ดูโบราณ\",\n    \"เข้าถึงง่าย: ใช้หัวข้อเป็นคำถามที่คนสงสัย หรือประโยคสั้นๆ ที่ดึงดูดความสนใจ\",\n    \"แฝงความมงคล: สอดแทรกเรื่องราวความเชื่อและความเป็นมงคลเข้าไปในคอนเทนต์อย่างเป็นธรรมชาติ\"\n  ],\n  \"topicPatterns\": [\n    \"เปรียบเทียบ (X vs Y): เช่น 'หยกแข็ง vs หยกอ่อน', 'ตำหนิธรรมชาติ vs รอยร้าว'\",\n    \"ลิสต์รายการ (Listicles): เช่น '5 วิธีเช็กหยก', '3 ศัพท์วงการหยก'\",\n    \"ไขความหมาย (Symbolism): เช่น 'ความหมายมงคลของสีหยก', 'จักจั่นหยก: สัญลักษณ์แห่ง...'\",\n    \"ฮาวทู (How-to Guide): เช่น 'วิธีวัดไซซ์กำไลหยก', 'วิธีล้างหยกให้เงา'\"\n  ],\n  \"promptRules\": [\n    \"เริ่มต้นด้วย Format: 'Infographic square image, 1080x1080.' เสมอ\",\n    \"กำหนดสุนทรียศาสตร์หลัก: 'Modern Chinese aesthetic.' เป็นแกนกลาง อาจเสริมด้วย 'sophisticated', 'High Luxury' หรือ 'New GEN JADE style'\",\n    \"ระบุหัวข้อภาษาไทยชัดเจน: 'Title at top in Thai: \\\"[หัวข้อภาษาไทยที่ต้องการ]\\\"'\",\n    \"อธิบายองค์ประกอบภาพและ Layout: บรรยายการจัดวางอย่างละเอียด เช่น 'Split screen comparison', 'Five numbered circular sections', 'A central realistic mockup' พร้อมระบุว่าแต่ละส่วนมีภาพอะไร ไอคอนอะไร\",\n    \"ระบุข้อความประกอบ: ใช้คำว่า 'Thai text' เพื่อบอกให้ AI รู้ว่าจะมีข้อความภาษาไทยในส่วนต่างๆ เช่น 'Thai text labels', 'Thai text descriptions'\",\n    \"กำหนด Mood & Tone ของภาพ: ใช้คำคุณศัพท์ช่วย เช่น 'Clean and legible style', 'Elegant layout', 'Luxurious mood', 'Mystical but clean vibe'\",\n    \"อาจระบุสีหลัก: ถ้าต้องการคุมโทนสีเป็นพิเศษ ให้ระบุ เช่น 'Deep jade green and gold color palette.'\"\n  ],\n  \"visualStyleRules\": {\n    \"ภาพรวม (Overall Vibe)\": \"Modern Chinese, Minimalist Luxury, Clean, Elegant, Sophisticated\",\n    \"สี (Color Palette)\": \"เน้นสีเขียวหยก (Jade Green) และสีทอง (Gold) เป็นหลัก อาจใช้สีขาว, ดำ, หรือสีแดงเบอร์กันดี (Burgundy) มาตัดเพื่อความหรูหรา\",\n    \"องค์ประกอบ (Elements)\": \"ใช้ไอคอนที่ดูเรียบง่ายและทันสมัย, มีการใช้เส้นสายที่คมชัด, พื้นหลังมักมีลวดลายจีน (Chinese lattice/patterns) แบบจางๆ (subtle)\",\n    \"ฟอนต์ (Font)\": \"แม้ prompt ไม่ได้ระบุ แต่ควรเลือกฟอนต์ไทยที่ดูทันสมัย ไม่มีหัว อ่านง่าย เหมาะกับความเป็น 'New GEN'\",\n    \"Layout\": \"จัดวางอย่างเป็นระเบียบ มีพื้นที่ว่าง (white space) ไม่รก, สมดุล, เข้าใจง่ายในทันที ไม่ว่าจะเป็นแบบแบ่งช่อง, แบบตาราง, หรือมีวัตถุหลักตรงกลาง\",\n    \"อารมณ์ (Mood)\": \"น่าเชื่อถือ, ให้ความรู้, หรูหรา, สงบ, เป็นมงคล\"\n  },\n  \"negativeRules\": [\n    \"ห้ามใช้สไตล์จีนโบราณ จ๋าๆ หรือดูเก่า\",\n    \"ห้ามออกแบบให้ดูรกหรืออัดแน่นจนเกินไป\",\n    \"ห้ามใช้สีสันที่ฉูดฉาด ไม่เข้ากับโทนหรูหรา (เช่น สีสะท้อนแสง)\",\n    \"ห้ามใช้ภาพสต็อกที่ดูไม่สมจริงหรือคุณภาพต่ำ\",\n    \"รูปที่สร้างต้องไม่มีตัวอักษรภาษาอังกฤษที่ผิดเพี้ยน (หาก AI สร้างขึ้นมาเอง) ต้องเน้นการเว้นที่ว่างสำหรับใส่ข้อความไทย\"\n  ],\n  \"trendInsights\": [\n    \"ข้อมูล CSV เทรนด์ชี้ว่าคอนเทนต์ที่เกี่ยวกับการ 'ทำนาย' 'ทายนิสัย' และ 'ความเป็นส่วนตัว' (Personalization) ได้รับความนิยมสูงมาก เช่น ดูดวงตามราศี, วันเกิด, เลือกไพ่\",\n    \"กลยุทธ์ที่ควรทำคือการ 'ผสมผสาน' เรื่อง 'หยก' เข้ากับฟอร์แมตตามเทรนด์เหล่านี้\",\n    \"ตัวอย่างการประยุกต์: จากเดิมทำหัวข้อ 'หยกกับ 12 นักษัตร' ให้เปลี่ยนเป็น 'จัดอันดับ! 3 นักษัตรที่ใส่ \\\"กำไลหยก\\\" แล้วดวงการเงินพุ่งแรงที่สุด' เพื่อสร้างความน่าสนใจและกระตุ้นการมีส่วนร่วม\",\n    \"สร้างคอนเทนต์แนว 'Pick A Jade' (เลียนแบบ Pick A Card) โดยให้เลือกรูปหยก 1 ชิ้น แล้วทำนายดวงด้านต่างๆ เช่น การงาน, ความรัก, สุขภาพ เพื่อเพิ่ม Engagement ในคอมเมนต์\"\n  ],\n  \"examplePrompts\": [\n    \"Infographic square image, 1080x1080. Modern Chinese aesthetic, mystical and engaging. Title at top in Thai: \\\"เลือก 'หยก' 1 ชิ้น: ทำนายโชคลาภที่กำลังจะมาถึง\\\". Below the title, four different beautiful jade carvings are displayed on luxurious silk cushions, labeled A, B, C, D. A: A Jade Pixiu. B: A Jade Cicada. C: A Jade Ruyi scepter. D: A Jade Gourd (Wu Lou). The background is a dark, elegant jade green with subtle golden sparkles. The layout encourages user interaction.\",\n    \"Infographic square image, 1080x1080. Modern Chinese aesthetic, sophisticated 'New GEN JADE' style. Title at top in Thai: \\\"จัดอันดับ! 3 ราศีที่ 'หยก' เสริมดวงความรักได้ดีที่สุด\\\". A minimalist podium design with 1st, 2nd, and 3rd places. On each step, a beautiful jade pendant (e.g., heart-shaped, dragon & phoenix) is displayed next to a zodiac sign icon (e.g., Libra, Taurus, Pisces). Thai text descriptions below each. Elegant rose gold and light jade color palette.\",\n    \"Infographic square image, 1080x1080. Modern Chinese aesthetic. Title at top in Thai: \\\"หยกเนื้อน้ำแข็ง (Icy Jade) VS หยกเนื้อแอปเปิ้ล (Apple Green)\\\". A vertical split comparison. Left side header 'หยกเนื้อน้ำแข็ง (Icy Jade)' features a highly translucent, near-colorless jade bangle with a snowflake icon, symbolizing clarity and purity. Right side header 'หยกเนื้อแอปเปิ้ล (Apple Green)' features a vibrant, opaque, bright green jade pendant with an apple icon, symbolizing vitality. Thai text bullet points below each. Clean, high-contrast layout.\",\n    \"Infographic square image, 1080x1080. Modern Chinese aesthetic. Title at top in Thai: \\\"เช็คด่วน! หยกที่เหมาะกับ 'ธาตุ' ของคุณ (เสริมดวง x10)\\\". A central diagram of the Wu Xing (5 Elements) cycle. From each element (Wood, Fire, Earth, Metal, Water), an arrow points to a corresponding type/color of jade. E.g., Wood -> Green Jade, Water -> Black/Dark Jade, Metal -> White Jade. Icons for each element. Thai text explaining the synergy. Balanced and educational design.\"\n  ]\n}\n```"
+  }
+}
