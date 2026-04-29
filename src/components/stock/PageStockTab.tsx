@@ -120,6 +120,23 @@ interface LocalImageArticleItem {
   selected: boolean;
 }
 
+interface LocalImageArticleBrain {
+  name: string;
+  updatedAt: string;
+  sourceFileName?: string;
+  sourceRowCount: number;
+  summary: string;
+  writingPrompt: string;
+  audienceInsights: string[];
+  toneGuidelines: string[];
+  structureRules: string[];
+  productSignals: string[];
+  captionExamples: string[];
+  negativeRules: string[];
+  feedbackNotes: string[];
+  rawAnalysis?: string;
+}
+
 const workflowNodes = (workflow as any).nodes ?? [];
 
 function extractPageConfigs(): PageConfig[] {
@@ -141,6 +158,7 @@ const OUTPUT_SETTINGS_KEY = 'page_stock_output_settings';
 const MANUAL_PROMPT_BRAINS_KEY = 'page_stock_prompt_brains';
 const LOCAL_IMAGE_PROMPT_KEY = 'page_stock_local_image_article_prompt';
 const LOCAL_IMAGE_DROPBOX_PATH_KEY = 'page_stock_local_image_dropbox_path';
+const LOCAL_IMAGE_ARTICLE_BRAINS_KEY = 'page_stock_local_image_article_brains';
 
 const DEFAULT_LOCAL_IMAGE_ARTICLE_PROMPT = `## สินค้าหยก
 Role: คุณคือเจ้าของร้านหยกประสบการณ์สูงที่เน้นการขายแบบ "Short & Sharp" (สั้น กระชับ ได้ใจความ) สไตล์ของคุณคือ ตรงไปตรงมา จริงใจ บอกสเปกชัดเจน และเน้นความคุ้มค่า
@@ -286,6 +304,25 @@ function normalizeManualBrain(brain: Partial<ManualPromptBrain> | undefined, fal
     negativeRules: asStringArray(brain?.negativeRules),
     trendInsights: asStringArray(brain?.trendInsights),
     examplePrompts: asStringArray(brain?.examplePrompts),
+    feedbackNotes: asStringArray(brain?.feedbackNotes),
+    rawAnalysis: brain?.rawAnalysis || '',
+  };
+}
+
+function normalizeArticleBrain(brain: Partial<LocalImageArticleBrain> | undefined, fallbackName = 'สมองเขียนโพส'): LocalImageArticleBrain {
+  return {
+    name: String(brain?.name || fallbackName),
+    updatedAt: String(brain?.updatedAt || new Date().toISOString()),
+    sourceFileName: brain?.sourceFileName || '',
+    sourceRowCount: Number(brain?.sourceRowCount || 0),
+    summary: String(brain?.summary || 'ยังไม่มีสรุปสมอง'),
+    writingPrompt: String(brain?.writingPrompt || DEFAULT_LOCAL_IMAGE_ARTICLE_PROMPT),
+    audienceInsights: asStringArray(brain?.audienceInsights),
+    toneGuidelines: asStringArray(brain?.toneGuidelines),
+    structureRules: asStringArray(brain?.structureRules),
+    productSignals: asStringArray(brain?.productSignals),
+    captionExamples: asStringArray(brain?.captionExamples),
+    negativeRules: asStringArray(brain?.negativeRules),
     feedbackNotes: asStringArray(brain?.feedbackNotes),
     rawAnalysis: brain?.rawAnalysis || '',
   };
@@ -498,8 +535,14 @@ export function PageStockTab() {
   const [localImagePrompt, setLocalImagePrompt] = useState(() => localStorage.getItem(LOCAL_IMAGE_PROMPT_KEY) || DEFAULT_LOCAL_IMAGE_ARTICLE_PROMPT);
   const [localImageDropboxPath, setLocalImageDropboxPath] = useState(() => localStorage.getItem(LOCAL_IMAGE_DROPBOX_PATH_KEY) || '');
   const [localImageItems, setLocalImageItems] = useState<LocalImageArticleItem[]>([]);
+  const [localImageBrains, setLocalImageBrains] = useState<Record<string, LocalImageArticleBrain>>({});
+  const [localImageBrainKey, setLocalImageBrainKey] = useState('');
+  const [localImageBrainCsvName, setLocalImageBrainCsvName] = useState('');
+  const [localImageBrainCsvText, setLocalImageBrainCsvText] = useState('');
+  const [localImageBrainFeedback, setLocalImageBrainFeedback] = useState('');
   const [localImageRunning, setLocalImageRunning] = useState(false);
   const [localImageScanning, setLocalImageScanning] = useState(false);
+  const [localImageBrainAnalyzing, setLocalImageBrainAnalyzing] = useState(false);
   const [localImageCopied, setLocalImageCopied] = useState(false);
   const localImageStopRef = useRef(false);
   const [settings, setSettings] = useState<OutputSettings>(() => {
@@ -585,6 +628,16 @@ export function PageStockTab() {
       .join('\n\n'),
     [localImageItems],
   );
+  const localImageBrain = useMemo(
+    () => localImageBrainKey && localImageBrains[localImageBrainKey]
+      ? normalizeArticleBrain(localImageBrains[localImageBrainKey], localImageBrainKey)
+      : undefined,
+    [localImageBrainKey, localImageBrains],
+  );
+  const localImageBrainRowsCount = useMemo(
+    () => localImageBrainCsvText.trim() ? parseCsvTable(localImageBrainCsvText).length : 0,
+    [localImageBrainCsvText],
+  );
 
   useEffect(() => {
     fetch('/api/get-app-data?key=api_profiles')
@@ -640,6 +693,37 @@ export function PageStockTab() {
             );
             setManualBrains(normalized);
             setManualBrainKey(prev => prev || Object.keys(normalized)[0] || '');
+          }
+        } catch {}
+      });
+  }, []);
+
+  useEffect(() => {
+    fetch(`/api/get-app-data?key=${LOCAL_IMAGE_ARTICLE_BRAINS_KEY}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data && typeof data === 'object' && !Array.isArray(data)) {
+          const normalized = Object.fromEntries(
+            Object.entries(data).map(([key, brain]) => [key, normalizeArticleBrain(brain as Partial<LocalImageArticleBrain>, key)]),
+          );
+          setLocalImageBrains(normalized);
+          const firstKey = Object.keys(normalized)[0] || '';
+          setLocalImageBrainKey(prev => prev || firstKey);
+          if (firstKey && !localStorage.getItem(LOCAL_IMAGE_PROMPT_KEY)) {
+            setLocalImagePrompt((normalized as Record<string, LocalImageArticleBrain>)[firstKey].writingPrompt);
+          }
+        }
+      })
+      .catch(() => {
+        try {
+          const data = JSON.parse(localStorage.getItem(LOCAL_IMAGE_ARTICLE_BRAINS_KEY) || '{}');
+          if (data && typeof data === 'object' && !Array.isArray(data)) {
+            const normalized = Object.fromEntries(
+              Object.entries(data).map(([key, brain]) => [key, normalizeArticleBrain(brain as Partial<LocalImageArticleBrain>, key)]),
+            );
+            setLocalImageBrains(normalized);
+            const firstKey = Object.keys(normalized)[0] || '';
+            setLocalImageBrainKey(prev => prev || firstKey);
           }
         } catch {}
       });
@@ -739,6 +823,16 @@ export function PageStockTab() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key: MANUAL_PROMPT_BRAINS_KEY, data: nextBrains }),
+    }).catch(() => undefined);
+  };
+
+  const saveLocalImageBrains = async (nextBrains: Record<string, LocalImageArticleBrain>) => {
+    setLocalImageBrains(nextBrains);
+    localStorage.setItem(LOCAL_IMAGE_ARTICLE_BRAINS_KEY, JSON.stringify(nextBrains));
+    await fetch('/api/save-app-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: LOCAL_IMAGE_ARTICLE_BRAINS_KEY, data: nextBrains }),
     }).catch(() => undefined);
   };
 
@@ -1037,6 +1131,128 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
     link.download = `manual-image-prompts-${manualBrain?.pageName || manualBrainKey || 'page'}-${Date.now()}.csv`;
     link.click();
     URL.revokeObjectURL(link.href);
+  };
+
+  const handleLocalImageBrainCsvUpload = async (file?: File | null) => {
+    if (!file) return;
+    const text = await file.text();
+    const brainKey = createManualBrainKey(file.name);
+    setLocalImageBrainCsvName(file.name);
+    setLocalImageBrainCsvText(text);
+    setLocalImageBrainKey(brainKey);
+  };
+
+  const applyLocalImageBrain = (key: string) => {
+    setLocalImageBrainKey(key);
+    const brain = localImageBrains[key];
+    if (brain?.writingPrompt) setLocalImagePrompt(brain.writingPrompt);
+  };
+
+  const startAnalyzeLocalImageBrainCsv = () => {
+    if (!localImageBrainCsvText.trim() || !getOpenRouterKeyForLocalImage() || localImageBrainAnalyzing) return;
+    const brainKey = localImageBrainKey || createManualBrainKey(localImageBrainCsvName || 'สมองเขียนโพส');
+    const rows = parseCsvTable(localImageBrainCsvText);
+    const messySample = localImageBrainCsvText.slice(0, 42000);
+    const tableSample = JSON.stringify(rows.slice(0, 120), null, 2).slice(0, 32000);
+    setLocalImageBrainKey(brainKey);
+    setLocalImageBrainAnalyzing(true);
+    globalTaskStore.enqueueTask({
+      id: `local-image-brain-${Date.now()}`,
+      title: `🧠 สร้างสมองเขียนโพส: ${brainKey}`,
+      category: 'page-stock-local-image',
+      progress: 'เตรียมอ่าน CSV ตัวอย่างโพส',
+    }, async ctx => {
+      try {
+        ctx.log(`1/6 อ่าน CSV: ${localImageBrainCsvName || 'ไฟล์อัปโหลด'} (${rows.length} แถวจาก parser, raw ${localImageBrainCsvText.length.toLocaleString()} ตัวอักษร)`);
+        ctx.log('2/6 ส่งทั้ง raw CSV และ parsed rows ให้ AI แกะ แม้ไฟล์จัดระเบียบไม่ดี');
+        const answer = await askOpenRouter(`คุณคือ Senior Content Strategist ที่เชี่ยวชาญการสร้าง "สมองเขียนโพสจากรูปสินค้า/รูปคอนเทนต์"
+
+เป้าหมาย:
+วิเคราะห์ CSV ตัวอย่างโพสนี้ให้ละเอียด แม้ CSV จะเละ คอลัมน์มั่ว ข้อมูลไม่เป็นระเบียบ หรือมีข้อความปนกัน คุณต้องเดาโครงสร้างและ pattern ให้ดีที่สุด
+
+ชื่อสมองเบื้องต้น: ${brainKey}
+
+RAW CSV SAMPLE:
+${messySample}
+
+PARSED ROWS SAMPLE:
+${tableSample}
+
+งานที่ต้องทำ:
+1. อ่านให้ออกว่าไฟล์นี้เป็นคอนเทนต์/สินค้าแนวไหน
+2. วิเคราะห์กลุ่มลูกค้า, จุดขาย, ภาษาที่ใช้, ความยาว, โครงสร้างโพส
+3. วิเคราะห์ว่าตอน AI เห็นรูป ควรจับสัญญาณอะไรจากภาพเพื่อเอามาเขียน
+4. สร้าง System Prompt สำหรับใช้กับ Vision AI ตอนอ่านรูป Dropbox แล้วเขียนโพส ต้องพร้อมนำไปใช้จริงทันที
+5. ยกตัวอย่างโพส/แคปชั่นที่น่าจะตรง pattern
+6. ใส่ข้อห้าม เช่น ห้ามแต่งราคา, ห้ามกล่าวเกินจริง, ห้ามใช้ markdown ถ้า pattern เดิมไม่ใช้
+
+ตอบ JSON เท่านั้น:
+{
+  "name": "ชื่อสมองสั้นๆ",
+  "summary": "สรุปว่าเข้าใจเพจ/สินค้า/สไตล์ยังไงอย่างละเอียด",
+  "writingPrompt": "System Prompt เต็มสำหรับให้ AI อ่านรูปแล้วเขียนโพส",
+  "audienceInsights": ["..."],
+  "toneGuidelines": ["..."],
+  "structureRules": ["..."],
+  "productSignals": ["สิ่งที่ต้องดูจากรูป"],
+  "captionExamples": ["ตัวอย่างโพส"],
+  "negativeRules": ["ข้อห้าม"]
+}`, ctx.signal);
+        ctx.log(`3/6 AI วิเคราะห์กลับมาแล้ว (${answer.length.toLocaleString()} ตัวอักษร)`);
+        const parsed = extractJsonPayload<any>(answer, {});
+        const brain = normalizeArticleBrain({
+          name: String(parsed.name || brainKey),
+          updatedAt: new Date().toISOString(),
+          sourceFileName: localImageBrainCsvName,
+          sourceRowCount: rows.length,
+          summary: String(parsed.summary || 'AI วิเคราะห์ CSV แล้ว แต่ไม่ได้ส่ง summary ชัดเจน'),
+          writingPrompt: String(parsed.writingPrompt || DEFAULT_LOCAL_IMAGE_ARTICLE_PROMPT),
+          audienceInsights: asStringArray(parsed.audienceInsights),
+          toneGuidelines: asStringArray(parsed.toneGuidelines),
+          structureRules: asStringArray(parsed.structureRules),
+          productSignals: asStringArray(parsed.productSignals),
+          captionExamples: asStringArray(parsed.captionExamples),
+          negativeRules: asStringArray(parsed.negativeRules),
+          feedbackNotes: localImageBrain?.feedbackNotes || [],
+          rawAnalysis: answer,
+        }, brainKey);
+        ctx.log('4/6 บันทึกสมองเขียนโพสลง app_data และ localStorage');
+        await saveLocalImageBrains({ ...localImageBrains, [brainKey]: brain });
+        setLocalImagePrompt(brain.writingPrompt);
+        ctx.log('5/6 ตั้ง Prompt ในแท็บนี้ให้ใช้สมองใหม่เรียบร้อย');
+        ctx.log('6/6 วิเคราะห์เสร็จ: เปิดดูรายละเอียดและพิมพ์ติชมเพื่อพัฒนาสมองต่อได้');
+      } finally {
+        setLocalImageBrainAnalyzing(false);
+      }
+    });
+  };
+
+  const saveLocalImageBrainFeedback = async () => {
+    if (!localImageBrain || !localImageBrainFeedback.trim()) return;
+    const note = localImageBrainFeedback.trim();
+    const nextBrain = normalizeArticleBrain({
+      ...localImageBrain,
+      updatedAt: new Date().toISOString(),
+      feedbackNotes: [...localImageBrain.feedbackNotes, note],
+      writingPrompt: `${localImageBrain.writingPrompt.trim()}
+
+Additional owner feedback to follow in future runs:
+- ${note}`,
+    }, localImageBrainKey);
+    await saveLocalImageBrains({ ...localImageBrains, [localImageBrainKey]: nextBrain });
+    setLocalImagePrompt(nextBrain.writingPrompt);
+    setLocalImageBrainFeedback('');
+  };
+
+  const deleteLocalImageBrain = async () => {
+    if (!localImageBrainKey || !localImageBrains[localImageBrainKey]) return;
+    if (!window.confirm(`ลบสมอง "${localImageBrains[localImageBrainKey].name || localImageBrainKey}" ใช่ไหม?`)) return;
+    const nextBrains = { ...localImageBrains };
+    delete nextBrains[localImageBrainKey];
+    await saveLocalImageBrains(nextBrains);
+    const nextKey = Object.keys(nextBrains)[0] || '';
+    setLocalImageBrainKey(nextKey);
+    if (nextKey) setLocalImagePrompt(nextBrains[nextKey].writingPrompt);
   };
 
   const getOpenRouterKeyForLocalImage = () => {
@@ -2269,14 +2485,99 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
 
             <div className="page-stock-manual-card">
               <h3>2. Prompt/สมองแบบรันบอท Flow</h3>
-              <p>แก้ Prompt ตรงนี้ได้เลย ระบบจะจำไว้ในเครื่อง และใช้ OpenRouter จาก Profile ที่เลือกอยู่</p>
+              <p>เลือกสมองเขียนโพส หรืออัปโหลด CSV ตัวอย่างให้ AI แกะ pattern แล้วสร้างสมองใหม่ได้</p>
+              {Object.keys(localImageBrains).length > 0 && (
+                <label>
+                  <span>เลือกสมองเขียนโพส</span>
+                  <select
+                    className="page-stock-manual-input"
+                    value={localImageBrainKey}
+                    onChange={event => applyLocalImageBrain(event.target.value)}
+                  >
+                    {Object.entries(localImageBrains).map(([key, brain]) => (
+                      <option key={key} value={key}>{brain.name || key}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <label>
+                <span>สร้างสมองใหม่จาก CSV ตัวอย่างโพส</span>
+                <label className="page-stock-upload">
+                  <input
+                    type="file"
+                    accept=".csv,text/csv"
+                    onChange={event => handleLocalImageBrainCsvUpload(event.target.files?.[0])}
+                  />
+                  <span>{localImageBrainCsvName || 'เลือกไฟล์ CSV ที่เคยใช้เขียนโพส'}</span>
+                </label>
+              </label>
+              {localImageBrainCsvText.trim() && (
+                <div className="page-stock-trend-box">
+                  <strong>พร้อมวิเคราะห์ CSV</strong>
+                  <span>{localImageBrainRowsCount} แถว · {localImageBrainCsvName}</span>
+                </div>
+              )}
+              <div className="page-stock-manual-actions">
+                <button
+                  className="page-stock-primary"
+                  disabled={!localImageBrainCsvText.trim() || !getOpenRouterKeyForLocalImage() || localImageBrainAnalyzing}
+                  onClick={startAnalyzeLocalImageBrainCsv}
+                >
+                  {localImageBrainAnalyzing ? 'กำลังวิเคราะห์...' : 'วิเคราะห์ CSV และ Save เป็นสมอง'}
+                </button>
+                <button
+                  className="page-stock-danger"
+                  disabled={!localImageBrain}
+                  onClick={deleteLocalImageBrain}
+                >
+                  ลบสมองนี้
+                </button>
+              </div>
+              {localImageBrain && (
+                <div className="page-stock-brain-box">
+                  <strong>{localImageBrain.summary}</strong>
+                  <span>{localImageBrain.sourceRowCount} แถว · อัปเดต {new Date(localImageBrain.updatedAt).toLocaleString('th-TH')}</span>
+                </div>
+              )}
               <textarea
                 className="page-stock-textarea page-stock-feedback"
                 value={localImagePrompt}
                 onChange={event => setLocalImagePrompt(event.target.value)}
                 placeholder="ใส่ System Prompt สำหรับให้ AI อ่านรูปและเขียนบทความ"
               />
+              {localImageBrain && (
+                <div className="page-stock-brain-detail-grid">
+                  <article>
+                    <h4>กลุ่มลูกค้า/บริบท</h4>
+                    <ul>{(localImageBrain.audienceInsights.length ? localImageBrain.audienceInsights : ['ยังไม่มีข้อมูล']).slice(0, 5).map((item, index) => <li key={index}>{item}</li>)}</ul>
+                  </article>
+                  <article>
+                    <h4>สำนวน</h4>
+                    <ul>{(localImageBrain.toneGuidelines.length ? localImageBrain.toneGuidelines : ['ยังไม่มีข้อมูล']).slice(0, 5).map((item, index) => <li key={index}>{item}</li>)}</ul>
+                  </article>
+                  <article>
+                    <h4>โครงสร้างโพส</h4>
+                    <ul>{(localImageBrain.structureRules.length ? localImageBrain.structureRules : ['ยังไม่มีข้อมูล']).slice(0, 5).map((item, index) => <li key={index}>{item}</li>)}</ul>
+                  </article>
+                  <article>
+                    <h4>สิ่งที่ต้องดูจากรูป</h4>
+                    <ul>{(localImageBrain.productSignals.length ? localImageBrain.productSignals : ['ยังไม่มีข้อมูล']).slice(0, 5).map((item, index) => <li key={index}>{item}</li>)}</ul>
+                  </article>
+                </div>
+              )}
+              <textarea
+                className="page-stock-textarea"
+                value={localImageBrainFeedback}
+                onChange={event => setLocalImageBrainFeedback(event.target.value)}
+                placeholder="ติชม/สอนสมองเพิ่ม เช่น ต้องขายนุ่มกว่านี้, ห้ามใส่ราคาเอง, ให้ขึ้นต้นด้วยจุดเด่นจากภาพ..."
+              />
               <div className="page-stock-manual-actions">
+                <button
+                  disabled={!localImageBrain || !localImageBrainFeedback.trim()}
+                  onClick={saveLocalImageBrainFeedback}
+                >
+                  Save Feedback เข้าสมอง
+                </button>
                 <button
                   className="page-stock-primary"
                   disabled={localImageRunning || localImageSelectedCount === 0 || !getOpenRouterKeyForLocalImage()}
