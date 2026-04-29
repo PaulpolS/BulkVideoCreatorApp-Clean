@@ -159,6 +159,14 @@ const MANUAL_PROMPT_BRAINS_KEY = 'page_stock_prompt_brains';
 const LOCAL_IMAGE_PROMPT_KEY = 'page_stock_local_image_article_prompt';
 const LOCAL_IMAGE_DROPBOX_PATH_KEY = 'page_stock_local_image_dropbox_path';
 const LOCAL_IMAGE_ARTICLE_BRAINS_KEY = 'page_stock_local_image_article_brains';
+const LOCAL_IMAGE_ARTICLE_MODEL_KEY = 'page_stock_local_image_article_model';
+
+const LOCAL_IMAGE_ARTICLE_MODELS = [
+  { id: 'google/gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite · ถูกสุด', note: '$0.10 / $0.40 ต่อ 1M token' },
+  { id: 'google/gemini-2.0-flash-lite-001', label: 'Gemini 2.0 Flash Lite · ประหยัดมาก', note: '$0.075 / $0.30 ต่อ 1M token' },
+  { id: 'openai/gpt-4o-mini', label: 'GPT-4o mini · เขียนดี ราคากลาง', note: '$0.15 / $0.60 ต่อ 1M token' },
+  { id: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash · สมดุล', note: '$0.30 / $2.50 ต่อ 1M token' },
+];
 
 const DEFAULT_LOCAL_IMAGE_ARTICLE_PROMPT = `## สินค้าหยก
 Role: คุณคือเจ้าของร้านหยกประสบการณ์สูงที่เน้นการขายแบบ "Short & Sharp" (สั้น กระชับ ได้ใจความ) สไตล์ของคุณคือ ตรงไปตรงมา จริงใจ บอกสเปกชัดเจน และเน้นความคุ้มค่า
@@ -565,6 +573,7 @@ export function PageStockTab() {
   const manualPausedRef = useRef(false);
   const [localImagePrompt, setLocalImagePrompt] = useState(() => localStorage.getItem(LOCAL_IMAGE_PROMPT_KEY) || DEFAULT_LOCAL_IMAGE_ARTICLE_PROMPT);
   const [localImageDropboxPath, setLocalImageDropboxPath] = useState(() => localStorage.getItem(LOCAL_IMAGE_DROPBOX_PATH_KEY) || '');
+  const [localImageModel, setLocalImageModel] = useState(() => localStorage.getItem(LOCAL_IMAGE_ARTICLE_MODEL_KEY) || 'google/gemini-2.5-flash-lite');
   const [localImageItems, setLocalImageItems] = useState<LocalImageArticleItem[]>([]);
   const [localImageBrains, setLocalImageBrains] = useState<Record<string, LocalImageArticleBrain>>({});
   const [localImageBrainKey, setLocalImageBrainKey] = useState('');
@@ -773,6 +782,10 @@ export function PageStockTab() {
   }, [localImageDropboxPath]);
 
   useEffect(() => {
+    localStorage.setItem(LOCAL_IMAGE_ARTICLE_MODEL_KEY, localImageModel);
+  }, [localImageModel]);
+
+  useEffect(() => {
     if (!selectedPage) return;
     setSettings(prev => ({
       ...prev,
@@ -827,7 +840,7 @@ export function PageStockTab() {
     return data.choices?.[0]?.message?.content?.trim() || '';
   };
 
-  const askOpenRouter = async (prompt: string, signal?: AbortSignal, maxTokens = 6000) => {
+  const askOpenRouter = async (prompt: string, signal?: AbortSignal, maxTokens = 6000, modelOverride?: string) => {
     if (!activeProfile?.openRouterKey) throw new Error('ไม่พบ OpenRouter API Key');
     const tokenAttempts = Array.from(new Set([
       maxTokens,
@@ -845,7 +858,7 @@ export function PageStockTab() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: settings.openRouterModel || 'google/gemini-2.5-pro',
+          model: modelOverride || settings.openRouterModel || 'google/gemini-2.5-pro',
           messages: [{ role: 'user', content: prompt }],
           temperature: 0.72,
           max_tokens: tokens,
@@ -1235,7 +1248,7 @@ ${chunkText}
 - รายละเอียดจากรูปหรือชื่อไฟล์ที่ควรใช้เขียน
 - ข้อห้ามหรือสิ่งที่ไม่ควรเดา
 
-ตอบเป็น bullet ภาษาไทย ไม่เกิน 900 token`, ctx.signal, 1200);
+ตอบเป็น bullet ภาษาไทย ไม่เกิน 900 token`, ctx.signal, 1200, localImageModel);
             chunkSummaries.push(chunkAnswer);
           }
         } else {
@@ -1285,7 +1298,7 @@ ${tableSample}
   "productSignals": ["สิ่งที่ต้องดูจากรูป"],
   "captionExamples": ["ตัวอย่างโพส"],
   "negativeRules": ["ข้อห้าม", "ห้ามขึ้นต้นด้วยคำเกริ่น เช่น แน่นอน/ได้เลย/ในฐานะ", "ห้ามบอกว่าตัวเองเป็น AI หรือ Content Strategist"]
-}`, ctx.signal, 2400);
+}`, ctx.signal, 2400, localImageModel);
         ctx.log(`4/6 AI วิเคราะห์กลับมาแล้ว (${answer.length.toLocaleString()} ตัวอักษร)`);
         const parsed = extractJsonPayload<any>(answer, {});
         const brain = normalizeArticleBrain({
@@ -1495,7 +1508,7 @@ Additional owner feedback to follow in future runs:
         'X-Title': 'BulkVideoCreatorApp',
       },
       body: JSON.stringify({
-        model: settings.openRouterModel || 'google/gemini-2.5-flash',
+        model: localImageModel || 'google/gemini-2.5-flash-lite',
         messages: [{
           role: 'user',
           content: [
@@ -1540,7 +1553,7 @@ ${NO_AI_PREAMBLE_RULE}
       id: `local-image-article-${Date.now()}`,
       title: `🖼️ เขียนบทความจากรูป Dropbox (${targets.length} รูป)`,
       category: 'page-stock-local-image',
-      progress: `เตรียมอ่านรูป Dropbox ${targets.length} รูปด้วย ${settings.openRouterModel || 'google/gemini-2.5-flash'}`,
+      progress: `เตรียมอ่านรูป Dropbox ${targets.length} รูปด้วย ${localImageModel}`,
     }, async ctx => {
       ctx.log(`1/4 เตรียมรูปจาก Dropbox ที่เลือก: ${targets.length} รูป`);
       ctx.log(`2/4 ใช้ Prompt/สมองจากรันบอท Flow (${localImagePrompt.length.toLocaleString()} ตัวอักษร)`);
@@ -2628,6 +2641,21 @@ ${NO_AI_PREAMBLE_RULE}
                   <span>{localImageBrain.sourceRowCount} แถว · อัปเดต {new Date(localImageBrain.updatedAt).toLocaleString('th-TH')}</span>
                 </div>
               )}
+              <label>
+                <span>โมเดล OpenRouter สำหรับสมอง/เขียนโพส</span>
+                <select
+                  className="page-stock-manual-input"
+                  value={localImageModel}
+                  onChange={event => setLocalImageModel(event.target.value)}
+                >
+                  {LOCAL_IMAGE_ARTICLE_MODELS.map(model => (
+                    <option key={model.id} value={model.id}>{model.label}</option>
+                  ))}
+                </select>
+                <small>
+                  {LOCAL_IMAGE_ARTICLE_MODELS.find(model => model.id === localImageModel)?.note || localImageModel}
+                </small>
+              </label>
               <textarea
                 className="page-stock-textarea page-stock-feedback"
                 value={localImagePrompt}
@@ -2684,7 +2712,7 @@ ${NO_AI_PREAMBLE_RULE}
               </div>
               <div className="page-stock-brain-box">
                 <strong>{getOpenRouterKeyForLocalImage() ? 'OpenRouter พร้อมใช้งาน' : 'ยังไม่พบ OpenRouter API Key'}</strong>
-                <span>โมเดล: {settings.openRouterModel || 'google/gemini-2.5-flash'}</span>
+                <span>โมเดล: {localImageModel}</span>
               </div>
             </div>
 
