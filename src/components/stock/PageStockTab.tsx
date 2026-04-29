@@ -31,7 +31,7 @@ type StockMode = 'image-and-post' | 'image-only' | 'post-only';
 type ImageProvider = 'kie-gpt-image-2';
 type AspectRatio = 'auto' | '1:1' | '9:16' | '16:9' | '4:3' | '3:4';
 type ImageResolution = '1K' | '2K' | '4K';
-type PageStockBuilderTab = 'api' | 'prompt';
+type PageStockBuilderTab = 'api' | 'prompt' | 'local-image-article';
 
 interface ApiProfile {
   id: string;
@@ -1404,6 +1404,15 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
         >
           สร้างรูปเองด้วยPrompt
         </button>
+        <button
+          type="button"
+          className={builderTab === 'local-image-article' ? 'active' : ''}
+          onClick={() => setBuilderTab('local-image-article')}
+          role="tab"
+          aria-selected={builderTab === 'local-image-article'}
+        >
+          เขียนบทความจากรูปในเครื่อง
+        </button>
       </div>
 
       {builderTab === 'api' ? (
@@ -1661,7 +1670,7 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
           )}
         </aside>
       </div>
-      ) : (
+      ) : builderTab === 'prompt' ? (
         <section className="page-stock-panel page-stock-manual-prompt">
           <div className="page-stock-panel-head">
             <h2>สร้างรูปเองด้วยPrompt</h2>
@@ -1875,6 +1884,16 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
                 </button>
               </div>
             </div>
+          </div>
+        </section>
+      ) : (
+        <section className="page-stock-panel page-stock-manual-prompt">
+          <div className="page-stock-panel-head">
+            <h2>เขียนบทความจากรูปในเครื่อง</h2>
+            <span>ยังไม่ตั้งค่า</span>
+          </div>
+          <div className="page-stock-manual-card page-stock-manual-wide">
+            <em>พื้นที่ว่างสำหรับฟีเจอร์เขียนบทความจากรูปในเครื่อง</em>
           </div>
         </section>
       )}
