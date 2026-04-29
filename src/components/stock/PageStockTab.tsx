@@ -798,23 +798,35 @@ export function PageStockTab() {
 
   const askOpenRouter = async (prompt: string, signal?: AbortSignal, maxTokens = 6000) => {
     if (!activeProfile?.openRouterKey) throw new Error('ไม่พบ OpenRouter API Key');
-    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      signal,
-      headers: {
-        'Authorization': `Bearer ${activeProfile.openRouterKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: settings.openRouterModel || 'google/gemini-2.5-pro',
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.72,
-        max_tokens: maxTokens,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error?.message || `OpenRouter error ${res.status}`);
-    return data.choices?.[0]?.message?.content?.trim() || '';
+    const tokenAttempts = Array.from(new Set([
+      maxTokens,
+      Math.min(maxTokens, 1800),
+      Math.min(maxTokens, 1200),
+      Math.min(maxTokens, 800),
+    ])).filter(tokens => tokens > 0);
+    let lastError = '';
+    for (const tokens of tokenAttempts) {
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        signal,
+        headers: {
+          'Authorization': `Bearer ${activeProfile.openRouterKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: settings.openRouterModel || 'google/gemini-2.5-pro',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.72,
+          max_tokens: tokens,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && !data.error) return data.choices?.[0]?.message?.content?.trim() || '';
+      lastError = data.error?.message || `OpenRouter error ${res.status}`;
+      const canRetryLowerTokens = /more credits|fewer max_tokens|can only afford|credits/i.test(lastError);
+      if (!canRetryLowerTokens) throw new Error(lastError);
+    }
+    throw new Error(lastError || 'OpenRouter error');
   };
 
   const saveManualBrains = async (nextBrains: Record<string, ManualPromptBrain>) => {
@@ -1185,15 +1197,14 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
 ข้อมูล:
 ${chunkText}
 
-สรุปให้กระชับแต่ละเอียด:
+สรุปให้สั้น กระชับ แต่ยังใช้สร้างสมองต่อได้:
 - ประเภทสินค้า/คอนเทนต์ที่เห็น
 - โครงสร้างโพสที่พบบ่อย
 - สำนวน/คำขาย/คำเรียกสินค้า
 - รายละเอียดจากรูปหรือชื่อไฟล์ที่ควรใช้เขียน
-- ตัวอย่างโพส/แคปชั่นที่เจอหรือควรเลียนแบบ
 - ข้อห้ามหรือสิ่งที่ไม่ควรเดา
 
-ตอบเป็น bullet ภาษาไทยเท่านั้น`, ctx.signal, 2600);
+ตอบเป็น bullet ภาษาไทย ไม่เกิน 900 token`, ctx.signal, 1200);
             chunkSummaries.push(chunkAnswer);
           }
         } else {
@@ -1242,7 +1253,7 @@ ${tableSample}
   "productSignals": ["สิ่งที่ต้องดูจากรูป"],
   "captionExamples": ["ตัวอย่างโพส"],
   "negativeRules": ["ข้อห้าม"]
-}`, ctx.signal, 6500);
+}`, ctx.signal, 2400);
         ctx.log(`4/6 AI วิเคราะห์กลับมาแล้ว (${answer.length.toLocaleString()} ตัวอักษร)`);
         const parsed = extractJsonPayload<any>(answer, {});
         const brain = normalizeArticleBrain({
