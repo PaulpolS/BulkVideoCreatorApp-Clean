@@ -108,6 +108,16 @@ interface ManualPromptResult {
   imagePrompt: string;
 }
 
+interface LocalImageArticleItem {
+  id: string;
+  fileName: string;
+  dataUrl: string;
+  status: 'idle' | 'processing' | 'done' | 'error';
+  article: string;
+  errorMsg: string;
+  selected: boolean;
+}
+
 const workflowNodes = (workflow as any).nodes ?? [];
 
 function extractPageConfigs(): PageConfig[] {
@@ -127,6 +137,21 @@ function extractPageConfigs(): PageConfig[] {
 const PAGE_CONFIGS = extractPageConfigs();
 const OUTPUT_SETTINGS_KEY = 'page_stock_output_settings';
 const MANUAL_PROMPT_BRAINS_KEY = 'page_stock_prompt_brains';
+const LOCAL_IMAGE_PROMPT_KEY = 'page_stock_local_image_article_prompt';
+
+const DEFAULT_LOCAL_IMAGE_ARTICLE_PROMPT = `## สินค้าหยก
+Role: คุณคือเจ้าของร้านหยกประสบการณ์สูงที่เน้นการขายแบบ "Short & Sharp" (สั้น กระชับ ได้ใจความ) สไตล์ของคุณคือ ตรงไปตรงมา จริงใจ บอกสเปกชัดเจน และเน้นความคุ้มค่า
+Task: ดูข้อมูลรูปภาพสินค้าหยก แล้วเขียนแคปชั่นขายของแบบสั้นๆ (Micro-Content) ที่คนอ่านจบใน 10 วินาทีแล้วอยากทักซื้อทันที
+
+Rules (กฎเหล็ก):
+ห้ามมีหัวข้อ: ห้ามใส่คำว่า "Hook:", "Body:", "Price:" หรือหัวข้อใดๆ
+ความยาว: ห้ามเกิน 4-5 บรรทัด (รวมเว้นวรรค)
+หัวข้อบังคับ:
+บรรทัดแรก: จุดเด่น
+บรรทัดสอง: สเปก
+บรรทัดสาม: ราคาและ CTA
+
+รูปแบบ: เป็นข้อความดิบ ไม่มี markdown ไม่ใช้ markdown bold`;
 
 const DEFAULT_OUTPUT_SETTINGS: OutputSettings = {
   profileId: '',
@@ -336,6 +361,15 @@ function csvEscape(value: unknown) {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('อ่านไฟล์รูปไม่สำเร็จ'));
+    reader.readAsDataURL(file);
+  });
+}
+
 function toCsv(rows: Record<string, unknown>[]) {
   const headers = [
     'created_at', 'status', 'page_name', 'topic', 'mode', 'image_provider', 'image_model',
@@ -467,6 +501,11 @@ export function PageStockTab() {
   const [manualTaskId, setManualTaskId] = useState('');
   const [manualPaused, setManualPaused] = useState(false);
   const manualPausedRef = useRef(false);
+  const [localImagePrompt, setLocalImagePrompt] = useState(() => localStorage.getItem(LOCAL_IMAGE_PROMPT_KEY) || DEFAULT_LOCAL_IMAGE_ARTICLE_PROMPT);
+  const [localImageItems, setLocalImageItems] = useState<LocalImageArticleItem[]>([]);
+  const [localImageRunning, setLocalImageRunning] = useState(false);
+  const [localImageCopied, setLocalImageCopied] = useState(false);
+  const localImageStopRef = useRef(false);
   const [settings, setSettings] = useState<OutputSettings>(() => {
     try {
       return { ...DEFAULT_OUTPUT_SETTINGS, ...JSON.parse(localStorage.getItem(OUTPUT_SETTINGS_KEY) || '{}') };
@@ -535,6 +574,21 @@ export function PageStockTab() {
     () => manualPromptResults.map(result => result.imagePrompt).join('\n\n'),
     [manualPromptResults],
   );
+  const localImageSelectedCount = useMemo(
+    () => localImageItems.filter(item => item.selected).length,
+    [localImageItems],
+  );
+  const localImageDoneCount = useMemo(
+    () => localImageItems.filter(item => item.status === 'done').length,
+    [localImageItems],
+  );
+  const localImageCopyText = useMemo(
+    () => localImageItems
+      .filter(item => item.status === 'done' && item.article.trim())
+      .map(item => `${item.fileName}\n${item.article}`)
+      .join('\n\n'),
+    [localImageItems],
+  );
 
   useEffect(() => {
     fetch('/api/get-app-data?key=api_profiles')
@@ -598,6 +652,10 @@ export function PageStockTab() {
   useEffect(() => {
     localStorage.setItem(OUTPUT_SETTINGS_KEY, JSON.stringify(settings));
   }, [settings]);
+
+  useEffect(() => {
+    localStorage.setItem(LOCAL_IMAGE_PROMPT_KEY, localImagePrompt);
+  }, [localImagePrompt]);
 
   useEffect(() => {
     if (!selectedPage) return;
@@ -976,6 +1034,156 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
     link.download = `manual-image-prompts-${manualBrain?.pageName || manualBrainKey || 'page'}-${Date.now()}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
+
+  const getOpenRouterKeyForLocalImage = () => {
+    if (activeProfile?.openRouterKey?.trim()) return activeProfile.openRouterKey.trim();
+    const legacyKey = localStorage.getItem('openrouter_key')?.trim();
+    if (legacyKey) return legacyKey;
+    try {
+      const keys = JSON.parse(localStorage.getItem('openrouter_keys') || '[]');
+      const active = keys.find((key: any) => key.isActive) || keys[0];
+      return String(active?.key || '').trim();
+    } catch {
+      return '';
+    }
+  };
+
+  const updateLocalImageItem = (id: string, patch: Partial<LocalImageArticleItem>) => {
+    setLocalImageItems(prev => prev.map(item => item.id === id ? { ...item, ...patch } : item));
+  };
+
+  const handleLocalImageUpload = async (files?: FileList | null) => {
+    if (!files?.length) return;
+    const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
+    const nextItems = await Promise.all(imageFiles.map(async (file, index) => ({
+      id: `local-image-${Date.now()}-${index}-${file.name}`,
+      fileName: file.name,
+      dataUrl: await readFileAsDataUrl(file),
+      status: 'idle' as const,
+      article: '',
+      errorMsg: '',
+      selected: true,
+    })));
+    setLocalImageItems(prev => [...prev, ...nextItems]);
+  };
+
+  const askOpenRouterWithLocalImage = async (item: LocalImageArticleItem, signal?: AbortSignal) => {
+    const apiKey = getOpenRouterKeyForLocalImage();
+    if (!apiKey) throw new Error('ไม่พบ OpenRouter API Key ใน Profile หรือ Global Settings');
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      signal,
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': window.location.origin,
+        'X-Title': 'BulkVideoCreatorApp',
+      },
+      body: JSON.stringify({
+        model: settings.openRouterModel || 'google/gemini-2.5-flash',
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: `${localImagePrompt.trim() || DEFAULT_LOCAL_IMAGE_ARTICLE_PROMPT}
+
+ข้อมูลไฟล์:
+- ชื่อไฟล์: ${item.fileName}
+
+ให้วิเคราะห์รูปนี้แล้วเขียนผลลัพธ์ตามกฎด้านบนเท่านั้น`,
+            },
+            { type: 'image_url', image_url: { url: item.dataUrl } },
+          ],
+        }],
+        temperature: 0.72,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error?.message || `OpenRouter error ${res.status}`);
+    return String(data.choices?.[0]?.message?.content || '').trim();
+  };
+
+  const startLocalImageArticleRun = () => {
+    const targets = localImageItems.filter(item => item.selected);
+    if (targets.length === 0 || localImageRunning) return;
+    const apiKey = getOpenRouterKeyForLocalImage();
+    if (!apiKey) {
+      alert('ไม่พบ OpenRouter API Key ใน Profile หรือ Global Settings');
+      return;
+    }
+    localImageStopRef.current = false;
+    setLocalImageRunning(true);
+    const taskId = globalTaskStore.enqueueTask({
+      id: `local-image-article-${Date.now()}`,
+      title: `🖼️ เขียนบทความจากรูปในเครื่อง (${targets.length} รูป)`,
+      category: 'page-stock-local-image',
+      progress: `เตรียมอ่านรูป ${targets.length} รูปด้วย ${settings.openRouterModel || 'google/gemini-2.5-flash'}`,
+    }, async ctx => {
+      ctx.log(`1/4 เตรียมรูปที่เลือก: ${targets.length} รูป`);
+      ctx.log(`2/4 ใช้ Prompt/สมองจากรันบอท Flow (${localImagePrompt.length.toLocaleString()} ตัวอักษร)`);
+      for (let index = 0; index < targets.length; index++) {
+        const item = targets[index];
+        if (ctx.isCancelled() || localImageStopRef.current) {
+          ctx.log(`หยุดงานตามคำสั่งผู้ใช้: ทำไปแล้ว ${index}/${targets.length} รูป`);
+          break;
+        }
+        updateLocalImageItem(item.id, { status: 'processing', errorMsg: '' });
+        ctx.log(`รูป ${index + 1}/${targets.length}: ส่ง "${item.fileName}" ให้ AI วิเคราะห์และเขียนบทความ`);
+        try {
+          const article = await askOpenRouterWithLocalImage(item, ctx.signal);
+          updateLocalImageItem(item.id, { status: 'done', article, errorMsg: '' });
+          ctx.log(`รูป ${index + 1}/${targets.length}: เขียนเสร็จ (${article.length.toLocaleString()} ตัวอักษร)`);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          updateLocalImageItem(item.id, { status: 'error', errorMsg: message });
+          ctx.log(`รูป ${index + 1}/${targets.length}: ล้มเหลว - ${message}`);
+        }
+        await wait(350);
+      }
+      ctx.log('3/4 บันทึกผลลัพธ์ไว้ในหน้านี้แล้ว');
+      ctx.log('4/4 พร้อม Copy หรือ Export CSV จากรายการผลลัพธ์');
+      setLocalImageRunning(false);
+      localImageStopRef.current = false;
+    });
+    globalTaskStore.logTask(taskId, 'เริ่มงานเขียนบทความจากรูปในเครื่อง');
+  };
+
+  const stopLocalImageArticleRun = () => {
+    localImageStopRef.current = true;
+    setLocalImageRunning(false);
+  };
+
+  const copyLocalImageArticles = async () => {
+    if (!localImageCopyText) return;
+    await navigator.clipboard.writeText(localImageCopyText);
+    setLocalImageCopied(true);
+    window.setTimeout(() => setLocalImageCopied(false), 1500);
+  };
+
+  const downloadLocalImageArticleCsv = () => {
+    const rows = localImageItems
+      .filter(item => item.status === 'done' || item.status === 'error')
+      .map(item => ({
+        file_name: item.fileName,
+        article: item.article,
+        status: item.status,
+        error: item.errorMsg,
+        created_at: new Date().toISOString(),
+      }));
+    if (rows.length === 0) return;
+    const headers = ['file_name', 'article', 'status', 'error', 'created_at'];
+    const csv = [
+      headers.join(','),
+      ...rows.map(row => headers.map(header => csvEscape(row[header as keyof typeof row])).join(',')),
+    ].join('\n');
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `local-image-articles-${Date.now()}.csv`;
     link.click();
     URL.revokeObjectURL(link.href);
   };
@@ -1890,10 +2098,128 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
         <section className="page-stock-panel page-stock-manual-prompt">
           <div className="page-stock-panel-head">
             <h2>เขียนบทความจากรูปในเครื่อง</h2>
-            <span>ยังไม่ตั้งค่า</span>
+            <span>{localImageItems.length} รูป · เสร็จ {localImageDoneCount}</span>
           </div>
-          <div className="page-stock-manual-card page-stock-manual-wide">
-            <em>พื้นที่ว่างสำหรับฟีเจอร์เขียนบทความจากรูปในเครื่อง</em>
+          <div className="page-stock-manual-grid">
+            <div className="page-stock-manual-card">
+              <h3>1. อัปโหลดรูปจากเครื่อง</h3>
+              <p>เลือกหลายรูปได้ ระบบจะใช้ความสามารถแบบรันบอท Flow อ่านรูป แล้วเขียนบทความ/แคปชั่นตาม Prompt ด้านขวา</p>
+              <label className="page-stock-upload">
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={event => {
+                    handleLocalImageUpload(event.target.files);
+                    event.currentTarget.value = '';
+                  }}
+                />
+                <span>เลือกรูปจากเครื่อง</span>
+              </label>
+              <div className="page-stock-manual-actions">
+                <button
+                  disabled={localImageItems.length === 0}
+                  onClick={() => setLocalImageItems(prev => prev.map(item => ({ ...item, selected: true })))}
+                >
+                  เลือกทั้งหมด
+                </button>
+                <button
+                  disabled={localImageItems.length === 0}
+                  onClick={() => setLocalImageItems(prev => prev.map(item => ({ ...item, selected: false })))}
+                >
+                  ยกเลิกทั้งหมด
+                </button>
+                <button
+                  className="page-stock-danger"
+                  disabled={localImageRunning || localImageItems.length === 0}
+                  onClick={() => setLocalImageItems([])}
+                >
+                  ล้างรูป
+                </button>
+              </div>
+            </div>
+
+            <div className="page-stock-manual-card">
+              <h3>2. Prompt/สมองแบบรันบอท Flow</h3>
+              <p>แก้ Prompt ตรงนี้ได้เลย ระบบจะจำไว้ในเครื่อง และใช้ OpenRouter จาก Profile ที่เลือกอยู่</p>
+              <textarea
+                className="page-stock-textarea page-stock-feedback"
+                value={localImagePrompt}
+                onChange={event => setLocalImagePrompt(event.target.value)}
+                placeholder="ใส่ System Prompt สำหรับให้ AI อ่านรูปและเขียนบทความ"
+              />
+              <div className="page-stock-manual-actions">
+                <button
+                  className="page-stock-primary"
+                  disabled={localImageRunning || localImageSelectedCount === 0 || !getOpenRouterKeyForLocalImage()}
+                  onClick={startLocalImageArticleRun}
+                >
+                  เริ่มเขียน {localImageSelectedCount} รูป
+                </button>
+                <button
+                  className="page-stock-danger"
+                  disabled={!localImageRunning}
+                  onClick={stopLocalImageArticleRun}
+                >
+                  หยุด
+                </button>
+              </div>
+              <div className="page-stock-brain-box">
+                <strong>{getOpenRouterKeyForLocalImage() ? 'OpenRouter พร้อมใช้งาน' : 'ยังไม่พบ OpenRouter API Key'}</strong>
+                <span>โมเดล: {settings.openRouterModel || 'google/gemini-2.5-flash'}</span>
+              </div>
+            </div>
+
+            <div className="page-stock-manual-card page-stock-manual-wide">
+              <div className="page-stock-manual-headline">
+                <h3>ผลลัพธ์บทความจากรูป</h3>
+                <span>เลือกอยู่ {localImageSelectedCount}/{localImageItems.length}</span>
+              </div>
+              <div className="page-stock-result-list page-stock-prompt-results">
+                {localImageItems.length === 0 ? (
+                  <em>ยังไม่มีรูปที่อัปโหลด</em>
+                ) : localImageItems.map((item, index) => (
+                  <article key={item.id}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', gap: 16, alignItems: 'start' }}>
+                      <img
+                        src={item.dataUrl}
+                        alt=""
+                        style={{ width: 96, height: 96, objectFit: 'cover', borderRadius: 8, border: '1px solid rgba(255,255,255,.14)' }}
+                      />
+                      <div>
+                        <label style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10 }}>
+                          <input
+                            type="checkbox"
+                            checked={item.selected}
+                            onChange={event => updateLocalImageItem(item.id, { selected: event.target.checked })}
+                          />
+                          <strong>{index + 1}. {item.fileName}</strong>
+                          <span>{item.status === 'idle' ? 'รอทำงาน' : item.status === 'processing' ? 'กำลังเขียน' : item.status === 'done' ? 'เสร็จแล้ว' : 'ผิดพลาด'}</span>
+                        </label>
+                        {item.status === 'error' ? (
+                          <p>{item.errorMsg}</p>
+                        ) : (
+                          <textarea
+                            className="page-stock-textarea"
+                            value={item.article}
+                            onChange={event => updateLocalImageItem(item.id, { article: event.target.value })}
+                            placeholder={item.status === 'processing' ? 'AI กำลังเขียน...' : 'บทความ/แคปชั่นจะแสดงตรงนี้ และแก้ไขเองได้'}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+              <div className="page-stock-manual-actions">
+                <button disabled={!localImageCopyText} onClick={copyLocalImageArticles}>
+                  {localImageCopied ? 'คัดลอกแล้ว' : 'คัดลอกบทความทั้งหมด'}
+                </button>
+                <button disabled={localImageDoneCount === 0} onClick={downloadLocalImageArticleCsv}>
+                  Export CSV
+                </button>
+              </div>
+            </div>
           </div>
         </section>
       )}
