@@ -174,6 +174,12 @@ Rules (กฎเหล็ก):
 
 รูปแบบ: เป็นข้อความดิบ ไม่มี markdown ไม่ใช้ markdown bold`;
 
+const NO_AI_PREAMBLE_RULE = `ข้อห้ามสำคัญมาก:
+- ห้ามขึ้นต้นด้วยคำเกริ่น เช่น "แน่นอน", "ได้เลย", "ในฐานะ", "ผมคือ", "ฉันคือ", "นี่คือ", "แคปชั่นสำหรับภาพนี้"
+- ห้ามบอกว่าตัวเองเป็น AI, Content Strategist, ผู้ช่วย, นักเขียน หรือกำลังวิเคราะห์ภาพ
+- ห้ามพูดถึงกระบวนการทำงานหรือ prompt
+- เริ่มคำตอบด้วยเนื้อหาโพสต์จริงทันที`;
+
 const DEFAULT_OUTPUT_SETTINGS: OutputSettings = {
   profileId: '',
   imageProvider: 'kie-gpt-image-2',
@@ -310,13 +316,16 @@ function normalizeManualBrain(brain: Partial<ManualPromptBrain> | undefined, fal
 }
 
 function normalizeArticleBrain(brain: Partial<LocalImageArticleBrain> | undefined, fallbackName = 'สมองเขียนโพส'): LocalImageArticleBrain {
+  const writingPrompt = String(brain?.writingPrompt || DEFAULT_LOCAL_IMAGE_ARTICLE_PROMPT);
   return {
     name: String(brain?.name || fallbackName),
     updatedAt: String(brain?.updatedAt || new Date().toISOString()),
     sourceFileName: brain?.sourceFileName || '',
     sourceRowCount: Number(brain?.sourceRowCount || 0),
     summary: String(brain?.summary || 'ยังไม่มีสรุปสมอง'),
-    writingPrompt: String(brain?.writingPrompt || DEFAULT_LOCAL_IMAGE_ARTICLE_PROMPT),
+    writingPrompt: writingPrompt.includes('ห้ามขึ้นต้นด้วยคำเกริ่น')
+      ? writingPrompt
+      : `${writingPrompt.trim()}\n\n${NO_AI_PREAMBLE_RULE}`,
     audienceInsights: asStringArray(brain?.audienceInsights),
     toneGuidelines: asStringArray(brain?.toneGuidelines),
     structureRules: asStringArray(brain?.structureRules),
@@ -326,6 +335,28 @@ function normalizeArticleBrain(brain: Partial<LocalImageArticleBrain> | undefine
     feedbackNotes: asStringArray(brain?.feedbackNotes),
     rawAnalysis: brain?.rawAnalysis || '',
   };
+}
+
+function cleanAiPostPreamble(text: string) {
+  let output = String(text || '').trim();
+  const blockedLinePatterns = [
+    /^แน่นอน[^\n]*(?:\n|$)/i,
+    /^ได้เลย[^\n]*(?:\n|$)/i,
+    /^ในฐานะ[^\n]*(?:\n|$)/i,
+    /^(?:ผม|ฉัน|ดิฉัน)คือ[^\n]*(?:\n|$)/i,
+    /^นี่คือ(?:แคปชั่น|โพสต์|บทความ)?[^\n]*(?:\n|$)/i,
+    /^แคปชั่นสำหรับภาพนี้[^\n]*(?:\n|$)/i,
+  ];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const before = output;
+    for (const pattern of blockedLinePatterns) {
+      output = output.replace(pattern, '').trimStart();
+    }
+    changed = before !== output;
+  }
+  return output.trim();
 }
 
 function getTopics(input: string): string[] {
@@ -1241,6 +1272,7 @@ ${tableSample}
 4. สร้าง System Prompt สำหรับใช้กับ Vision AI ตอนอ่านรูป Dropbox แล้วเขียนโพส ต้องพร้อมนำไปใช้จริงทันที
 5. ยกตัวอย่างโพส/แคปชั่นที่น่าจะตรง pattern
 6. ใส่ข้อห้าม เช่น ห้ามแต่งราคา, ห้ามกล่าวเกินจริง, ห้ามใช้ markdown ถ้า pattern เดิมไม่ใช้
+7. ใน writingPrompt ต้องบังคับชัดเจนว่า ห้ามขึ้นต้นด้วยคำเกริ่น ห้ามบอกว่าเป็น AI/Content Strategist/ผู้ช่วย และต้องเข้าเนื้อหาโพสต์ทันที
 
 ตอบ JSON เท่านั้น:
 {
@@ -1252,7 +1284,7 @@ ${tableSample}
   "structureRules": ["..."],
   "productSignals": ["สิ่งที่ต้องดูจากรูป"],
   "captionExamples": ["ตัวอย่างโพส"],
-  "negativeRules": ["ข้อห้าม"]
+  "negativeRules": ["ข้อห้าม", "ห้ามขึ้นต้นด้วยคำเกริ่น เช่น แน่นอน/ได้เลย/ในฐานะ", "ห้ามบอกว่าตัวเองเป็น AI หรือ Content Strategist"]
 }`, ctx.signal, 2400);
         ctx.log(`4/6 AI วิเคราะห์กลับมาแล้ว (${answer.length.toLocaleString()} ตัวอักษร)`);
         const parsed = extractJsonPayload<any>(answer, {});
@@ -1262,7 +1294,7 @@ ${tableSample}
           sourceFileName: localImageBrainCsvName,
           sourceRowCount: rows.length,
           summary: String(parsed.summary || 'AI วิเคราะห์ CSV แล้ว แต่ไม่ได้ส่ง summary ชัดเจน'),
-          writingPrompt: String(parsed.writingPrompt || DEFAULT_LOCAL_IMAGE_ARTICLE_PROMPT),
+          writingPrompt: `${String(parsed.writingPrompt || DEFAULT_LOCAL_IMAGE_ARTICLE_PROMPT).trim()}\n\n${NO_AI_PREAMBLE_RULE}`,
           audienceInsights: asStringArray(parsed.audienceInsights),
           toneGuidelines: asStringArray(parsed.toneGuidelines),
           structureRules: asStringArray(parsed.structureRules),
@@ -1471,11 +1503,13 @@ Additional owner feedback to follow in future runs:
               type: 'text',
               text: `${localImagePrompt.trim() || DEFAULT_LOCAL_IMAGE_ARTICLE_PROMPT}
 
+${NO_AI_PREAMBLE_RULE}
+
 ข้อมูลไฟล์:
 - ชื่อไฟล์: ${item.fileName}
 - Dropbox path: ${item.dropboxPath}
 
-ให้วิเคราะห์รูปนี้แล้วเขียนผลลัพธ์ตามกฎด้านบนเท่านั้น`,
+ให้วิเคราะห์รูปนี้แล้วเขียนผลลัพธ์ตามกฎด้านบนเท่านั้น ส่งเฉพาะข้อความโพสต์จริงที่จะนำไปลงเพจ`,
             },
             { type: 'image_url', image_url: { url: imageUrl } },
           ],
@@ -1485,7 +1519,7 @@ Additional owner feedback to follow in future runs:
     });
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error?.message || `OpenRouter error ${res.status}`);
-    return String(data.choices?.[0]?.message?.content || '').trim();
+    return cleanAiPostPreamble(String(data.choices?.[0]?.message?.content || ''));
   };
 
   const startLocalImageArticleRun = () => {
@@ -2686,7 +2720,7 @@ Additional owner feedback to follow in future runs:
                           <textarea
                             className="page-stock-textarea"
                             value={item.article}
-                            onChange={event => updateLocalImageItem(item.id, { article: event.target.value })}
+                            onChange={event => updateLocalImageItem(item.id, { article: cleanAiPostPreamble(event.target.value) })}
                             placeholder={item.status === 'processing' ? 'AI กำลังเขียน...' : 'บทความ/แคปชั่นจะแสดงตรงนี้ และแก้ไขเองได้'}
                           />
                         )}
