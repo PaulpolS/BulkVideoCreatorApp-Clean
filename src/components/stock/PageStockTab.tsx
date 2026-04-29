@@ -111,7 +111,9 @@ interface ManualPromptResult {
 interface LocalImageArticleItem {
   id: string;
   fileName: string;
-  dataUrl: string;
+  dropboxPath: string;
+  sharedUrl: string;
+  directUrl: string;
   status: 'idle' | 'processing' | 'done' | 'error';
   article: string;
   errorMsg: string;
@@ -138,6 +140,7 @@ const PAGE_CONFIGS = extractPageConfigs();
 const OUTPUT_SETTINGS_KEY = 'page_stock_output_settings';
 const MANUAL_PROMPT_BRAINS_KEY = 'page_stock_prompt_brains';
 const LOCAL_IMAGE_PROMPT_KEY = 'page_stock_local_image_article_prompt';
+const LOCAL_IMAGE_DROPBOX_PATH_KEY = 'page_stock_local_image_dropbox_path';
 
 const DEFAULT_LOCAL_IMAGE_ARTICLE_PROMPT = `## สินค้าหยก
 Role: คุณคือเจ้าของร้านหยกประสบการณ์สูงที่เน้นการขายแบบ "Short & Sharp" (สั้น กระชับ ได้ใจความ) สไตล์ของคุณคือ ตรงไปตรงมา จริงใจ บอกสเปกชัดเจน และเน้นความคุ้มค่า
@@ -361,15 +364,6 @@ function csvEscape(value: unknown) {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = () => reject(reader.error || new Error('อ่านไฟล์รูปไม่สำเร็จ'));
-    reader.readAsDataURL(file);
-  });
-}
-
 function toCsv(rows: Record<string, unknown>[]) {
   const headers = [
     'created_at', 'status', 'page_name', 'topic', 'mode', 'image_provider', 'image_model',
@@ -502,8 +496,10 @@ export function PageStockTab() {
   const [manualPaused, setManualPaused] = useState(false);
   const manualPausedRef = useRef(false);
   const [localImagePrompt, setLocalImagePrompt] = useState(() => localStorage.getItem(LOCAL_IMAGE_PROMPT_KEY) || DEFAULT_LOCAL_IMAGE_ARTICLE_PROMPT);
+  const [localImageDropboxPath, setLocalImageDropboxPath] = useState(() => localStorage.getItem(LOCAL_IMAGE_DROPBOX_PATH_KEY) || '');
   const [localImageItems, setLocalImageItems] = useState<LocalImageArticleItem[]>([]);
   const [localImageRunning, setLocalImageRunning] = useState(false);
+  const [localImageScanning, setLocalImageScanning] = useState(false);
   const [localImageCopied, setLocalImageCopied] = useState(false);
   const localImageStopRef = useRef(false);
   const [settings, setSettings] = useState<OutputSettings>(() => {
@@ -658,11 +654,16 @@ export function PageStockTab() {
   }, [localImagePrompt]);
 
   useEffect(() => {
+    localStorage.setItem(LOCAL_IMAGE_DROPBOX_PATH_KEY, localImageDropboxPath);
+  }, [localImageDropboxPath]);
+
+  useEffect(() => {
     if (!selectedPage) return;
     setSettings(prev => ({
       ...prev,
       dropboxFolderPath: prev.dropboxFolderPath || selectedPage.dropbox_path,
     }));
+    setLocalImageDropboxPath(prev => prev || selectedPage.dropbox_path || settings.dropboxFolderPath || '');
   }, [selectedPage]);
 
   const updateSettings = (patch: Partial<OutputSettings>) => {
@@ -1051,28 +1052,136 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
     }
   };
 
+  const getDropboxTokenForLocalImage = async () => {
+    if (activeProfile?.dropboxRefreshToken && activeProfile.dropboxAppKey && activeProfile.dropboxAppSecret) {
+      const res = await fetch('https://api.dropboxapi.com/oauth2/token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': `Basic ${btoa(`${activeProfile.dropboxAppKey}:${activeProfile.dropboxAppSecret}`)}`,
+        },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          refresh_token: activeProfile.dropboxRefreshToken,
+        }),
+      });
+      const data = await res.json();
+      if (data.access_token) {
+        setProfiles(prev => prev.map(profile => profile.id === activeProfile.id ? { ...profile, dropboxKey: data.access_token } : profile));
+        try {
+          const savedProfiles = JSON.parse(localStorage.getItem('api_global_profiles') || '[]');
+          const nextProfiles = savedProfiles.map((profile: ApiProfile) => profile.id === activeProfile.id ? { ...profile, dropboxKey: data.access_token } : profile);
+          localStorage.setItem('api_global_profiles', JSON.stringify(nextProfiles));
+          localStorage.setItem('dropbox_api_key', data.access_token);
+        } catch {}
+        return String(data.access_token);
+      }
+      throw new Error(data.error_description || data.error || 'ต่ออายุ Dropbox token ไม่สำเร็จ');
+    }
+    const token = activeProfile?.dropboxKey || localStorage.getItem('dropbox_api_key') || '';
+    if (!token.trim()) throw new Error('ไม่พบ Dropbox token ใน Profile หรือ Global Settings');
+    return token.trim();
+  };
+
+  const createDropboxSharedLink = async (path: string, token: string) => {
+    const res = await fetch('https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ path }),
+    });
+    const data = await res.json();
+    const url = data.url || data.error?.shared_link_already_exists?.metadata?.url || '';
+    if (!url) throw new Error(data.error_summary || data.error?.['.tag'] || 'สร้าง Dropbox shared link ไม่สำเร็จ');
+    return {
+      sharedUrl: String(url),
+      directUrl: String(url).replace('?dl=0', '?raw=1').replace('&dl=0', '&raw=1'),
+    };
+  };
+
+  const toDropboxDownloadLink = (url: string) => (
+    String(url || '')
+      .replace('?raw=1', '?dl=1')
+      .replace('&raw=1', '&dl=1')
+      .replace('?dl=0', '?dl=1')
+      .replace('&dl=0', '&dl=1')
+  );
+
   const updateLocalImageItem = (id: string, patch: Partial<LocalImageArticleItem>) => {
     setLocalImageItems(prev => prev.map(item => item.id === id ? { ...item, ...patch } : item));
   };
 
-  const handleLocalImageUpload = async (files?: FileList | null) => {
-    if (!files?.length) return;
-    const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
-    const nextItems = await Promise.all(imageFiles.map(async (file, index) => ({
-      id: `local-image-${Date.now()}-${index}-${file.name}`,
-      fileName: file.name,
-      dataUrl: await readFileAsDataUrl(file),
-      status: 'idle' as const,
-      article: '',
-      errorMsg: '',
-      selected: true,
-    })));
-    setLocalImageItems(prev => [...prev, ...nextItems]);
+  const scanLocalImageDropboxFolder = () => {
+    const folderPath = localImageDropboxPath.trim();
+    if (!folderPath || localImageScanning) return;
+    setLocalImageScanning(true);
+    globalTaskStore.enqueueTask({
+      id: `local-image-dropbox-scan-${Date.now()}`,
+      title: `📂 ดึงรูปจาก Dropbox: ${folderPath}`,
+      category: 'page-stock-local-image',
+      progress: 'เตรียมเชื่อมต่อ Dropbox',
+    }, async ctx => {
+      try {
+        ctx.log(`1/4 ตรวจ Dropbox token และ path: ${folderPath}`);
+        const token = await getDropboxTokenForLocalImage();
+        ctx.log('2/4 ดึงรายชื่อไฟล์ในโฟลเดอร์ Dropbox');
+        const res = await fetch('https://api.dropboxapi.com/2/files/list_folder', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            path: folderPath,
+            recursive: false,
+            include_media_info: false,
+            include_deleted: false,
+            include_has_explicit_shared_members: false,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error_summary || JSON.stringify(data));
+        const files = (data.entries || [])
+          .filter((entry: any) => entry['.tag'] === 'file' && /\.(png|jpe?g|webp|gif)$/i.test(entry.name));
+        ctx.log(`3/4 พบไฟล์รูป ${files.length} รูป กำลังสร้าง shared link สำหรับ preview และ AI`);
+        const nextItems: LocalImageArticleItem[] = [];
+        for (let index = 0; index < files.length; index++) {
+          if (ctx.isCancelled()) break;
+          const file = files[index];
+          ctx.log(`สร้าง link ${index + 1}/${files.length}: ${file.name}`);
+          const link = await createDropboxSharedLink(file.path_lower || file.path_display, token);
+          nextItems.push({
+            id: file.id || `${file.path_lower}-${Date.now()}`,
+            fileName: file.name,
+            dropboxPath: file.path_lower || file.path_display || '',
+            sharedUrl: link.sharedUrl,
+            directUrl: link.directUrl,
+            status: 'idle',
+            article: '',
+            errorMsg: '',
+            selected: true,
+          });
+          await wait(120);
+        }
+        setLocalImageItems(nextItems);
+        ctx.log(`4/4 ดึงรูปจาก Dropbox เสร็จ: ${nextItems.length} รูป พร้อมเริ่มเขียนบทความ`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        ctx.log(`ล้มเหลว: ${message}`);
+        throw error;
+      } finally {
+        setLocalImageScanning(false);
+      }
+    });
   };
 
   const askOpenRouterWithLocalImage = async (item: LocalImageArticleItem, signal?: AbortSignal) => {
     const apiKey = getOpenRouterKeyForLocalImage();
     if (!apiKey) throw new Error('ไม่พบ OpenRouter API Key ใน Profile หรือ Global Settings');
+    const imageUrl = item.directUrl || item.sharedUrl;
+    if (!imageUrl) throw new Error('รูปนี้ยังไม่มี Dropbox shared link');
     const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       signal,
@@ -1093,10 +1202,11 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
 
 ข้อมูลไฟล์:
 - ชื่อไฟล์: ${item.fileName}
+- Dropbox path: ${item.dropboxPath}
 
 ให้วิเคราะห์รูปนี้แล้วเขียนผลลัพธ์ตามกฎด้านบนเท่านั้น`,
             },
-            { type: 'image_url', image_url: { url: item.dataUrl } },
+            { type: 'image_url', image_url: { url: imageUrl } },
           ],
         }],
         temperature: 0.72,
@@ -1115,15 +1225,19 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
       alert('ไม่พบ OpenRouter API Key ใน Profile หรือ Global Settings');
       return;
     }
+    if (!localImageDropboxPath.trim()) {
+      alert('ใส่ Dropbox Folder Path ก่อนครับ');
+      return;
+    }
     localImageStopRef.current = false;
     setLocalImageRunning(true);
     const taskId = globalTaskStore.enqueueTask({
       id: `local-image-article-${Date.now()}`,
-      title: `🖼️ เขียนบทความจากรูปในเครื่อง (${targets.length} รูป)`,
+      title: `🖼️ เขียนบทความจากรูป Dropbox (${targets.length} รูป)`,
       category: 'page-stock-local-image',
-      progress: `เตรียมอ่านรูป ${targets.length} รูปด้วย ${settings.openRouterModel || 'google/gemini-2.5-flash'}`,
+      progress: `เตรียมอ่านรูป Dropbox ${targets.length} รูปด้วย ${settings.openRouterModel || 'google/gemini-2.5-flash'}`,
     }, async ctx => {
-      ctx.log(`1/4 เตรียมรูปที่เลือก: ${targets.length} รูป`);
+      ctx.log(`1/4 เตรียมรูปจาก Dropbox ที่เลือก: ${targets.length} รูป`);
       ctx.log(`2/4 ใช้ Prompt/สมองจากรันบอท Flow (${localImagePrompt.length.toLocaleString()} ตัวอักษร)`);
       for (let index = 0; index < targets.length; index++) {
         const item = targets[index];
@@ -1149,7 +1263,7 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
       setLocalImageRunning(false);
       localImageStopRef.current = false;
     });
-    globalTaskStore.logTask(taskId, 'เริ่มงานเขียนบทความจากรูปในเครื่อง');
+    globalTaskStore.logTask(taskId, 'เริ่มงานเขียนบทความจากรูปใน Dropbox');
   };
 
   const stopLocalImageArticleRun = () => {
@@ -1168,14 +1282,20 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
     const rows = localImageItems
       .filter(item => item.status === 'done' || item.status === 'error')
       .map(item => ({
+        file_id: item.id,
         file_name: item.fileName,
         article: item.article,
+        update_date: `มาใหม่ๆ ${new Date().toLocaleDateString('th-TH')}`,
+        publish_status: 'N',
+        dropbox_link_dl: toDropboxDownloadLink(item.directUrl || item.sharedUrl),
+        formula: '=',
+        dropbox_path: item.dropboxPath,
         status: item.status,
         error: item.errorMsg,
         created_at: new Date().toISOString(),
       }));
     if (rows.length === 0) return;
-    const headers = ['file_name', 'article', 'status', 'error', 'created_at'];
+    const headers = ['file_id', 'article', 'update_date', 'publish_status', 'dropbox_link_dl', 'formula', 'file_name', 'dropbox_path', 'status', 'error', 'created_at'];
     const csv = [
       headers.join(','),
       ...rows.map(row => headers.map(header => csvEscape(row[header as keyof typeof row])).join(',')),
@@ -1619,7 +1739,7 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
           role="tab"
           aria-selected={builderTab === 'local-image-article'}
         >
-          เขียนบทความจากรูปในเครื่อง
+          เขียนบทความจากรูป Dropbox
         </button>
       </div>
 
@@ -2097,26 +2217,30 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
       ) : (
         <section className="page-stock-panel page-stock-manual-prompt">
           <div className="page-stock-panel-head">
-            <h2>เขียนบทความจากรูปในเครื่อง</h2>
+            <h2>เขียนบทความจากรูป Dropbox</h2>
             <span>{localImageItems.length} รูป · เสร็จ {localImageDoneCount}</span>
           </div>
           <div className="page-stock-manual-grid">
             <div className="page-stock-manual-card">
-              <h3>1. อัปโหลดรูปจากเครื่อง</h3>
-              <p>เลือกหลายรูปได้ ระบบจะใช้ความสามารถแบบรันบอท Flow อ่านรูป แล้วเขียนบทความ/แคปชั่นตาม Prompt ด้านขวา</p>
-              <label className="page-stock-upload">
+              <h3>1. ดึงรูปจาก Dropbox</h3>
+              <p>ใส่ path โฟลเดอร์ Dropbox เหมือนรันบอท Flow ระบบจะดึงรูป สร้าง shared link และแปลงเป็น dl=1 ใน CSV ให้เอง</p>
+              <label>
+                <span>Dropbox Folder Path</span>
                 <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  onChange={event => {
-                    handleLocalImageUpload(event.target.files);
-                    event.currentTarget.value = '';
-                  }}
+                  className="page-stock-manual-input"
+                  value={localImageDropboxPath}
+                  onChange={event => setLocalImageDropboxPath(event.target.value)}
+                  placeholder="/หยก/set3"
                 />
-                <span>เลือกรูปจากเครื่อง</span>
               </label>
               <div className="page-stock-manual-actions">
+                <button
+                  className="page-stock-primary"
+                  disabled={localImageScanning || localImageRunning || !localImageDropboxPath.trim() || !hasDropboxAuth}
+                  onClick={scanLocalImageDropboxFolder}
+                >
+                  {localImageScanning ? 'กำลังดึงรูป...' : 'ดึงรูปจาก Dropbox'}
+                </button>
                 <button
                   disabled={localImageItems.length === 0}
                   onClick={() => setLocalImageItems(prev => prev.map(item => ({ ...item, selected: true })))}
@@ -2137,6 +2261,10 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
                   ล้างรูป
                 </button>
               </div>
+              <div className="page-stock-brain-box">
+                <strong>{hasDropboxAuth ? 'Dropbox พร้อมใช้งาน' : 'ยังไม่พบ Dropbox token'}</strong>
+                <span>ใช้ token จาก Profile API ที่เลือกอยู่</span>
+              </div>
             </div>
 
             <div className="page-stock-manual-card">
@@ -2154,7 +2282,7 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
                   disabled={localImageRunning || localImageSelectedCount === 0 || !getOpenRouterKeyForLocalImage()}
                   onClick={startLocalImageArticleRun}
                 >
-                  เริ่มเขียน {localImageSelectedCount} รูป
+                  เริ่มเขียนจาก Dropbox {localImageSelectedCount} รูป
                 </button>
                 <button
                   className="page-stock-danger"
@@ -2182,7 +2310,7 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
                   <article key={item.id}>
                     <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', gap: 16, alignItems: 'start' }}>
                       <img
-                        src={item.dataUrl}
+                        src={item.directUrl || item.sharedUrl}
                         alt=""
                         style={{ width: 96, height: 96, objectFit: 'cover', borderRadius: 8, border: '1px solid rgba(255,255,255,.14)' }}
                       />
