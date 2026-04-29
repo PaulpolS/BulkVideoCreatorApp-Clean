@@ -2058,31 +2058,42 @@ const fileSaverPlugin = (): Plugin => ({
           const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
           const title = titleMatch ? titleMatch[1].trim() : 'Website Post';
 
-          let ogImage = '';
-          const ogMatch1 = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["'][^>]*>/i);
-          const ogMatch2 = html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:image["'][^>]*>/i);
-          if (ogMatch1) ogImage = ogMatch1[1];
-          else if (ogMatch2) ogImage = ogMatch2[1];
-
-          const imgRegex = /<img[^>]+src=["']([^"']+)["']/gi;
-          let match;
           const images = new Set<string>();
-          if (ogImage) {
-            if (ogImage.startsWith('//')) ogImage = 'https:' + ogImage;
-            else if (ogImage.startsWith('/')) { try { const u = new URL(url); ogImage = u.origin + ogImage; } catch(e){} }
-            images.add(ogImage);
+          const normalizeImageUrl = (src: string) => {
+            let next = (src || '').trim().replace(/&amp;/g, '&');
+            if (!next || next.startsWith('data:') || next.startsWith('blob:')) return '';
+            if (next.startsWith('//')) next = 'https:' + next;
+            else if (next.startsWith('/')) { try { const u = new URL(url); next = u.origin + next; } catch(e){} }
+            else if (!next.startsWith('http')) { try { next = new URL(next, url).href; } catch(e){} }
+            return next.startsWith('http') ? next : '';
+          };
+          const addImage = (src: string) => {
+            const normalized = normalizeImageUrl(src);
+            if (normalized) images.add(normalized);
+          };
+
+          const metaImageRegex = /<meta[^>]+(?:property|name)=["'](?:og:image|og:image:secure_url|twitter:image|twitter:image:src)["'][^>]*content=["']([^"']+)["'][^>]*>|<meta[^>]+content=["']([^"']+)["'][^>]*(?:property|name)=["'](?:og:image|og:image:secure_url|twitter:image|twitter:image:src)["'][^>]*>/gi;
+          let metaMatch;
+          while ((metaMatch = metaImageRegex.exec(html)) !== null) {
+            addImage(metaMatch[1] || metaMatch[2] || '');
           }
-          
-          while ((match = imgRegex.exec(html)) !== null) {
-            let src = match[1];
-            if (src.startsWith('data:')) continue;
-            if (src.startsWith('//')) src = 'https:' + src;
-            else if (src.startsWith('/')) {
-               try { const parsedUrl = new URL(url); src = parsedUrl.origin + src; } catch(e){}
-            } else if (!src.startsWith('http')) {
-               try { const parsedUrl = new URL(url); src = parsedUrl.origin + '/' + src; } catch(e){}
+
+          const linkImageRegex = /<link[^>]+rel=["'][^"']*(?:image_src|preload)[^"']*["'][^>]+href=["']([^"']+)["'][^>]*>/gi;
+          let linkMatch;
+          while ((linkMatch = linkImageRegex.exec(html)) !== null) addImage(linkMatch[1]);
+
+          const imgTagRegex = /<img\b[^>]*>/gi;
+          let imgTagMatch;
+          while ((imgTagMatch = imgTagRegex.exec(html)) !== null) {
+            const tag = imgTagMatch[0];
+            const attrRegex = /\b(?:src|data-src|data-original|data-lazy-src|data-url)=["']([^"']+)["']/gi;
+            let attrMatch;
+            while ((attrMatch = attrRegex.exec(tag)) !== null) addImage(attrMatch[1]);
+
+            const srcsetMatch = tag.match(/\b(?:srcset|data-srcset)=["']([^"']+)["']/i);
+            if (srcsetMatch) {
+              srcsetMatch[1].split(',').forEach(part => addImage(part.trim().split(/\s+/)[0]));
             }
-            images.add(src);
           }
 
           let cleanHtml = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ')

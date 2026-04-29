@@ -25,11 +25,13 @@ interface GenerationTask {
   bulkPromptJson?: string;
   bulkSourceUrl?: string;
   localYoutubeOverlay?: {
+    overlayKind?: 'youtube' | 'ai-news';
     channelName?: string;
     channelLogoUrl?: string;
     subscriberText?: string;
     fontPaletteId?: string;
     markedKeywords?: string[];
+    newsBadgeStyleId?: string;
   };
   sourceMeta?: Record<string, any>;
   bulkItemId?: string;
@@ -71,6 +73,7 @@ interface BulkArticleItem {
   fontPaletteId: string;
   useAttachedImage: boolean;
   decorateOriginalPhoto: boolean;
+  aiNewsBadgeStyleId: string;
   selectedImageUrl: string;
   generatedArticle: string;
   generatedCommentPost: string;
@@ -102,6 +105,7 @@ interface BulkArticleItem {
 const VISION_MODEL = "google/gemini-2.5-pro"; // Excellent for OCR and analysis
 const TEXT_MODEL = "google/gemini-2.5-flash"; // Fast for text generation
 const YOUTUBE_IMAGE_STYLE_ID = '__youtube_image_style__';
+const AI_NEWS_IMAGE_STYLE_ID = '__ai_news_image_style__';
 const ARTICLE_LENGTH_OPTIONS = [
   { id: 'short', label: 'สั้น', hint: 'ประมาณ 500-800 ตัวอักษร', range: '500-800' },
   { id: 'medium', label: 'กลาง', hint: 'ประมาณ 900-1,300 ตัวอักษร', range: '900-1300' },
@@ -119,6 +123,12 @@ const YOUTUBE_FONT_PALETTES = [
   { id: 'gold-white-red', name: 'ทอง ขาว แดง', primary: '#ffffff', accent: '#fbbf24', block: '#b91c1c', altBlock: '#78350f', stroke: '#000000' },
   { id: 'blue-white-cyan', name: 'น้ำเงิน ขาว ไซแอน', primary: '#ffffff', accent: '#67e8f9', block: '#2563eb', altBlock: '#0891b2', stroke: '#020617' },
   { id: 'mono-white-gray', name: 'ขาว เทา มินิมอล', primary: '#ffffff', accent: '#e5e7eb', block: '#374151', altBlock: '#111827', stroke: '#000000' },
+];
+const AI_NEWS_BADGE_STYLES = [
+  { id: 'breaking-red', name: 'แดง Breaking', bg: '#dc2626', fg: '#ffffff', accent: '#facc15', border: '#7f1d1d' },
+  { id: 'cyber-blue', name: 'น้ำเงิน Cyber', bg: '#0f172a', fg: '#e0f2fe', accent: '#38bdf8', border: '#2563eb' },
+  { id: 'neon-purple', name: 'ม่วง Neon', bg: '#581c87', fg: '#ffffff', accent: '#f0abfc', border: '#a855f7' },
+  { id: 'glass-dark', name: 'ดำ Glass', bg: 'rgba(0,0,0,0.78)', fg: '#ffffff', accent: '#22c55e', border: '#ffffff' },
 ];
 
 interface AIPagePostGeneratorProps {
@@ -342,6 +352,7 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
     fontPaletteId: 'cyan-white-navy',
     useAttachedImage: false,
     decorateOriginalPhoto: false,
+    aiNewsBadgeStyleId: 'breaking-red',
     selectedImageUrl: '',
     generatedArticle: '',
     generatedCommentPost: '',
@@ -1795,6 +1806,10 @@ Return ONLY valid JSON format.`;
     return source === 'news' || source === 'rss' || tags.includes('ข่าว');
   };
 
+  const isSpecialImageStyle = (id: string) => id === YOUTUBE_IMAGE_STYLE_ID || id === AI_NEWS_IMAGE_STYLE_ID;
+  const isOverlayImageStyle = (id: string) => id === YOUTUBE_IMAGE_STYLE_ID || id === AI_NEWS_IMAGE_STYLE_ID;
+  const getDisplayImageUrl = (url: string) => url.startsWith('http') ? `/api/proxy-image?url=${encodeURIComponent(url)}` : url;
+
   const fetchNewsImages = async (id: string) => {
     const item = bulkItems.find(b => b.id === id);
     if (!item?.sourceUrl) {
@@ -1955,6 +1970,12 @@ Return only the final Thai text in the required format.`;
     return warnings;
   };
 
+  const validateAiNewsImageStyleRequired = (item: BulkArticleItem) => {
+    const missing: string[] = [];
+    if (!item.useAttachedImage || !item.selectedImageUrl) missing.push('รูปข่าวสำหรับ Image-to-Image');
+    return missing;
+  };
+
   const createYoutubeImagePromptJson = (item: BulkArticleItem) => {
     const subscribers = formatSubscriberCount(item.subscriberCount);
     const channelLogoSource = item.channelLogoUrl || item.selectedImageUrl;
@@ -2001,6 +2022,46 @@ Return only the final Thai text in the required format.`;
         channel_logo_fallback_used: !item.channelLogoUrl,
         subscribers,
         omit_subscribers: !subscribers,
+      },
+    }, null, 2);
+  };
+
+  const createAiNewsImagePromptJson = (item: BulkArticleItem) => {
+    const supportingImages = (item.images || []).filter(img => img !== item.selectedImageUrl).slice(0, 4);
+    const badge = AI_NEWS_BADGE_STYLES.find(s => s.id === item.aiNewsBadgeStyleId) || AI_NEWS_BADGE_STYLES[0];
+    const subjectInstruction = item.decorateOriginalPhoto
+      ? [
+          'IMPORTANT: Treat the attached news image as the final base photo.',
+          'Keep the original photo, people, object, place, composition, lighting, and news context as close to the source as possible.',
+          'Only add editorial design on top: Thai headline, subtle AI/technology visual accents, information blocks, and a top-left "ข่าวAI" label.',
+          'Do not replace the main subject, do not invent a different event, and do not turn it into a generic stock illustration.',
+        ].join(' ')
+      : 'Use the attached news image as the main reference and recreate it as a premium Thai AI-news social poster while preserving the core event/context, subject, composition, and realistic lighting.';
+    const corePrompt = [
+      'Create a polished Thai AI-news social media poster for Facebook.',
+      subjectInstruction,
+      `Main Thai headline text must be exactly: "${item.selectedHeadline}".`,
+      'Design readable Thai typography with strong hierarchy, editorial news energy, modern AI/tech visual language, and high contrast. Keep the key subject visible and avoid covering important faces or product details.',
+      `Add a top-left edge-attached news label that reads exactly "ข่าวAI". Badge style: ${badge.name}, background ${badge.bg}, text ${badge.fg}, accent ${badge.accent}. The label must touch the top-left image edge like a professional newsroom strap.`,
+      supportingImages.length > 0 ? `Use these additional news images only as optional context accents: ${supportingImages.join(', ')}` : '',
+      'Add subtle AI visual cues only where useful: neural grid lines, tiny chip icons, data glow, scanning frame, or clean tech overlay. Avoid clutter and fake UI overload.',
+      'Do not include unrelated logos, fake watermarks, misspelled Thai, unreadable text, or extra headline variations.',
+      'Overall mood: credible, urgent but premium, Thai AI news page, clean editorial composition, mobile readable.',
+    ].filter(Boolean).join(' ');
+
+    return JSON.stringify({
+      core_prompt: corePrompt,
+      negative_prompt: item.decorateOriginalPhoto
+        ? 'changed event, changed subject, generic stock photo, fake person, fake logo, extra watermark, unreadable Thai text, misspelled Thai, distorted face, deformed hands, low quality, blurry, messy layout, too much text, text covering main subject'
+        : 'generic stock photo, unrelated event, fake logo, extra watermark, unreadable Thai text, misspelled Thai, distorted face, deformed hands, low quality, blurry, messy layout, too much text, text covering main subject',
+      style_name: 'ข่าวAI',
+      edit_mode: item.decorateOriginalPhoto ? 'decorate_original_news_photo_only' : 'ai_news_image_to_image_recreation',
+      news_badge: {
+        text: 'ข่าวAI',
+        style_id: badge.id,
+        style_name: badge.name,
+        position: 'top-left-edge-attached',
+        colors: { bg: badge.bg, fg: badge.fg, accent: badge.accent, border: badge.border },
       },
     }, null, 2);
   };
@@ -2161,6 +2222,45 @@ Return only the final Thai text in the required format.`;
     });
   };
 
+  const drawAiNewsBadge = (
+    ctx: CanvasRenderingContext2D,
+    w: number,
+    h: number,
+    styleId?: string,
+  ) => {
+    const style = AI_NEWS_BADGE_STYLES.find(s => s.id === styleId) || AI_NEWS_BADGE_STYLES[0];
+    const badgeH = Math.max(58, Math.min(92, h * 0.085));
+    const badgeW = Math.max(210, Math.min(330, w * 0.30));
+    const notch = badgeH * 0.34;
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.45)';
+    ctx.shadowBlur = 18;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(badgeW, 0);
+    ctx.lineTo(badgeW + notch, badgeH / 2);
+    ctx.lineTo(badgeW, badgeH);
+    ctx.lineTo(0, badgeH);
+    ctx.closePath();
+    ctx.fillStyle = style.bg;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = style.border;
+    ctx.lineWidth = Math.max(3, w * 0.003);
+    ctx.stroke();
+    ctx.fillStyle = style.accent;
+    ctx.fillRect(0, badgeH - Math.max(6, badgeH * 0.08), badgeW * 0.74, Math.max(6, badgeH * 0.08));
+    ctx.fillStyle = style.fg;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.font = `900 ${Math.floor(badgeH * 0.42)}px Kanit, Prompt, Arial, sans-serif`;
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(0,0,0,0.28)';
+    ctx.strokeText('ข่าวAI', badgeH * 0.28, badgeH * 0.50);
+    ctx.fillText('ข่าวAI', badgeH * 0.28, badgeH * 0.50);
+    ctx.restore();
+  };
+
   const renderYoutubeOverlayImage = async (task: GenerationTask, headline: string) => {
     const base = await loadCanvasImage(task.referenceImageUrl);
     const canvas = document.createElement('canvas');
@@ -2174,6 +2274,7 @@ Return only the final Thai text in the required format.`;
     const h = canvas.height;
     const palette = YOUTUBE_FONT_PALETTES.find(p => p.id === task.localYoutubeOverlay?.fontPaletteId) || YOUTUBE_FONT_PALETTES[0];
     drawCoverImage(ctx, base, w, h);
+    const overlayKind = task.localYoutubeOverlay?.overlayKind || 'youtube';
 
     const isPortrait = task.imageRatio === '9:16';
     const isLandscape = task.imageRatio === '16:9';
@@ -2233,8 +2334,12 @@ Return only the final Thai text in the required format.`;
       y += fontSize * 1.14;
     });
 
+    if (overlayKind === 'ai-news') {
+      drawAiNewsBadge(ctx, w, h, task.localYoutubeOverlay?.newsBadgeStyleId);
+    }
+
     const meta = task.localYoutubeOverlay;
-    if (meta && (meta.channelName || meta.subscriberText || meta.channelLogoUrl)) {
+    if (overlayKind === 'youtube' && meta && (meta.channelName || meta.subscriberText || meta.channelLogoUrl)) {
       const cardW = Math.min(w * 0.42, 420);
       const cardH = Math.max(58, h * 0.11);
       const cardX = w - cardW - pad;
@@ -2405,6 +2510,8 @@ Return only the final Thai text in the required format.`;
     const item = bulkItems.find(b => b.id === itemId);
     if (!item || !item.selectedHeadline) return alert('⚠️ กรุณาเลือกพาดหัวก่อน');
     const isYoutubeImageStyle = item.cardImagePromptStyleId === YOUTUBE_IMAGE_STYLE_ID;
+    const isAiNewsImageStyle = item.cardImagePromptStyleId === AI_NEWS_IMAGE_STYLE_ID;
+    const isOverlayStyle = isOverlayImageStyle(item.cardImagePromptStyleId);
 
     if (isYoutubeImageStyle) {
       const missing = validateYoutubeImageStyleRequired(item);
@@ -2421,10 +2528,18 @@ Return only the final Thai text in the required format.`;
         }
       }
     }
+    if (isAiNewsImageStyle) {
+      const missing = validateAiNewsImageStyleRequired(item);
+      if (missing.length > 0) {
+        return alert(`⚠️ สไตล์ "ข่าวAI" ยังขาดข้อมูล:\n- ${missing.join('\n- ')}\n\nให้กด "ดูดรูปข่าวจากwebsite" แล้วเลือกรูปข่าวก่อน`);
+      }
+    }
 
     let basePromptJson = '';
     if (isYoutubeImageStyle) {
       basePromptJson = createYoutubeImagePromptJson(item);
+    } else if (isAiNewsImageStyle) {
+      basePromptJson = createAiNewsImagePromptJson(item);
     } else if (item.cardImagePromptStyleId) {
       const saved = imagePromptStyles.find(p => p.id === item.cardImagePromptStyleId);
       if (saved) basePromptJson = saved.content;
@@ -2434,7 +2549,7 @@ Return only the final Thai text in the required format.`;
     updateBulkItem(itemId, { status: 'generating-image', imageErrorMsg: '', errorMsg: '' });
     try {
       let cleanJson = basePromptJson;
-      if (!isYoutubeImageStyle) {
+      if (!isOverlayStyle) {
         const promptJson = `You are an expert AI image prompt engineer.\nI have a base image generation prompt JSON:\n${basePromptJson}\n\nAnd a specific headline:\n"${item.selectedHeadline}"\n\nReturn the UPDATED JSON with the headline embedded. Return ONLY valid JSON.`;
         const text = await callOpenRouter([{ role: "user", content: promptJson }], VISION_MODEL);
         cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -2443,7 +2558,7 @@ Return only the final Thai text in the required format.`;
       const taskId = Date.now().toString() + Math.random().toString(36).slice(2, 6);
       globalTaskStore.addTask({ id: `aipage_${taskId}`, title: `AI: ${item.selectedHeadline.substring(0, 25)}...`, progress: 'เข้าคิวงานเรียบร้อย...', status: 'running' });
 
-      const useImg = isYoutubeImageStyle ? true : item.useAttachedImage && !!item.selectedImageUrl;
+      const useImg = isOverlayStyle ? true : item.useAttachedImage && !!item.selectedImageUrl;
       const newTask: GenerationTask = {
         id: taskId, status: 'pending', log: ['เข้าคิวจากกล่องบทความ...'],
         rawArticle: item.generatedArticle,
@@ -2458,12 +2573,14 @@ Return only the final Thai text in the required format.`;
         bulkHeadline: item.selectedHeadline,
         bulkPromptJson: cleanJson,
         bulkSourceUrl: item.sourceUrl,
-        localYoutubeOverlay: isYoutubeImageStyle && item.decorateOriginalPhoto ? {
+        localYoutubeOverlay: isOverlayStyle && item.decorateOriginalPhoto ? {
+          overlayKind: isAiNewsImageStyle ? 'ai-news' : 'youtube',
           channelName: item.channelName?.trim() || '',
           channelLogoUrl: item.channelLogoUrl || '',
           subscriberText: formatSubscriberCount(item.subscriberCount),
           fontPaletteId: item.fontPaletteId,
           markedKeywords: item.markedKeywords,
+          newsBadgeStyleId: item.aiNewsBadgeStyleId,
         } : undefined,
         sourceMeta: {
           title: item.title || '',
@@ -2999,6 +3116,7 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
   const getHeadlinePackName = (id: string) => headlinePacks.find(p => p.id === id)?.name || 'ยังไม่เลือก';
   const getImagePromptStyleName = (id: string) => {
     if (id === YOUTUBE_IMAGE_STYLE_ID) return 'รูปจากyoutube';
+    if (id === AI_NEWS_IMAGE_STYLE_ID) return 'ข่าวAI';
     return imagePromptStyles.find(p => p.id === id)?.name || 'ยังไม่เลือก';
   };
   const getArticleLengthLabel = (id: string) => {
@@ -3434,6 +3552,7 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                         >
                           <option value="">-- ไม่เปลี่ยน --</option>
                           <option value={YOUTUBE_IMAGE_STYLE_ID}>รูปจากยูทูป</option>
+                          <option value={AI_NEWS_IMAGE_STYLE_ID}>ข่าวAI</option>
                           {imagePromptStyles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                         </select>
                       </div>
@@ -3735,6 +3854,7 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                             <select className="input-field text-xs py-1 w-full" value={item.cardImagePromptStyleId} onChange={e => updateBulkItem(item.id, { cardImagePromptStyleId: e.target.value })} disabled={item.status === 'queued'}>
                               <option value="">-- เลือกสไตล์ภาพ --</option>
                               <option value={YOUTUBE_IMAGE_STYLE_ID}>รูปจากyoutube</option>
+                              <option value={AI_NEWS_IMAGE_STYLE_ID}>ข่าวAI</option>
                               {imagePromptStyles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                             </select>
                           </div>
@@ -3834,7 +3954,7 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                                         : 'border-gray-600 hover:border-gray-400'
                                     }`}
                                   >
-                                    <img src={img} alt={`img ${ii + 1}`} className="w-full h-full object-cover" />
+                                    <img src={getDisplayImageUrl(img)} alt={`img ${ii + 1}`} className="w-full h-full object-cover" />
                                     <span className="absolute left-1 top-1 rounded bg-black/75 px-1.5 py-0.5 text-[9px] font-bold text-white">
                                       #{ii + 1}
                                     </span>
@@ -3876,7 +3996,7 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                           </div>
                         )}
 
-                        {item.cardImagePromptStyleId === YOUTUBE_IMAGE_STYLE_ID && (
+                        {isOverlayImageStyle(item.cardImagePromptStyleId) && (
                           <div className="space-y-2 rounded-lg border border-cyan-500/20 bg-cyan-950/20 p-3">
                             <label className="flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 p-2 cursor-pointer">
                               <input
@@ -3889,10 +4009,39 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                               <span className="text-xs text-amber-100 leading-snug">
                                 คงรูปเดิมไว้ แค่ตกแต่งเพิ่ม
                                 <span className="block text-[10px] text-amber-300/80">
-                                  เหมาะกับรูปที่อยากให้ดูจริง: รักษาหน้า เสื้อ ฉาก และแสงเดิม แล้วเพิ่มตัวหนังสือ/กราฟิก/การ์ดช่องทับลงไป
+                                  {item.cardImagePromptStyleId === AI_NEWS_IMAGE_STYLE_ID
+                                    ? 'เหมาะกับรูปข่าวจริง: รักษาเหตุการณ์/วัตถุ/ภาพเดิม แล้วเพิ่มพาดหัวและป้าย ข่าวAI ทับลงไป'
+                                    : 'เหมาะกับรูปที่อยากให้ดูจริง: รักษาหน้า เสื้อ ฉาก และแสงเดิม แล้วเพิ่มตัวหนังสือ/กราฟิก/การ์ดช่องทับลงไป'}
                                 </span>
                               </span>
                             </label>
+                            {item.cardImagePromptStyleId === AI_NEWS_IMAGE_STYLE_ID ? (
+                              <div className="space-y-2">
+                                <label className="text-[9px] text-gray-500 block">Canvas ป้ายข่าว AI ซ้ายบน</label>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                  {AI_NEWS_BADGE_STYLES.map(style => (
+                                    <button
+                                      key={style.id}
+                                      type="button"
+                                      onClick={() => updateBulkItem(item.id, { aiNewsBadgeStyleId: style.id })}
+                                      className={`rounded-lg border p-2 text-left transition-all ${item.aiNewsBadgeStyleId === style.id ? 'border-red-400 bg-red-500/10' : 'border-gray-700 bg-black/20 hover:border-gray-500'}`}
+                                    >
+                                      <div className="relative h-12 overflow-hidden rounded bg-gradient-to-br from-slate-800 to-slate-950">
+                                        <div
+                                          className="absolute left-0 top-0 flex h-7 items-center pr-4 pl-2 text-[11px] font-black shadow-lg"
+                                          style={{ backgroundColor: style.bg, color: style.fg, clipPath: 'polygon(0 0, 86% 0, 100% 50%, 86% 100%, 0 100%)' }}
+                                        >
+                                          ข่าวAI
+                                        </div>
+                                        <div className="absolute bottom-2 left-2 h-2 w-16 rounded" style={{ backgroundColor: style.accent }} />
+                                      </div>
+                                      <div className="mt-1 text-[10px] font-bold text-gray-200">{style.name}</div>
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : (
+                              <>
                             <div className="flex flex-wrap gap-1.5 text-[9px]">
                               <span className={`px-1.5 py-0.5 rounded border ${item.channelName ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/20' : 'bg-amber-500/15 text-amber-300 border-amber-500/20'}`}>
                                 ช่อง: {item.channelName || 'ไม่ใส่ในรูป'}
@@ -3931,6 +4080,8 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                                 onChange={e => updateBulkItem(item.id, { subscriberCount: e.target.value === '' ? undefined : Number(e.target.value) })}
                               />
                             </div>
+                              </>
+                            )}
                             {item.decorateOriginalPhoto && (
                               <div className="space-y-2">
                                 <div>
@@ -3990,7 +4141,7 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                         {/* Images strip (when not used as reference) */}
                         {item.images && item.images.length > 0 && !item.useAttachedImage && (
                           <div className="flex gap-1 flex-wrap">
-                            {item.images.slice(0, 5).map((img, ii) => <img key={ii} src={img} alt="" className="h-8 w-12 object-cover rounded border border-gray-700/50" />)}
+                            {item.images.slice(0, 5).map((img, ii) => <img key={ii} src={getDisplayImageUrl(img)} alt="" className="h-8 w-12 object-cover rounded border border-gray-700/50" />)}
                             {item.images.length > 5 && <span className="text-[10px] text-gray-500 self-center">+{item.images.length - 5}</span>}
                           </div>
                         )}
@@ -4124,9 +4275,9 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                               <button onClick={() => handleCardGenerateArticleAndHeadlines(item.id)} className="bg-gray-700 hover:bg-gray-600 text-gray-300 py-2 px-3 rounded-lg text-xs font-medium transition-all">🔄 สร้างใหม่</button>
                               <button
                                 onClick={() => handleCardCreateImage(item.id)}
-                                disabled={!item.selectedHeadline || !item.cardImagePromptStyleId || (item.cardImagePromptStyleId !== YOUTUBE_IMAGE_STYLE_ID && !item.cardImagePromptStyleId)}
+                                disabled={!item.selectedHeadline || !item.cardImagePromptStyleId}
                                 className="flex-1 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white py-2 rounded-lg font-bold text-xs transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-purple-500/10"
-                                title={!item.selectedHeadline ? 'เลือกพาดหัวก่อน' : !item.cardImagePromptStyleId ? 'เลือกสไตล์ภาพก่อน' : item.cardImagePromptStyleId === YOUTUBE_IMAGE_STYLE_ID ? 'ต้องมีสถานะ YouTube extract และรูปคนที่เลือกไว้ ส่วนชื่อช่อง/โลโก้/ผู้ติดตามไม่บังคับ' : ''}
+                                title={!item.selectedHeadline ? 'เลือกพาดหัวก่อน' : !item.cardImagePromptStyleId ? 'เลือกสไตล์ภาพก่อน' : item.cardImagePromptStyleId === YOUTUBE_IMAGE_STYLE_ID ? 'ต้องมีสถานะ YouTube extract และรูปคนที่เลือกไว้ ส่วนชื่อช่อง/โลโก้/ผู้ติดตามไม่บังคับ' : item.cardImagePromptStyleId === AI_NEWS_IMAGE_STYLE_ID ? 'ต้องมีรูปข่าวที่เลือกไว้สำหรับ Image-to-Image' : ''}
                               >
                                 {item.imageQueuedCount > 0 ? '🎨 สร้างภาพใหม่อีกครั้ง' : '🎨 สร้างภาพ'}
                               </button>
