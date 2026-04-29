@@ -1672,12 +1672,17 @@ Return ONLY valid JSON format.`;
     const data = await res.json();
     if (data.success) {
       setDropboxUploadLog(`✅ บันทึก CSV แล้ว: ${data.csvPath}`);
+      const csvText = data.csvContent || '';
+      const blobUrl = csvText
+        ? URL.createObjectURL(new Blob([csvText], { type: 'text/csv;charset=utf-8;' }))
+        : data.csvPath;
       const link = document.createElement('a');
-      link.href = data.csvPath;
-      link.download = `aipage_n8n_export_${Date.now()}.csv`;
+      link.href = blobUrl;
+      link.download = data.fileName || `aipage_n8n_export_${Date.now()}.csv`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      if (csvText) setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
     }
     else alert(data.error || 'บันทึก CSV ไม่สำเร็จ');
   };

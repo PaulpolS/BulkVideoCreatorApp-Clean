@@ -1001,10 +1001,17 @@ const fileSaverPlugin = (): Plugin => ({
                   p.createdAt || '',
                 ].map(esc).join(',');
               });
+              const csvBody = headers.join(',') + '\r\n' + lines.join('\r\n');
+              const csvContent = '\uFEFF' + csvBody;
               const csvPath = path.join(getAipageDataDir(), 'aipage_n8n_export.csv');
-              fs.writeFileSync(csvPath, '\uFEFF' + headers.join(',') + '\n' + lines.join('\n'));
+              fs.writeFileSync(csvPath, csvContent);
               res.setHeader('Content-Type', 'application/json');
-              res.end(JSON.stringify({ success: true, csvPath: '/app_data/aipage_n8n_export.csv' }));
+              res.end(JSON.stringify({
+                success: true,
+                csvPath: '/app_data/aipage_n8n_export.csv',
+                fileName: `aipage_n8n_export_${Date.now()}.csv`,
+                csvContent,
+              }));
             } else if (action === 'clear') {
               fs.writeFileSync(resultsFile, JSON.stringify([]));
               res.setHeader('Content-Type', 'application/json');
