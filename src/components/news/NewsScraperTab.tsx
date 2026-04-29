@@ -144,6 +144,7 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isBulkSending, setIsBulkSending] = useState(false);
   const stopBulkRef = useRef(false);
+  const newsLogTaskIdRef = useRef<string | null>(null);
   const [selectedSites, setSelectedSites] = useState<Set<string>>(new Set());
   const [scrapedToday, setScrapedToday] = useState<{ url: string; time: string; name: string }[]>([]);
   const [sortBy, setSortBy] = useState<'default' | 'newsScore' | 'evergreenScore'>('default');
@@ -346,7 +347,23 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
   const deselectAll = () => setSelectedIds(new Set());
 
   const addLog = (msg: string) => {
-    setLogs(prev => [...prev, `[${new Date().toLocaleTimeString('th-TH')}] ${msg}`]);
+    const line = `[${new Date().toLocaleTimeString('th-TH')}] ${msg}`;
+    setLogs(prev => [...prev, line]);
+    if (newsLogTaskIdRef.current) {
+      globalTaskStore.logTask(newsLogTaskIdRef.current, msg);
+    }
+  };
+
+  const startNewsLogTask = (id: string, title: string, progress: string) => {
+    newsLogTaskIdRef.current = id;
+    globalTaskStore.addTask({ id, title, category: 'news-rss', progress, status: 'running' });
+  };
+
+  const finishNewsLogTask = (id: string, progress: string, status: 'completed' | 'error' | 'cancelled' = 'completed') => {
+    globalTaskStore.updateTask(id, { progress, status });
+    if (newsLogTaskIdRef.current === id) {
+      newsLogTaskIdRef.current = null;
+    }
   };
 
   const cleanJsonText = (text: string) => {
@@ -376,6 +393,8 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
     setIsScraping(true);
     setArticles([]);
     setLogs([]);
+    const scrapeTaskId = `news_scrape_${Date.now()}`;
+    startNewsLogTask(scrapeTaskId, `📰 ดูดข่าว RSS ${targets.length} แหล่ง`, `เตรียมสแกน ${targets.length} แหล่งข่าว...`);
     let allScraped: ArticleItem[] = [];
     let newScrapedToday = [...scrapedToday];
 
@@ -471,6 +490,7 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
     setArticles(allScraped.slice(0, 150)); // limit total
     saveScrapedToday(newScrapedToday);
     addLog(`\n🎯 สรุปผล: สกัดลิงก์ข่าวรวมทั้งหมด ${allScraped.length} ข่าว (แสดงสูงสุด 150 ข่าว)`);
+    finishNewsLogTask(scrapeTaskId, `สกัดลิงก์ข่าวรวม ${allScraped.length} ข่าว (แสดงสูงสุด 150 ข่าว)`);
     setIsScraping(false);
   };
 
@@ -484,6 +504,8 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
     setIsTranslating(true);
     const BATCH_SIZE = 30;
     const totalBatches = Math.ceil(allToTranslate.length / BATCH_SIZE);
+    const translateTaskId = `news_translate_${Date.now()}`;
+    startNewsLogTask(translateTaskId, `🇹🇭 แปลหัวข้อข่าว ${allToTranslate.length} รายการ`, `แบ่งเป็น ${totalBatches} ชุด ชุดละ ${BATCH_SIZE}`);
     addLog(`🌐 พบ ${allToTranslate.length} หัวข้อที่ยังไม่ได้แปล → จะแบ่งเป็น ${totalBatches} ชุด (ชุดละ ${BATCH_SIZE})`);
 
     let totalTranslated = 0;
@@ -531,6 +553,7 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
     }
 
     addLog(`🎯 สรุปผล: แปลหัวข้อข่าวสำเร็จทั้งหมด ${totalTranslated}/${allToTranslate.length} รายการ (พร้อมคะแนน News + Evergreen + Tags)`);
+    finishNewsLogTask(translateTaskId, `แปลหัวข้อข่าวสำเร็จ ${totalTranslated}/${allToTranslate.length} รายการ`);
     setIsTranslating(false);
   };
 
@@ -539,6 +562,8 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
     if (!apiKey) return alert("กรุณาตั้งค่า OpenRouter API Key ก่อน");
 
     setProcessingId(article.id);
+    const processTaskId = `news_process_${Date.now()}`;
+    startNewsLogTask(processTaskId, `⚙️ ปั่นข่าว: ${(article.thaiTitle || article.title).substring(0, 35)}...`, 'เริ่มต้นกระบวนการ AI');
     addLog(`-----------------------------------`);
     addLog(`🚀 [${article.title.substring(0, 30)}...] เริ่มต้นกระบวนการ AI`);
 
@@ -612,9 +637,11 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
       
       onSendToStock([newStockData]);
       addLog(`🎉 เสร็จสมบูรณ์! ข้อความพร้อมถูกนำไปปั้นวิดีโอแล้ว`);
+      finishNewsLogTask(processTaskId, 'เสร็จสมบูรณ์ พร้อมส่งเข้าคลังบทความ');
 
     } catch (e: any) {
       addLog(`❌ เกิดข้อผิดพลาดระหว่าง AI Process: ${e.message}`);
+      finishNewsLogTask(processTaskId, `ผิดพลาด: ${e.message}`, 'error');
     } finally {
       setProcessingId(null);
     }
@@ -1016,8 +1043,42 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
 
       {/* RSS Mode */}
       {activeMode === 'rss' && (
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <div className="lg:col-span-2 space-y-4">
+      <div className="space-y-4">
+        <Card>
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <h3 className="text-lg font-bold flex items-center gap-2">
+              <span>📅</span> แหล่งข่าวที่ดูดแล้ววันนี้
+            </h3>
+            <span className="text-[10px] text-gray-500 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-full">{new Date().toLocaleDateString('th-TH')}</span>
+          </div>
+
+          {scrapedToday.length === 0 ? (
+            <div className="text-sm text-gray-500">
+              ยังไม่มีการดูดข่าวในวันนี้
+            </div>
+          ) : (
+            <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-1">
+              {scrapedToday.map((item, idx) => (
+                <a
+                  key={idx}
+                  href={item.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="min-w-[220px] max-w-[280px] rounded-lg border border-gray-200 bg-gray-50 p-3 transition-colors hover:border-blue-400 dark:border-gray-700 dark:bg-gray-800/50"
+                  title={item.url}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="truncate text-sm font-bold text-blue-600 dark:text-blue-400">{item.name}</span>
+                    <span className="shrink-0 text-[10px] text-gray-500">{item.time}</span>
+                  </div>
+                  <div className="mt-1 truncate text-[10px] text-gray-400">{item.url}</div>
+                </a>
+              ))}
+            </div>
+          )}
+        </Card>
+
+      <div className="space-y-4">
         <Card>
           <div className="mb-4">
             <h2 className="text-xl font-bold flex items-center gap-2">
@@ -1110,9 +1171,10 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
                       if (selected.length === 0) return;
                       stopBulkRef.current = false;
                       setIsBulkSending(true);
-                      addLog(`📦 กำลังดึงเนื้อหาและเก็บ ${selected.length} ข่าวเข้าคลังบทความ...`);
                       const saveTaskId = `news_save_${Date.now()}`;
                       globalTaskStore.addTask({ id: saveTaskId, title: `📦 เก็บข่าวเข้าคลัง ${selected.length} ข่าว`, category: 'news-save', progress: `กำลังดึงเนื้อหา 0/${selected.length}...`, status: 'running' });
+                      newsLogTaskIdRef.current = saveTaskId;
+                      addLog(`📦 กำลังดึงเนื้อหาและเก็บ ${selected.length} ข่าวเข้าคลังบทความ...`);
                       const stockItems: any[] = [];
                       for (let i = 0; i < selected.length; i++) {
                         if (stopBulkRef.current) {
@@ -1170,9 +1232,11 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
                         const data = await res.json();
                         addLog(`✅ เก็บเข้าคลังบทความสำเร็จ! เพิ่ม ${data.added} ข่าว (ซ้ำ ${data.duplicates} ข่าว)`);
                         globalTaskStore.updateTask(saveTaskId, { progress: `✅ เพิ่ม ${data.added} ข่าว (ซ้ำ ${data.duplicates})`, status: 'completed' });
+                        if (newsLogTaskIdRef.current === saveTaskId) newsLogTaskIdRef.current = null;
                       } catch (e: any) {
                         addLog(`❌ เก็บเข้าคลังบทความล้มเหลว: ${e.message}`);
                         globalTaskStore.updateTask(saveTaskId, { progress: `❌ ${e.message}`, status: 'error' });
+                        if (newsLogTaskIdRef.current === saveTaskId) newsLogTaskIdRef.current = null;
                       }
                       setIsBulkSending(false);
                     }}
@@ -1190,9 +1254,10 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
                         if (selected.length === 0) return;
                         stopBulkRef.current = false;
                         setIsBulkSending(true);
-                        addLog(`🚀 กำลังดึงเนื้อหาดิบ ${selected.length} ข่าวเพื่อส่งไปทำโพสต์ AI...`);
                         const aiSendTaskId = `news_ai_${Date.now()}`;
                         globalTaskStore.addTask({ id: aiSendTaskId, title: `📰 ส่งข่าวไป AI Page ${selected.length} ข่าว`, category: 'news-save', progress: `ดึงเนื้อหา 0/${selected.length}...`, status: 'running' });
+                        newsLogTaskIdRef.current = aiSendTaskId;
+                        addLog(`🚀 กำลังดึงเนื้อหาดิบ ${selected.length} ข่าวเพื่อส่งไปทำโพสต์ AI...`);
                         const results: { rawArticle: string; sourceUrl: string; title: string; tags?: string[]; images?: string[]; sourceType?: string; domain?: string }[] = [];
                         const stockItems: any[] = [];
                         const sentToAIPageAt = new Date().toISOString();
@@ -1245,6 +1310,7 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
                         } catch(e) {}
                         addLog(`✅ ดึงเนื้อหาเสร็จ ${results.length} ข่าว → กำลังส่งไปหน้า "สร้างรูปลงเพจ AI"...`);
                         globalTaskStore.updateTask(aiSendTaskId, { progress: `✅ ส่ง ${results.length} ข่าวไป AI Page เรียบร้อย`, status: 'completed' });
+                        if (newsLogTaskIdRef.current === aiSendTaskId) newsLogTaskIdRef.current = null;
                         onSendToAIPage(results);
                         setIsBulkSending(false);
                       }}
@@ -1328,70 +1394,6 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
             ))}
           </div>
         )}
-      </div>
-
-      <div className="lg:col-span-1">
-        <Card className="sticky top-4">
-          <div className="mb-4">
-            <h2 className="text-lg flex items-center gap-2 font-bold">
-              💻 สเตตัสการปั่น (Live Logs)
-            </h2>
-          </div>
-          <div>
-            <div className="bg-black/90 p-3 rounded-lg h-[400px] overflow-y-auto font-mono text-[11px] text-green-400 space-y-1 shadow-inner custom-scrollbar">
-              {logs.length === 0 ? (
-                <div className="text-gray-500 italic text-center mt-10">ระบบรอดำเนินการ...</div>
-              ) : (
-                logs.map((log, i) => (
-                  <div key={i} className="break-words opacity-90 hover:opacity-100 border-b border-white/10 pb-1">{log}</div>
-                ))
-              )}
-            </div>
-            {logs.length > 0 && (
-               <button onClick={() => setLogs([])} className="w-full mt-2 text-xs text-gray-400 hover:text-red-500">
-                  ล้างหน้าจอ Logs
-               </button>
-            )}
-            
-            <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/10 rounded-lg text-xs text-blue-700 dark:text-blue-300">
-              <strong>💡 ทริคการใช้งาน:</strong>
-              <ul className="list-disc pl-4 mt-1 space-y-1">
-                <li>เอาลิงก์จากหน้าหมวดหมู่มาใส่ (เช่น หน้ารวมข่าวหุ้น) มันจะสอยมาให้ทีละ 20-50 เรื่อง</li>
-                <li>คุณมีหน้าที่แค่กดปุ่มเขียว AI จะอ่านเนื้อหาเต็มทะลุกำแพง และเขียนข่าวสรุปให้ใหม่ 100% ตรงคอนเทนต์</li>
-              </ul>
-            </div>
-          </div>
-        </Card>
-
-        {/* Scraped Today Box */}
-        <Card className="mt-4 sticky top-[600px]">
-          <div className="mb-4 flex items-center justify-between">
-            <h3 className="text-lg font-bold flex items-center gap-2">
-              <span>📅</span> แหล่งข่าวที่ดูดแล้ววันนี้
-            </h3>
-            <span className="text-[10px] text-gray-500 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-full">{new Date().toLocaleDateString('th-TH')}</span>
-          </div>
-          
-          {scrapedToday.length === 0 ? (
-            <div className="text-center py-6 text-gray-500 text-sm">
-              ยังไม่มีการดูดข่าวในวันนี้
-            </div>
-          ) : (
-            <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-1">
-              {scrapedToday.map((item, idx) => (
-                <div key={idx} className="flex flex-col bg-gray-50 dark:bg-gray-800/50 p-3 rounded-lg border border-gray-100 dark:border-gray-700">
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="font-bold text-[13px] text-blue-600 dark:text-blue-400">{item.name}</span>
-                    <span className="text-[10px] text-gray-500">{item.time}</span>
-                  </div>
-                  <a href={item.url} target="_blank" rel="noreferrer" className="text-[10px] text-gray-400 hover:text-blue-500 truncate block w-full overflow-hidden text-ellipsis whitespace-nowrap">
-                    {item.url}
-                  </a>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
       </div>
 
       </div>
