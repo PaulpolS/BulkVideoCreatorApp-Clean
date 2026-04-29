@@ -2512,6 +2512,7 @@ Return only the final Thai text in the required format.`;
     const isYoutubeImageStyle = item.cardImagePromptStyleId === YOUTUBE_IMAGE_STYLE_ID;
     const isAiNewsImageStyle = item.cardImagePromptStyleId === AI_NEWS_IMAGE_STYLE_ID;
     const isOverlayStyle = isOverlayImageStyle(item.cardImagePromptStyleId);
+    const isLocalCanvasOnly = isOverlayStyle && item.decorateOriginalPhoto;
 
     if (isYoutubeImageStyle) {
       const missing = validateYoutubeImageStyleRequired(item);
@@ -2600,7 +2601,7 @@ Return only the final Thai text in the required format.`;
       };
       setTasks(prev => [...prev, newTask]);
       updateBulkItem(itemId, {
-        finalPromptJson: cleanJson,
+        finalPromptJson: isLocalCanvasOnly ? '' : cleanJson,
         status: 'article-done',
         imageQueuedCount: (item.imageQueuedCount || 0) + 1,
         lastImageQueuedAt: new Date().toISOString(),
@@ -4240,7 +4241,7 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                           </div>
                         )}
 
-                        {item.finalPromptJson && (
+                        {item.finalPromptJson && !(isOverlayImageStyle(item.cardImagePromptStyleId) && item.decorateOriginalPhoto) && (
                           <div className="space-y-1.5">
                             <div className="flex items-center justify-between">
                               <label className="text-[10px] text-purple-300 font-bold">Prompt JSON สำหรับ Kie.ai</label>
@@ -4279,7 +4280,9 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                                 className="flex-1 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white py-2 rounded-lg font-bold text-xs transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-purple-500/10"
                                 title={!item.selectedHeadline ? 'เลือกพาดหัวก่อน' : !item.cardImagePromptStyleId ? 'เลือกสไตล์ภาพก่อน' : item.cardImagePromptStyleId === YOUTUBE_IMAGE_STYLE_ID ? 'ต้องมีสถานะ YouTube extract และรูปคนที่เลือกไว้ ส่วนชื่อช่อง/โลโก้/ผู้ติดตามไม่บังคับ' : item.cardImagePromptStyleId === AI_NEWS_IMAGE_STYLE_ID ? 'ต้องมีรูปข่าวที่เลือกไว้สำหรับ Image-to-Image' : ''}
                               >
-                                {item.imageQueuedCount > 0 ? '🎨 สร้างภาพใหม่อีกครั้ง' : '🎨 สร้างภาพ'}
+                                {isOverlayImageStyle(item.cardImagePromptStyleId) && item.decorateOriginalPhoto
+                                  ? item.imageQueuedCount > 0 ? '🖼️ แปะ Canvas ใหม่อีกครั้ง' : '🖼️ แปะ Canvas สร้างภาพ'
+                                  : item.imageQueuedCount > 0 ? '🎨 สร้างภาพใหม่อีกครั้ง' : '🎨 สร้างภาพ'}
                               </button>
                             </>
                           )}
