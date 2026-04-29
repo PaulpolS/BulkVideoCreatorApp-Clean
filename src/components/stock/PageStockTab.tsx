@@ -796,7 +796,7 @@ export function PageStockTab() {
     return data.choices?.[0]?.message?.content?.trim() || '';
   };
 
-  const askOpenRouter = async (prompt: string, signal?: AbortSignal) => {
+  const askOpenRouter = async (prompt: string, signal?: AbortSignal, maxTokens = 6000) => {
     if (!activeProfile?.openRouterKey) throw new Error('ไม่พบ OpenRouter API Key');
     const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
@@ -809,6 +809,7 @@ export function PageStockTab() {
         model: settings.openRouterModel || 'google/gemini-2.5-pro',
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.72,
+        max_tokens: maxTokens,
       }),
     });
     const data = await res.json();
@@ -1152,8 +1153,6 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
     if (!localImageBrainCsvText.trim() || !getOpenRouterKeyForLocalImage() || localImageBrainAnalyzing) return;
     const brainKey = localImageBrainKey || createManualBrainKey(localImageBrainCsvName || 'สมองเขียนโพส');
     const rows = parseCsvTable(localImageBrainCsvText);
-    const messySample = localImageBrainCsvText.slice(0, 42000);
-    const tableSample = JSON.stringify(rows.slice(0, 120), null, 2).slice(0, 32000);
     setLocalImageBrainKey(brainKey);
     setLocalImageBrainAnalyzing(true);
     globalTaskStore.enqueueTask({
@@ -1164,13 +1163,59 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
     }, async ctx => {
       try {
         ctx.log(`1/6 อ่าน CSV: ${localImageBrainCsvName || 'ไฟล์อัปโหลด'} (${rows.length} แถวจาก parser, raw ${localImageBrainCsvText.length.toLocaleString()} ตัวอักษร)`);
-        ctx.log('2/6 ส่งทั้ง raw CSV และ parsed rows ให้ AI แกะ แม้ไฟล์จัดระเบียบไม่ดี');
+        const shouldChunk = rows.length > 80 || localImageBrainCsvText.length > 60000;
+        const chunkSummaries: string[] = [];
+        if (shouldChunk) {
+          const rowChunks = rows.length > 0
+            ? Array.from({ length: Math.ceil(rows.length / 45) }, (_, index) => rows.slice(index * 45, index * 45 + 45))
+            : Array.from({ length: Math.ceil(localImageBrainCsvText.length / 24000) }, (_, index) => localImageBrainCsvText.slice(index * 24000, index * 24000 + 24000));
+          ctx.log(`2/6 CSV ใหญ่: แบ่งให้ AI อ่าน ${rowChunks.length} ชุด เพื่อลด token/เครดิต`);
+          for (let index = 0; index < rowChunks.length; index++) {
+            if (ctx.isCancelled()) break;
+            const chunk = rowChunks[index];
+            const chunkText = typeof chunk === 'string'
+              ? chunk
+              : JSON.stringify(chunk, null, 2).slice(0, 26000);
+            ctx.log(`อ่านชุด ${index + 1}/${rowChunks.length}: สรุป pattern จากข้อมูลชุดนี้`);
+            const chunkAnswer = await askOpenRouter(`คุณคือ Content Analyst ให้สรุป pattern จาก CSV ชุดย่อยนี้เท่านั้น
+
+ชื่อสมอง: ${brainKey}
+ชุดที่: ${index + 1}/${rowChunks.length}
+
+ข้อมูล:
+${chunkText}
+
+สรุปให้กระชับแต่ละเอียด:
+- ประเภทสินค้า/คอนเทนต์ที่เห็น
+- โครงสร้างโพสที่พบบ่อย
+- สำนวน/คำขาย/คำเรียกสินค้า
+- รายละเอียดจากรูปหรือชื่อไฟล์ที่ควรใช้เขียน
+- ตัวอย่างโพส/แคปชั่นที่เจอหรือควรเลียนแบบ
+- ข้อห้ามหรือสิ่งที่ไม่ควรเดา
+
+ตอบเป็น bullet ภาษาไทยเท่านั้น`, ctx.signal, 2600);
+            chunkSummaries.push(chunkAnswer);
+          }
+        } else {
+          ctx.log('2/6 CSV ขนาดพอดี: ส่งตัวอย่างตรงให้ AI วิเคราะห์ในรอบเดียว');
+        }
+        const messySample = shouldChunk
+          ? localImageBrainCsvText.slice(0, 10000)
+          : localImageBrainCsvText.slice(0, 42000);
+        const tableSample = JSON.stringify(rows.slice(0, shouldChunk ? 30 : 120), null, 2).slice(0, shouldChunk ? 12000 : 32000);
+        const chunkContext = chunkSummaries.length > 0
+          ? `สรุปจากการอ่าน CSV ทีละชุด:
+${chunkSummaries.map((summary, index) => `--- ชุด ${index + 1} ---\n${summary}`).join('\n\n')}`
+          : '';
+        ctx.log(chunkSummaries.length > 0 ? '3/6 รวมสรุปทุกชุด แล้วให้ AI สร้างสมองสุดท้าย' : '3/6 ให้ AI สร้างสมองสุดท้ายจากตัวอย่าง CSV');
         const answer = await askOpenRouter(`คุณคือ Senior Content Strategist ที่เชี่ยวชาญการสร้าง "สมองเขียนโพสจากรูปสินค้า/รูปคอนเทนต์"
 
 เป้าหมาย:
 วิเคราะห์ CSV ตัวอย่างโพสนี้ให้ละเอียด แม้ CSV จะเละ คอลัมน์มั่ว ข้อมูลไม่เป็นระเบียบ หรือมีข้อความปนกัน คุณต้องเดาโครงสร้างและ pattern ให้ดีที่สุด
 
 ชื่อสมองเบื้องต้น: ${brainKey}
+
+${chunkContext}
 
 RAW CSV SAMPLE:
 ${messySample}
@@ -1197,8 +1242,8 @@ ${tableSample}
   "productSignals": ["สิ่งที่ต้องดูจากรูป"],
   "captionExamples": ["ตัวอย่างโพส"],
   "negativeRules": ["ข้อห้าม"]
-}`, ctx.signal);
-        ctx.log(`3/6 AI วิเคราะห์กลับมาแล้ว (${answer.length.toLocaleString()} ตัวอักษร)`);
+}`, ctx.signal, 6500);
+        ctx.log(`4/6 AI วิเคราะห์กลับมาแล้ว (${answer.length.toLocaleString()} ตัวอักษร)`);
         const parsed = extractJsonPayload<any>(answer, {});
         const brain = normalizeArticleBrain({
           name: String(parsed.name || brainKey),
@@ -1216,11 +1261,10 @@ ${tableSample}
           feedbackNotes: localImageBrain?.feedbackNotes || [],
           rawAnalysis: answer,
         }, brainKey);
-        ctx.log('4/6 บันทึกสมองเขียนโพสลง app_data และ localStorage');
+        ctx.log('5/6 บันทึกสมองเขียนโพสลง app_data และ localStorage');
         await saveLocalImageBrains({ ...localImageBrains, [brainKey]: brain });
         setLocalImagePrompt(brain.writingPrompt);
-        ctx.log('5/6 ตั้ง Prompt ในแท็บนี้ให้ใช้สมองใหม่เรียบร้อย');
-        ctx.log('6/6 วิเคราะห์เสร็จ: เปิดดูรายละเอียดและพิมพ์ติชมเพื่อพัฒนาสมองต่อได้');
+        ctx.log('6/6 วิเคราะห์เสร็จ: ตั้ง Prompt ให้ใช้สมองใหม่ และเปิดให้ติชมพัฒนาต่อได้');
       } finally {
         setLocalImageBrainAnalyzing(false);
       }
