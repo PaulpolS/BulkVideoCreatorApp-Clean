@@ -3974,6 +3974,16 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                                         <span className="rounded-full bg-cyan-500 px-2 py-0.5 text-[10px] font-black text-white">เลือกอยู่</span>
                                       </div>
                                     )}
+                                    <a
+                                      href={getDisplayImageUrl(img)}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      onClick={e => e.stopPropagation()}
+                                      className="absolute right-1 bottom-1 rounded bg-black/75 px-1.5 py-0.5 text-[8px] font-bold text-white opacity-80 hover:opacity-100"
+                                      title="เปิดดูรูป"
+                                    >
+                                      ดู
+                                    </a>
                                   </button>
                                 );
                               })}

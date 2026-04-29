@@ -1441,17 +1441,34 @@ const fileSaverPlugin = (): Plugin => ({
     });
 
     // === Image Proxy (bypass CORS for canvas) ===
-    server.middlewares.use('/api/proxy-image', (req, res) => {
+    server.middlewares.use('/api/proxy-image', async (req, res) => {
       const rawUrl = new URLSearchParams((req.url || '').split('?')[1] || '').get('url') || '';
       if (!rawUrl.startsWith('http')) { res.statusCode = 400; res.end('Bad url'); return; }
-      const { get: httpGet } = rawUrl.startsWith('https') ? require('https') : require('http');
-      httpGet(rawUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (upstream: any) => {
-        const ct = upstream.headers['content-type'] || 'image/jpeg';
+      try {
+        const origin = new URL(rawUrl).origin;
+        const upstream = await fetch(rawUrl, {
+          redirect: 'follow',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+            'Referer': origin + '/',
+          },
+        });
+        if (!upstream.ok) {
+          res.statusCode = upstream.status;
+          res.end(`Image fetch failed: ${upstream.status}`);
+          return;
+        }
+        const ct = upstream.headers.get('content-type') || 'image/jpeg';
+        const buf = Buffer.from(await upstream.arrayBuffer());
         res.setHeader('Content-Type', ct);
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Cache-Control', 'public, max-age=3600');
-        upstream.pipe(res);
-      }).on('error', (e: any) => { res.statusCode = 502; res.end(e.message); });
+        res.end(buf);
+      } catch (e: any) {
+        res.statusCode = 502;
+        res.end(e.message);
+      }
     });
 
     // === KIE.AI Proxy (bypass CORS) ===
