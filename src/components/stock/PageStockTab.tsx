@@ -169,12 +169,28 @@ const LOCAL_IMAGE_PROMPT_KEY = 'page_stock_local_image_article_prompt';
 const LOCAL_IMAGE_DROPBOX_PATH_KEY = 'page_stock_local_image_dropbox_path';
 const LOCAL_IMAGE_ARTICLE_BRAINS_KEY = 'page_stock_local_image_article_brains';
 const LOCAL_IMAGE_ARTICLE_MODEL_KEY = 'page_stock_local_image_article_model';
+const MANUAL_BRAIN_MODEL_KEY = 'page_stock_manual_brain_model';
+const MANUAL_TOPIC_MODEL_KEY = 'page_stock_manual_topic_model';
+const MANUAL_PROMPT_MODEL_KEY = 'page_stock_manual_prompt_model';
 
 const LOCAL_IMAGE_ARTICLE_MODELS = [
   { id: 'google/gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite · ถูกสุด', note: '$0.10 / $0.40 ต่อ 1M token' },
   { id: 'google/gemini-2.0-flash-lite-001', label: 'Gemini 2.0 Flash Lite · ประหยัดมาก', note: '$0.075 / $0.30 ต่อ 1M token' },
   { id: 'openai/gpt-4o-mini', label: 'GPT-4o mini · เขียนดี ราคากลาง', note: '$0.15 / $0.60 ต่อ 1M token' },
   { id: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash · สมดุล', note: '$0.30 / $2.50 ต่อ 1M token' },
+];
+
+const MANUAL_BRAIN_MODELS = [
+  { id: 'google/gemini-2.5-pro', label: 'Gemini 2.5 Pro · วิเคราะห์เก่งสุด', note: 'แนะนำสำหรับสร้างสมอง' },
+  { id: 'anthropic/claude-sonnet-4-5', label: 'Claude Sonnet 4 · เข้าใจ pattern ลึก', note: 'เก่งเรื่อง reasoning & context' },
+  { id: 'openai/gpt-4o', label: 'GPT-4o · เขียนไทยแข็งแกร่ง', note: 'สมดุลระหว่างความแม่นและความเร็ว' },
+];
+
+const MANUAL_TOPIC_PROMPT_MODELS = [
+  { id: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash · สมดุล', note: 'แนะนำ — เร็วและคุณภาพดี' },
+  { id: 'google/gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite · ประหยัด', note: '$0.10 / $0.40 ต่อ 1M token' },
+  { id: 'openai/gpt-4o-mini', label: 'GPT-4o mini · เขียนไทยดี', note: '$0.15 / $0.60 ต่อ 1M token' },
+  { id: 'google/gemini-2.0-flash-lite-001', label: 'Gemini 2.0 Flash Lite · ถูกมาก', note: '$0.075 / $0.30 ต่อ 1M token' },
 ];
 
 const DEFAULT_LOCAL_IMAGE_ARTICLE_PROMPT = `## สินค้าหยก
@@ -352,6 +368,106 @@ function normalizeArticleBrain(brain: Partial<LocalImageArticleBrain> | undefine
     feedbackNotes: asStringArray(brain?.feedbackNotes),
     rawAnalysis: brain?.rawAnalysis || '',
   };
+}
+
+function getLikelyPostExamples(rows: Record<string, string>[], limit = 12): string[] {
+  const priorityKeys = [
+    'caption', 'post', 'content', 'article', 'text', 'message', 'copy',
+    'แคปชั่น', 'โพส', 'โพสต์', 'เนื้อหา', 'บทความ', 'ข้อความ', 'รายละเอียด',
+  ];
+  const examples: string[] = [];
+  const seen = new Set<string>();
+
+  rows.forEach(row => {
+    const entries = Object.entries(row);
+    const sorted = [...entries].sort(([aKey, aValue], [bKey, bValue]) => {
+      const aScore = priorityKeys.some(key => aKey.toLowerCase().includes(key.toLowerCase())) ? 1000 : 0;
+      const bScore = priorityKeys.some(key => bKey.toLowerCase().includes(key.toLowerCase())) ? 1000 : 0;
+      return (bScore + String(bValue).length) - (aScore + String(aValue).length);
+    });
+    const value = sorted
+      .map(([, item]) => String(item || '').trim())
+      .find(item =>
+        item.length >= 24 &&
+        item.length <= 1800 &&
+        !/^https?:\/\//i.test(item) &&
+        !/\.(png|jpe?g|webp|gif|mp4|mov)(\?|$)/i.test(item) &&
+        /[ก-๙A-Za-z]/.test(item)
+      );
+    if (!value) return;
+    const clean = value.replace(/\s+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+    const fingerprint = clean.slice(0, 160);
+    if (seen.has(fingerprint)) return;
+    seen.add(fingerprint);
+    examples.push(clean);
+  });
+
+  return examples.slice(0, limit);
+}
+
+function buildLocalImageWritingPromptFromCsv(params: {
+  brainKey: string;
+  summary: string;
+  audienceInsights: string[];
+  toneGuidelines: string[];
+  structureRules: string[];
+  productSignals: string[];
+  captionExamples: string[];
+  negativeRules: string[];
+}) {
+  return `Role: คุณคือคนเขียนโพสต์ประจำเพจนี้ ต้องเขียนให้เหมือนตัวอย่าง CSV ที่เจ้าของเพจแนบมา ไม่ใช่เขียนแบบบทความทั่วไป
+
+บริบท/สรุปเพจ:
+${params.summary}
+
+กฎสำคัญ:
+- ใช้สำนวน ความยาว จังหวะการขึ้นบรรทัด และโครงสร้างให้ใกล้ตัวอย่าง CSV มากที่สุด
+- เขียนเป็นข้อความดิบสำหรับเอาไปโพสต์ทันที
+- ห้ามใช้ markdown, ห้ามใช้หัวข้อแบบ Hook:/Body:/CTA:, ห้ามใช้ markdown bold
+- ห้ามขึ้นต้นด้วยคำเกริ่น เช่น แน่นอน, ได้เลย, ในฐานะ, ผมคือ, ฉันคือ, นี่คือ, แคปชั่นสำหรับภาพนี้
+- ห้ามบอกว่าตัวเองเป็น AI, Content Strategist, ผู้ช่วย, นักเขียน หรือกำลังวิเคราะห์ภาพ
+- ห้ามเดาราคา/โปรโมชัน/สเปกที่มองไม่เห็นจากรูป ถ้า CSV เดิมไม่ได้ใช้รูปแบบนั้น
+- เริ่มคำตอบด้วยโพสต์จริงทันที
+
+กลุ่มลูกค้า/บริบทที่จับได้:
+${params.audienceInsights.map(item => `- ${item}`).join('\n') || '- ยึดจากตัวอย่างโพสต์ใน CSV เป็นหลัก'}
+
+สำนวน/น้ำเสียง:
+${params.toneGuidelines.map(item => `- ${item}`).join('\n') || '- เลียนแบบสำนวนจากตัวอย่างโพสต์ด้านล่าง'}
+
+โครงสร้างโพสต์:
+${params.structureRules.map(item => `- ${item}`).join('\n') || '- เลียนแบบความยาว จำนวนบรรทัด และลำดับข้อมูลจากตัวอย่างโพสต์ด้านล่าง'}
+
+สิ่งที่ต้องดูจากรูป:
+${params.productSignals.map(item => `- ${item}`).join('\n') || '- ดูชนิดสินค้า จุดเด่น สี ทรง วัสดุ ขนาดโดยประมาณ และข้อความที่เห็นในภาพเท่านั้น'}
+
+ข้อห้ามเฉพาะ:
+${params.negativeRules.map(item => `- ${item}`).join('\n') || '- ห้ามแต่งข้อมูลที่ไม่มีในภาพ'}
+
+ตัวอย่างโพสต์จริงจาก CSV ที่ต้องเลียนแบบ:
+${params.captionExamples.slice(0, 10).map((item, index) => `--- ตัวอย่าง ${index + 1} ---\n${item}`).join('\n\n') || 'ไม่มีตัวอย่างที่อ่านได้ ให้ยึดกฎด้านบนแทน'}
+
+งานของคุณ:
+อ่านรูปและชื่อไฟล์ แล้วเขียนโพสต์ใหม่ 1 โพสต์ให้เข้ากับรูปนั้น โดยรักษา pattern จากตัวอย่าง CSV ให้มากที่สุด`;
+}
+
+function readLocalApiProfiles(): ApiProfile[] {
+  try {
+    const profiles = JSON.parse(localStorage.getItem('api_global_profiles') || '[]');
+    return Array.isArray(profiles) ? profiles : [];
+  } catch {
+    return [];
+  }
+}
+
+function mergeApiProfiles(...profileGroups: ApiProfile[][]): ApiProfile[] {
+  const profileMap = new Map<string, ApiProfile>();
+  profileGroups.flat().forEach(profile => {
+    if (!profile) return;
+    const key = String(profile.id || profile.name || Date.now());
+    profileMap.set(key, { ...profileMap.get(key), ...profile, id: profile.id || key });
+  });
+  return Array.from(profileMap.values());
 }
 
 function cleanAiPostPreamble(text: string) {
@@ -625,6 +741,9 @@ export function PageStockTab() {
   const [localImagePrompt, setLocalImagePrompt] = useState(() => localStorage.getItem(LOCAL_IMAGE_PROMPT_KEY) || DEFAULT_LOCAL_IMAGE_ARTICLE_PROMPT);
   const [localImageDropboxPath, setLocalImageDropboxPath] = useState(() => localStorage.getItem(LOCAL_IMAGE_DROPBOX_PATH_KEY) || '');
   const [localImageModel, setLocalImageModel] = useState(() => localStorage.getItem(LOCAL_IMAGE_ARTICLE_MODEL_KEY) || 'google/gemini-2.5-flash-lite');
+  const [manualBrainModel, setManualBrainModel] = useState(() => localStorage.getItem(MANUAL_BRAIN_MODEL_KEY) || 'google/gemini-2.5-pro');
+  const [manualTopicModel, setManualTopicModel] = useState(() => localStorage.getItem(MANUAL_TOPIC_MODEL_KEY) || 'google/gemini-2.5-flash');
+  const [manualPromptModel, setManualPromptModel] = useState(() => localStorage.getItem(MANUAL_PROMPT_MODEL_KEY) || 'google/gemini-2.5-flash');
   const [localImageItems, setLocalImageItems] = useState<LocalImageArticleItem[]>([]);
   const [localImageBrains, setLocalImageBrains] = useState<Record<string, LocalImageArticleBrain>>({});
   const [localImageBrainKey, setLocalImageBrainKey] = useState('');
@@ -693,7 +812,6 @@ export function PageStockTab() {
   } : {};
   const totalQueuedTopics = queue.reduce((sum, batch) => sum + batch.topics.length, 0);
   const hasKieKey = Boolean(activeProfile?.kieKey);
-  const hasOpenRouterKey = Boolean(activeProfile?.openRouterKey);
   const hasDropboxAuth = Boolean(activeProfile?.dropboxKey || activeProfile?.dropboxRefreshToken);
   const runnableCount = totalQueuedTopics || topics.length;
   const manualBrain = manualBrainKey && manualBrains[manualBrainKey]
@@ -753,23 +871,67 @@ export function PageStockTab() {
     [canvasImages],
   );
 
-  useEffect(() => {
-    fetch('/api/get-app-data?key=api_profiles')
+  const getStoredOpenRouterKey = () => {
+    const profileKey = activeProfile?.openRouterKey?.trim();
+    if (profileKey) return profileKey;
+
+    try {
+      const savedProfiles = JSON.parse(localStorage.getItem('api_global_profiles') || '[]');
+      const activeId = settings.profileId || localStorage.getItem('api_global_active_id') || '';
+      const savedProfile = Array.isArray(savedProfiles)
+        ? savedProfiles.find((profile: ApiProfile) => profile.id === activeId) || savedProfiles[0]
+        : undefined;
+      const savedProfileKey = savedProfile?.openRouterKey?.trim();
+      if (savedProfileKey) return savedProfileKey;
+    } catch {}
+
+    const legacyKey = localStorage.getItem('openrouter_key')?.trim();
+    if (legacyKey) return legacyKey;
+
+    try {
+      const keys = JSON.parse(localStorage.getItem('openrouter_keys') || '[]');
+      const active = Array.isArray(keys) ? keys.find((key: any) => key.isActive) || keys[0] : undefined;
+      return String(active?.key || '').trim();
+    } catch {
+      return '';
+    }
+  };
+
+  const openRouterKey = getStoredOpenRouterKey();
+  const hasOpenRouterKey = Boolean(openRouterKey);
+
+  const loadProfiles = () => {
+    return fetch('/api/get-app-data?key=api_profiles')
       .then(res => res.json())
       .then((serverProfiles: ApiProfile[]) => {
-        const localProfiles = JSON.parse(localStorage.getItem('api_global_profiles') || '[]');
-        const loaded = Array.isArray(serverProfiles) && serverProfiles.length > 0 ? serverProfiles : localProfiles;
+        const loaded = mergeApiProfiles(
+          Array.isArray(serverProfiles) ? serverProfiles : [],
+          readLocalApiProfiles(),
+        );
         setProfiles(loaded);
         const activeId = localStorage.getItem('api_global_active_id') || loaded[0]?.id || '';
         setSettings(prev => ({ ...prev, profileId: prev.profileId || activeId }));
       })
       .catch(() => {
-        try {
-          const loaded = JSON.parse(localStorage.getItem('api_global_profiles') || '[]');
-          setProfiles(loaded);
-          setSettings(prev => ({ ...prev, profileId: prev.profileId || localStorage.getItem('api_global_active_id') || loaded[0]?.id || '' }));
-        } catch {}
+        const loaded = readLocalApiProfiles();
+        setProfiles(loaded);
+        setSettings(prev => ({ ...prev, profileId: prev.profileId || localStorage.getItem('api_global_active_id') || loaded[0]?.id || '' }));
       });
+  };
+
+  useEffect(() => {
+    loadProfiles();
+    const handleProfilesUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ profiles?: ApiProfile[]; activeProfileId?: string }>).detail;
+      if (Array.isArray(detail?.profiles)) {
+        setProfiles(detail.profiles);
+        if (detail.activeProfileId) setSettings(prev => ({ ...prev, profileId: detail.activeProfileId || prev.profileId }));
+      } else {
+        loadProfiles();
+      }
+    };
+    window.addEventListener('api-profiles-updated', handleProfilesUpdated);
+    return () => window.removeEventListener('api-profiles-updated', handleProfilesUpdated);
   }, []);
 
   useEffect(() => {
@@ -860,6 +1022,18 @@ export function PageStockTab() {
   }, [localImageModel]);
 
   useEffect(() => {
+    localStorage.setItem(MANUAL_BRAIN_MODEL_KEY, manualBrainModel);
+  }, [manualBrainModel]);
+
+  useEffect(() => {
+    localStorage.setItem(MANUAL_TOPIC_MODEL_KEY, manualTopicModel);
+  }, [manualTopicModel]);
+
+  useEffect(() => {
+    localStorage.setItem(MANUAL_PROMPT_MODEL_KEY, manualPromptModel);
+  }, [manualPromptModel]);
+
+  useEffect(() => {
     if (!selectedPage) return;
     setSettings(prev => ({
       ...prev,
@@ -896,11 +1070,12 @@ export function PageStockTab() {
   };
 
   const writePost = async (prompt: string) => {
-    if (!activeProfile?.openRouterKey) throw new Error('ไม่พบ OpenRouter API Key');
+    const apiKey = getStoredOpenRouterKey();
+    if (!apiKey) throw new Error('ไม่พบ OpenRouter API Key');
     const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${activeProfile.openRouterKey}`,
+        'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -915,7 +1090,8 @@ export function PageStockTab() {
   };
 
   const askOpenRouter = async (prompt: string, signal?: AbortSignal, maxTokens = 6000, modelOverride?: string) => {
-    if (!activeProfile?.openRouterKey) throw new Error('ไม่พบ OpenRouter API Key');
+    const apiKey = getStoredOpenRouterKey();
+    if (!apiKey) throw new Error('ไม่พบ OpenRouter API Key');
     const tokenAttempts = Array.from(new Set([
       maxTokens,
       Math.min(maxTokens, 1800),
@@ -928,7 +1104,7 @@ export function PageStockTab() {
         method: 'POST',
         signal,
         headers: {
-          'Authorization': `Bearer ${activeProfile.openRouterKey}`,
+          'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -999,7 +1175,7 @@ export function PageStockTab() {
   };
 
   const startAnalyzeManualCsv = () => {
-    if (!manualCsvText.trim() || !activeProfile?.openRouterKey) return;
+    if (!manualCsvText.trim() || !getStoredOpenRouterKey()) return;
     const rows = parseCsvTable(manualCsvText);
     const csvSample = JSON.stringify(rows.slice(0, 80), null, 2).slice(0, 32000);
     const csvPromptExamples = extractPromptExamplesFromRows(rows);
@@ -1017,6 +1193,7 @@ export function PageStockTab() {
       progress: 'เตรียมส่ง CSV Prompt และ CSV เทรนด์ให้ AI สร้างสมอง',
     }, async ctx => {
       setManualTaskId(ctx.signal.aborted ? '' : nextTaskId);
+      try {
       ctx.log(`1/6 อ่าน CSV Prompt: ${manualCsvName || 'ไฟล์อัปโหลด'} (${rows.length} แถว)`);
       if (trendRows.length > 0) {
         ctx.log(`2/6 อ่าน CSV เทรนด์ล่าสุด: ${manualTrendCsvName || 'trend.csv'} (${trendRows.length} แถว)`);
@@ -1058,8 +1235,8 @@ ${trendSample}` : 'ไม่มี CSV เทรนด์ล่าสุด'}
   "trendInsights": ["ถ้ามี CSV เทรนด์ วิเคราะห์ว่าควรจับกระแสอะไร ถ้าไม่มีให้เป็น []"],
   "examplePrompts": ["ต้องเป็น string เท่านั้น ห้ามเป็น object และต้องเป็น prompt เต็มที่พร้อมใช้"]
 }`;
-      ctx.log('3/6 ส่งให้ OpenRouter วิเคราะห์ CSV Prompt + เทรนด์ และสร้างสมองฉบับสมบูรณ์');
-      const answer = await askOpenRouter(prompt, ctx.signal);
+      ctx.log(`3/6 ส่งให้ OpenRouter (${manualBrainModel}) วิเคราะห์ CSV Prompt + เทรนด์ และสร้างสมองฉบับสมบูรณ์`);
+      const answer = await askOpenRouter(prompt, ctx.signal, 6000, manualBrainModel);
       ctx.log(`4/6 AI วิเคราะห์กลับมาแล้ว (${answer.length.toLocaleString()} ตัวอักษร)`);
       const parsed = extractJsonPayload<any>(answer, {});
       const inferredName = String(parsed.pageName || brainKey).trim() || brainKey;
@@ -1088,7 +1265,9 @@ ${trendSample}` : 'ไม่มี CSV เทรนด์ล่าสุด'}
       ctx.log('5/6 บันทึกสมองเพจลง app_data และ localStorage');
       await saveManualBrains({ ...manualBrains, [brainKey]: brain });
       ctx.log('6/6 สมองเพจพร้อมใช้: มี keyword, topic pattern, style, prompt pattern และตัวอย่าง prompt');
-      setManualTaskId('');
+      } finally {
+        setManualTaskId('');
+      }
     });
     setManualTaskId(taskId);
   };
@@ -1123,7 +1302,7 @@ ${trendSample}` : 'ไม่มี CSV เทรนด์ล่าสุด'}
   };
 
   const startGenerateManualTopics = () => {
-    if (!manualBrain || !activeProfile?.openRouterKey) return;
+    if (!manualBrain || !getStoredOpenRouterKey()) return;
     const total = Number(manualTopicCount);
     if (!Number.isFinite(total) || total <= 0) return;
     const nextTaskId = `manual-topics-${Date.now()}`;
@@ -1151,7 +1330,7 @@ ${trendSample}` : 'ไม่มี CSV เทรนด์ล่าสุด'}
 ห้ามซ้ำกับรายการนี้:
 ${[...manualTopics, ...nextTopics].join('\n')}
 
-ตอบเป็น JSON array ของ string เท่านั้น`, ctx.signal);
+ตอบเป็น JSON array ของ string เท่านั้น`, ctx.signal, 6000, manualTopicModel);
         const parsed = extractJsonPayload<string[]>(answer, []);
         const clean = parsed.map(item => String(item).trim()).filter(Boolean);
         nextTopics.push(...clean.slice(0, amount));
@@ -1168,7 +1347,7 @@ ${[...manualTopics, ...nextTopics].join('\n')}
 
   const startGenerateManualPrompts = () => {
     const topicsForPrompt = editableManualTopics;
-    if (!manualBrain || topicsForPrompt.length === 0 || !activeProfile?.openRouterKey) return;
+    if (!manualBrain || topicsForPrompt.length === 0 || !getStoredOpenRouterKey()) return;
     const nextTaskId = `manual-prompts-${Date.now()}`;
     const taskId = globalTaskStore.enqueueTask({
       id: nextTaskId,
@@ -1204,7 +1383,7 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
 - ต้องพร้อมเอาไปใช้ต่อได้ทันที
 
 ตอบเป็น JSON array เท่านั้น:
-[{"topic":"หัวข้อเดิม","imagePrompt":"prompt..."}]`, ctx.signal);
+[{"topic":"หัวข้อเดิม","imagePrompt":"prompt..."}]`, ctx.signal, 6000, manualPromptModel);
         const parsed = extractJsonPayload<ManualPromptResult[]>(answer, []);
         const clean = parsed
           .map(item => ({ topic: String(item.topic || '').trim(), imagePrompt: String(item.imagePrompt || '').trim() }))
@@ -1293,20 +1472,28 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
     }, async ctx => {
       try {
         ctx.log(`1/6 อ่าน CSV: ${localImageBrainCsvName || 'ไฟล์อัปโหลด'} (${rows.length} แถวจาก parser, raw ${localImageBrainCsvText.length.toLocaleString()} ตัวอักษร)`);
-        const shouldChunk = rows.length > 80 || localImageBrainCsvText.length > 60000;
+        const csvPostExamples = getLikelyPostExamples(rows, 14);
+        ctx.log(csvPostExamples.length > 0
+          ? `จับตัวอย่างโพสต์จริงจาก CSV ได้ ${csvPostExamples.length} ตัวอย่าง จะฝังไว้ในสมอง`
+          : 'ยังจับตัวอย่างโพสต์จาก CSV ไม่ได้ชัดเจน จะให้ AI วิเคราะห์จาก raw CSV แทน');
+        const shouldChunk = rows.length > 60 || localImageBrainCsvText.length > 45000;
         const chunkSummaries: string[] = [];
+        const chunkAnalyses: any[] = [];
+        const chunkExtractedExamples: string[] = [];
         if (shouldChunk) {
           const rowChunks = rows.length > 0
-            ? Array.from({ length: Math.ceil(rows.length / 45) }, (_, index) => rows.slice(index * 45, index * 45 + 45))
-            : Array.from({ length: Math.ceil(localImageBrainCsvText.length / 24000) }, (_, index) => localImageBrainCsvText.slice(index * 24000, index * 24000 + 24000));
-          ctx.log(`2/6 CSV ใหญ่: แบ่งให้ AI อ่าน ${rowChunks.length} ชุด เพื่อลด token/เครดิต`);
+            ? Array.from({ length: Math.ceil(rows.length / 30) }, (_, index) => rows.slice(index * 30, index * 30 + 30))
+            : Array.from({ length: Math.ceil(localImageBrainCsvText.length / 18000) }, (_, index) => localImageBrainCsvText.slice(index * 18000, index * 18000 + 18000));
+          ctx.log(`2/6 CSV ใหญ่: แบ่งให้ AI อ่านละเอียด ${rowChunks.length} ชุด ชุดละประมาณ 30 แถว`);
           for (let index = 0; index < rowChunks.length; index++) {
             if (ctx.isCancelled()) break;
             const chunk = rowChunks[index];
             const chunkText = typeof chunk === 'string'
               ? chunk
-              : JSON.stringify(chunk, null, 2).slice(0, 26000);
-            ctx.log(`อ่านชุด ${index + 1}/${rowChunks.length}: สรุป pattern จากข้อมูลชุดนี้`);
+              : JSON.stringify(chunk, null, 2).slice(0, 22000);
+            const chunkExamples = Array.isArray(chunk) ? getLikelyPostExamples(chunk, 6) : [];
+            chunkExtractedExamples.push(...chunkExamples);
+            ctx.log(`อ่านชุด ${index + 1}/${rowChunks.length}: วิเคราะห์ pattern + ตัวอย่างโพสต์จากชุดนี้`);
             const chunkAnswer = await askOpenRouter(`คุณคือ Content Analyst ให้สรุป pattern จาก CSV ชุดย่อยนี้เท่านั้น
 
 ชื่อสมอง: ${brainKey}
@@ -1315,15 +1502,39 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
 ข้อมูล:
 ${chunkText}
 
-สรุปให้สั้น กระชับ แต่ยังใช้สร้างสมองต่อได้:
-- ประเภทสินค้า/คอนเทนต์ที่เห็น
-- โครงสร้างโพสที่พบบ่อย
-- สำนวน/คำขาย/คำเรียกสินค้า
-- รายละเอียดจากรูปหรือชื่อไฟล์ที่ควรใช้เขียน
-- ข้อห้ามหรือสิ่งที่ไม่ควรเดา
+ตัวอย่างโพสต์ที่ระบบสกัดจากชุดนี้:
+${chunkExamples.map((item, exampleIndex) => `--- ตัวอย่าง ${exampleIndex + 1} ---\n${item}`).join('\n\n') || 'ไม่มีตัวอย่างที่ระบบสกัดได้ ให้หาเองจากข้อมูลชุดนี้'}
 
-ตอบเป็น bullet ภาษาไทย ไม่เกิน 900 token`, ctx.signal, 1200, localImageModel);
-            chunkSummaries.push(chunkAnswer);
+วิเคราะห์ชุดนี้แบบละเอียด แต่อย่าสรุปกว้าง ๆ:
+1. โพสต์ในชุดนี้ขาย/เล่าอะไร
+2. โครงสร้างจริง เช่น เริ่มด้วยอะไร ต่อด้วยอะไร จบด้วยอะไร จำนวนบรรทัดประมาณไหน
+3. คำซ้ำ วลีซ้ำ emoji/สัญลักษณ์/ตัวคั่น ถ้ามี
+4. สิ่งที่ดึงจากรูปหรือชื่อไฟล์ไปเขียน
+5. สิ่งที่ห้ามเดา
+6. ตัวอย่างโพสต์จริงจากชุดนี้ 3-6 ตัวอย่าง
+
+ตอบ JSON เท่านั้น:
+{
+  "summary": "สรุปชุดนี้",
+  "audienceInsights": ["..."],
+  "toneGuidelines": ["..."],
+  "structureRules": ["..."],
+  "productSignals": ["..."],
+  "negativeRules": ["..."],
+  "captionExamples": ["ตัวอย่างโพสต์จริงจากชุดนี้"]
+}`, ctx.signal, 2600, localImageModel);
+            const parsedChunk = extractJsonPayload<any>(chunkAnswer, {});
+            const chunkAnalysis = {
+              summary: String(parsedChunk.summary || chunkAnswer).slice(0, 2500),
+              audienceInsights: asStringArray(parsedChunk.audienceInsights),
+              toneGuidelines: asStringArray(parsedChunk.toneGuidelines),
+              structureRules: asStringArray(parsedChunk.structureRules),
+              productSignals: asStringArray(parsedChunk.productSignals),
+              negativeRules: asStringArray(parsedChunk.negativeRules),
+              captionExamples: Array.from(new Set([...asStringArray(parsedChunk.captionExamples), ...chunkExamples])).slice(0, 8),
+            };
+            chunkAnalyses.push(chunkAnalysis);
+            chunkSummaries.push(JSON.stringify(chunkAnalysis, null, 2));
           }
         } else {
           ctx.log('2/6 CSV ขนาดพอดี: ส่งตัวอย่างตรงให้ AI วิเคราะห์ในรอบเดียว');
@@ -1333,8 +1544,11 @@ ${chunkText}
           : localImageBrainCsvText.slice(0, 42000);
         const tableSample = JSON.stringify(rows.slice(0, shouldChunk ? 30 : 120), null, 2).slice(0, shouldChunk ? 12000 : 32000);
         const chunkContext = chunkSummaries.length > 0
-          ? `สรุปจากการอ่าน CSV ทีละชุด:
-${chunkSummaries.map((summary, index) => `--- ชุด ${index + 1} ---\n${summary}`).join('\n\n')}`
+          ? `ผลวิเคราะห์ CSV ทีละชุดแบบ structured:
+${JSON.stringify(chunkAnalyses, null, 2).slice(0, 70000)}
+
+สรุป raw จากแต่ละชุด:
+${chunkSummaries.map((summary, index) => `--- ชุด ${index + 1} ---\n${summary}`).join('\n\n').slice(0, 50000)}`
           : '';
         ctx.log(chunkSummaries.length > 0 ? '3/6 รวมสรุปทุกชุด แล้วให้ AI สร้างสมองสุดท้าย' : '3/6 ให้ AI สร้างสมองสุดท้ายจากตัวอย่าง CSV');
         const answer = await askOpenRouter(`คุณคือ Senior Content Strategist ที่เชี่ยวชาญการสร้าง "สมองเขียนโพสจากรูปสินค้า/รูปคอนเทนต์"
@@ -1349,6 +1563,9 @@ ${chunkContext}
 RAW CSV SAMPLE:
 ${messySample}
 
+ตัวอย่างโพสต์จริงที่ระบบสกัดจาก CSV:
+${Array.from(new Set([...csvPostExamples, ...chunkExtractedExamples])).slice(0, 18).map((item, index) => `--- ตัวอย่าง ${index + 1} ---\n${item}`).join('\n\n') || 'ยังสกัดตัวอย่างไม่ได้ ให้หาเองจาก RAW/PARSED CSV'}
+
 PARSED ROWS SAMPLE:
 ${tableSample}
 
@@ -1360,8 +1577,9 @@ ${tableSample}
 5. ยกตัวอย่างโพส/แคปชั่นที่น่าจะตรง pattern
 6. ใส่ข้อห้าม เช่น ห้ามแต่งราคา, ห้ามกล่าวเกินจริง, ห้ามใช้ markdown ถ้า pattern เดิมไม่ใช้
 7. ใน writingPrompt ต้องบังคับชัดเจนว่า ห้ามขึ้นต้นด้วยคำเกริ่น ห้ามบอกว่าเป็น AI/Content Strategist/ผู้ช่วย และต้องเข้าเนื้อหาโพสต์ทันที
+8. writingPrompt ต้องมีตัวอย่างโพสต์จริงจาก CSV อย่างน้อย 5 ตัวอย่าง เพื่อให้ตอนเขียนจากรูปเลียนแบบ pattern ได้
 
-ตอบ JSON เท่านั้น:
+ตอบ JSON เท่านั้น ห้าม markdown ห้ามคำอธิบายนอก JSON และต้องกรอกทุก array อย่างน้อย 4-8 ข้อถ้ามีข้อมูล:
 {
   "name": "ชื่อสมองสั้นๆ",
   "summary": "สรุปว่าเข้าใจเพจ/สินค้า/สไตล์ยังไงอย่างละเอียด",
@@ -1372,22 +1590,52 @@ ${tableSample}
   "productSignals": ["สิ่งที่ต้องดูจากรูป"],
   "captionExamples": ["ตัวอย่างโพส"],
   "negativeRules": ["ข้อห้าม", "ห้ามขึ้นต้นด้วยคำเกริ่น เช่น แน่นอน/ได้เลย/ในฐานะ", "ห้ามบอกว่าตัวเองเป็น AI หรือ Content Strategist"]
-}`, ctx.signal, 2400, localImageModel);
+}`, ctx.signal, 7000, localImageModel);
         ctx.log(`4/6 AI วิเคราะห์กลับมาแล้ว (${answer.length.toLocaleString()} ตัวอักษร)`);
         const parsed = extractJsonPayload<any>(answer, {});
+        const parsedCaptionExamples = asStringArray(parsed.captionExamples);
+        const chunkCaptionExamples = chunkAnalyses.flatMap(analysis => asStringArray(analysis.captionExamples));
+        const captionExamples = Array.from(new Set([...parsedCaptionExamples, ...csvPostExamples, ...chunkExtractedExamples, ...chunkCaptionExamples])).slice(0, 20);
+        const summary = String(parsed.summary || '').trim() || [
+          `วิเคราะห์จาก CSV ${rows.length} แถว`,
+          captionExamples.length > 0 ? `พบตัวอย่างโพสต์จริง ${captionExamples.length} ตัวอย่างและฝังเป็น pattern ให้ใช้ตอนเขียนจากรูป` : 'AI ตอบกลับมาไม่ครบ จึงสร้างสมอง fallback จากข้อมูล CSV ที่อ่านได้',
+          chunkSummaries.length > 0 ? `สรุปจาก CSV ที่แบ่งอ่าน ${chunkSummaries.length} ชุด` : '',
+        ].filter(Boolean).join(' · ');
+        const audienceInsights = Array.from(new Set([...asStringArray(parsed.audienceInsights), ...chunkAnalyses.flatMap(analysis => asStringArray(analysis.audienceInsights))])).slice(0, 16);
+        const toneGuidelines = Array.from(new Set([...asStringArray(parsed.toneGuidelines), ...chunkAnalyses.flatMap(analysis => asStringArray(analysis.toneGuidelines))])).slice(0, 16);
+        const structureRules = Array.from(new Set([...asStringArray(parsed.structureRules), ...chunkAnalyses.flatMap(analysis => asStringArray(analysis.structureRules))])).slice(0, 16);
+        const productSignals = Array.from(new Set([...asStringArray(parsed.productSignals), ...chunkAnalyses.flatMap(analysis => asStringArray(analysis.productSignals))])).slice(0, 16);
+        const negativeRules = Array.from(new Set([
+          ...asStringArray(parsed.negativeRules),
+          ...chunkAnalyses.flatMap(analysis => asStringArray(analysis.negativeRules)),
+          'ห้ามใช้ markdown หรือ markdown bold ถ้า CSV เดิมไม่ได้ใช้',
+          'ห้ามขึ้นต้นด้วยคำเกริ่น เช่น แน่นอน/ได้เลย/ในฐานะ',
+          'ห้ามบอกว่าตัวเองเป็น AI หรือกำลังวิเคราะห์ภาพ',
+          'ห้ามเดาราคา/โปรโมชัน/สเปกที่มองไม่เห็นจากรูป',
+        ]));
+        const writingPrompt = buildLocalImageWritingPromptFromCsv({
+          brainKey,
+          summary,
+          audienceInsights,
+          toneGuidelines,
+          structureRules,
+          productSignals,
+          captionExamples,
+          negativeRules,
+        });
         const brain = normalizeArticleBrain({
           name: String(parsed.name || brainKey),
           updatedAt: new Date().toISOString(),
           sourceFileName: localImageBrainCsvName,
           sourceRowCount: rows.length,
-          summary: String(parsed.summary || 'AI วิเคราะห์ CSV แล้ว แต่ไม่ได้ส่ง summary ชัดเจน'),
-          writingPrompt: `${String(parsed.writingPrompt || DEFAULT_LOCAL_IMAGE_ARTICLE_PROMPT).trim()}\n\n${NO_AI_PREAMBLE_RULE}`,
-          audienceInsights: asStringArray(parsed.audienceInsights),
-          toneGuidelines: asStringArray(parsed.toneGuidelines),
-          structureRules: asStringArray(parsed.structureRules),
-          productSignals: asStringArray(parsed.productSignals),
-          captionExamples: asStringArray(parsed.captionExamples),
-          negativeRules: asStringArray(parsed.negativeRules),
+          summary,
+          writingPrompt: `${String(parsed.writingPrompt || '').trim() ? `${String(parsed.writingPrompt).trim()}\n\n` : ''}${writingPrompt}\n\n${NO_AI_PREAMBLE_RULE}`,
+          audienceInsights,
+          toneGuidelines,
+          structureRules,
+          productSignals,
+          captionExamples,
+          negativeRules,
           feedbackNotes: localImageBrain?.feedbackNotes || [],
           rawAnalysis: answer,
         }, brainKey);
@@ -2611,6 +2859,23 @@ ${NO_AI_PREAMBLE_RULE}
                   <span>{manualTrendRowsCount} แถว · {manualTrendCsvName}</span>
                 </div>
               )}
+              <label>
+                <span>โมเดลสร้างสมอง</span>
+                <select
+                  className="page-stock-manual-input"
+                  value={manualBrainModel}
+                  onChange={event => setManualBrainModel(event.target.value)}
+                >
+                  {MANUAL_BRAIN_MODELS.map(m => (
+                    <option key={m.id} value={m.id}>{m.label}</option>
+                  ))}
+                </select>
+                {MANUAL_BRAIN_MODELS.find(m => m.id === manualBrainModel) && (
+                  <small style={{ color: '#9ca3af', marginTop: 2 }}>
+                    {MANUAL_BRAIN_MODELS.find(m => m.id === manualBrainModel)!.note}
+                  </small>
+                )}
+              </label>
               <button
                 className="page-stock-primary"
                 disabled={!manualCsvText.trim() || !hasOpenRouterKey || manualHasRunningTask}
@@ -2650,6 +2915,18 @@ ${NO_AI_PREAMBLE_RULE}
             <div className="page-stock-manual-card">
               <h3>2. สร้างหัวข้อ</h3>
               <p>ใส่จำนวนที่ต้องการ ระบบจะแบ่งส่งให้ AI ทีละชุด โดยใช้สมองที่มี keyword, trend insight, สำนวน และ pattern prompt แล้ว</p>
+              <label>
+                <span>โมเดลสร้างหัวข้อ</span>
+                <select
+                  className="page-stock-manual-input"
+                  value={manualTopicModel}
+                  onChange={event => setManualTopicModel(event.target.value)}
+                >
+                  {MANUAL_TOPIC_PROMPT_MODELS.map(m => (
+                    <option key={m.id} value={m.id}>{m.label}</option>
+                  ))}
+                </select>
+              </label>
               <div className="page-stock-number-row">
                 <input
                   type="number"
@@ -2739,6 +3016,18 @@ ${NO_AI_PREAMBLE_RULE}
                 }}
                 placeholder={`พิมพ์หัวข้อเองได้ หัวข้อละ 1 บรรทัด\nหรือกดสร้างหัวข้อ แล้วมาแก้ตรงนี้ก่อนสร้าง Prompt`}
               />
+              <label>
+                <span>โมเดลสร้าง Prompt รูป</span>
+                <select
+                  className="page-stock-manual-input"
+                  value={manualPromptModel}
+                  onChange={event => setManualPromptModel(event.target.value)}
+                >
+                  {MANUAL_TOPIC_PROMPT_MODELS.map(m => (
+                    <option key={m.id} value={m.id}>{m.label}</option>
+                  ))}
+                </select>
+              </label>
               <div className="page-stock-manual-actions">
                 <button
                   className="page-stock-primary"
@@ -2930,6 +3219,14 @@ ${NO_AI_PREAMBLE_RULE}
                   <article>
                     <h4>สิ่งที่ต้องดูจากรูป</h4>
                     <ul>{(localImageBrain.productSignals.length ? localImageBrain.productSignals : ['ยังไม่มีข้อมูล']).slice(0, 5).map((item, index) => <li key={index}>{item}</li>)}</ul>
+                  </article>
+                  <article>
+                    <h4>ตัวอย่างโพสต์จาก CSV</h4>
+                    <ul>{(localImageBrain.captionExamples.length ? localImageBrain.captionExamples : ['ยังไม่มีข้อมูล']).slice(0, 3).map((item, index) => <li key={index}>{item}</li>)}</ul>
+                  </article>
+                  <article>
+                    <h4>ข้อห้าม</h4>
+                    <ul>{(localImageBrain.negativeRules.length ? localImageBrain.negativeRules : ['ยังไม่มีข้อมูล']).slice(0, 5).map((item, index) => <li key={index}>{item}</li>)}</ul>
                   </article>
                 </div>
               )}

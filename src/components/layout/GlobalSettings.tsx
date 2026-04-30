@@ -32,6 +32,25 @@ export default function GlobalSettings() {
   const hasAttemptedAuth = useRef(false);
   const getDropboxRedirectUri = () => `${window.location.origin.replace(/\/$/, '')}/`;
 
+  const readLocalProfiles = (): ApiProfile[] => {
+    try {
+      const localProfiles = JSON.parse(localStorage.getItem('api_global_profiles') || '[]');
+      return Array.isArray(localProfiles) ? localProfiles : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const mergeProfiles = (...profileGroups: ApiProfile[][]) => {
+    const profileMap = new Map<string, ApiProfile>();
+    profileGroups.flat().forEach(profile => {
+      if (!profile) return;
+      const key = String(profile.id || profile.name || Date.now());
+      profileMap.set(key, { ...profileMap.get(key), ...profile, id: profile.id || key });
+    });
+    return Array.from(profileMap.values());
+  };
+
   // 1. Intercept Dropbox OAuth Redirect globally
   useEffect(() => {
     const handleDropboxAuth = async () => {
@@ -112,15 +131,10 @@ export default function GlobalSettings() {
       fetch('/api/get-app-data?key=api_profiles')
         .then(res => res.json())
         .then(serverProfiles => {
-          let profilesToLoad = [];
-          if (Array.isArray(serverProfiles) && serverProfiles.length > 0) {
-            profilesToLoad = serverProfiles;
-          } else {
-            // Fallback to localStorage migration
-            try {
-              profilesToLoad = JSON.parse(localStorage.getItem('api_global_profiles') || '[]');
-            } catch(e) {}
-          }
+          const profilesToLoad = mergeProfiles(
+            Array.isArray(serverProfiles) ? serverProfiles : [],
+            readLocalProfiles(),
+          );
 
           if (profilesToLoad.length > 0) {
             setProfiles(profilesToLoad);
@@ -200,6 +214,9 @@ export default function GlobalSettings() {
     if (newProfile.googleKey) {
       localStorage.setItem('google_api_key', newProfile.googleKey);
     }
+    window.dispatchEvent(new CustomEvent('api-profiles-updated', {
+      detail: { profiles: updated, activeProfileId: newProfile.id },
+    }));
 
     alert(`✅ บันทึกโปรไฟล์ "${newProfile.name}" เรียบร้อยแล้ว`);
     setIsOpen(false);
@@ -235,6 +252,9 @@ export default function GlobalSettings() {
       localStorage.setItem('openrouter_key', p.openRouterKey);
       localStorage.setItem('dropbox_api_key', p.dropboxKey);
       if (p.googleKey) localStorage.setItem('google_api_key', p.googleKey);
+      window.dispatchEvent(new CustomEvent('api-profiles-updated', {
+        detail: { profiles, activeProfileId: p.id },
+      }));
     }
   };
 
