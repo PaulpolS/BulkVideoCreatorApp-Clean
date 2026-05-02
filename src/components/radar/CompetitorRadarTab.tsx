@@ -552,9 +552,10 @@ export function CompetitorRadarTab() {
         return;
       }
 
-      setScanLogs(prev => [...prev, `⏳ กำลังดึง ${deepResearchLimit} โพสต์... (อาจใช้เวลา 2-5 นาที)`]);
+      setScanLogs(prev => [...prev, `⏳ กำลังดึง ${deepResearchLimit} โพสต์... (ใช้โหมด Async เพื่อป้องกัน Timeout)`]);
 
-      const apifyRes = await fetch(`https://api.apify.com/v2/acts/apify~facebook-posts-scraper/run-sync-get-dataset-items?token=${currentApifyKey}&timeout=300`, {
+      // ===== STEP 1: Start the run (async) =====
+      const startRes = await fetch(`https://api.apify.com/v2/acts/apify~facebook-posts-scraper/runs?token=${currentApifyKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -563,16 +564,108 @@ export function CompetitorRadarTab() {
         })
       });
 
-      if (!apifyRes.ok) {
-        setScanLogs(prev => [...prev, `❌ API Error: ${apifyRes.status}`]);
-        globalTaskStore.updateTask(taskId, { progress: `❌ API Error: ${apifyRes.status}`, status: 'error' });
+      if (!startRes.ok) {
+        const errText = await startRes.text().catch(() => 'unknown');
+        setScanLogs(prev => [...prev, `❌ API Error เริ่ม Run ไม่ได้: ${startRes.status} - ${errText.substring(0, 150)}`]);
+        globalTaskStore.updateTask(taskId, { progress: `❌ API Error: ${startRes.status}`, status: 'error' });
         setIsDeepResearching(false);
         setIsScanning(false);
         setGlobalScanTaskId(null);
         return;
       }
 
-      const data = await apifyRes.json();
+      const runData = await startRes.json();
+      const runId = runData?.data?.id;
+      const datasetId = runData?.data?.defaultDatasetId;
+      
+      if (!runId) {
+        setScanLogs(prev => [...prev, `❌ ไม่พบ Run ID จาก Apify`]);
+        globalTaskStore.updateTask(taskId, { progress: '❌ ไม่พบ Run ID', status: 'error' });
+        setIsDeepResearching(false);
+        setIsScanning(false);
+        setGlobalScanTaskId(null);
+        return;
+      }
+
+      setScanLogs(prev => [...prev, `🚀 เริ่ม Run สำเร็จ (ID: ${runId.substring(0, 8)}...) กำลังรอผล...`]);
+
+      // ===== STEP 2: Poll for status every 10s =====
+      let runStatus = 'RUNNING';
+      let pollCount = 0;
+      const maxPolls = 120; // Max 20 minutes (120 * 10s)
+
+      while (runStatus === 'RUNNING' || runStatus === 'READY') {
+        pollCount++;
+        if (pollCount > maxPolls) {
+          setScanLogs(prev => [...prev, `❌ หมดเวลารอ (เกิน 20 นาที) กรุณาลดจำนวนโพสต์แล้วลองใหม่`]);
+          globalTaskStore.updateTask(taskId, { progress: '❌ หมดเวลารอ', status: 'error' });
+          setIsDeepResearching(false);
+          setIsScanning(false);
+          setGlobalScanTaskId(null);
+          return;
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10s
+
+        try {
+          // Query run status
+          const statusRes = await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${currentApifyKey}`);
+          if (statusRes.ok) {
+            const statusData = await statusRes.json();
+            runStatus = statusData?.data?.status || 'UNKNOWN';
+            const elapsedSec = Math.round((Date.now() - new Date(statusData?.data?.startedAt).getTime()) / 1000);
+            
+            // Query dataset for REAL item count (run stats don't have itemCount)
+            let itemCount = 0;
+            if (datasetId) {
+              try {
+                const dsInfoRes = await fetch(`https://api.apify.com/v2/datasets/${datasetId}?token=${currentApifyKey}`);
+                if (dsInfoRes.ok) {
+                  const dsInfo = await dsInfoRes.json();
+                  itemCount = dsInfo?.data?.itemCount || 0;
+                }
+              } catch (e) { /* ignore dataset query errors */ }
+            }
+            
+            if (runStatus === 'RUNNING' || runStatus === 'READY') {
+              const phase = itemCount > 0 ? '📥 กำลังดึงโพสต์' : '🔄 Scraper กำลัง initialize (รอ Facebook ตอบกลับ)';
+              setScanLogs(prev => {
+                const newLogs = prev.filter(l => !l.startsWith('⏳ [Polling]'));
+                return [...newLogs, `⏳ [Polling] ${phase} — ได้แล้ว ${itemCount} โพสต์ (${elapsedSec}s, รอบที่ ${pollCount})`];
+              });
+              globalTaskStore.updateTask(taskId, { progress: `⏳ ดึงแล้ว ${itemCount} โพสต์ (${elapsedSec}s)` });
+            }
+          }
+        } catch (pollErr) {
+          console.warn('Poll error:', pollErr);
+        }
+      }
+
+      if (runStatus !== 'SUCCEEDED') {
+        setScanLogs(prev => [...prev, `❌ Run จบด้วยสถานะ: ${runStatus}`]);
+        globalTaskStore.updateTask(taskId, { progress: `❌ Run failed: ${runStatus}`, status: 'error' });
+        setIsDeepResearching(false);
+        setIsScanning(false);
+        setGlobalScanTaskId(null);
+        return;
+      }
+
+      // ===== STEP 3: Get dataset items =====
+      setScanLogs(prev => [...prev, `✅ Run สำเร็จ! กำลังดาวน์โหลดข้อมูล...`]);
+      
+      const dsId = datasetId || runId;
+      const dataRes = await fetch(`https://api.apify.com/v2/datasets/${dsId}/items?token=${currentApifyKey}&format=json`);
+      
+      if (!dataRes.ok) {
+        setScanLogs(prev => [...prev, `❌ ดาวน์โหลด Dataset ล้มเหลว: ${dataRes.status}`]);
+        globalTaskStore.updateTask(taskId, { progress: `❌ Dataset Error: ${dataRes.status}`, status: 'error' });
+        setIsDeepResearching(false);
+        setIsScanning(false);
+        setGlobalScanTaskId(null);
+        return;
+      }
+
+      const data = await dataRes.json();
       setScanLogs(prev => [...prev, `✅ ได้ข้อมูล ${data.length} โพสต์ กำลังสร้าง CSV...`]);
 
       // สร้าง CSV

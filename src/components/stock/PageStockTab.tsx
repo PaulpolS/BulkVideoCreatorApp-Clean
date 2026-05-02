@@ -31,7 +31,7 @@ type StockMode = 'image-and-post' | 'image-only' | 'post-only';
 type ImageProvider = 'kie-gpt-image-2';
 type AspectRatio = 'auto' | '1:1' | '9:16' | '16:9' | '4:3' | '3:4';
 type ImageResolution = '1K' | '2K' | '4K';
-type PageStockBuilderTab = 'api' | 'prompt' | 'local-image-article' | 'clickbait' | 'canvas';
+type PageStockBuilderTab = 'api' | 'prompt' | 'local-image-article' | 'clickbait' | 'csv-clickbait' | 'canvas';
 
 interface ApiProfile {
   id: string;
@@ -1243,6 +1243,42 @@ Pattern ที่ต้องเลียนแบบจากตัวอย่
 }`;
 }
 
+function createCsvClickbaitPrompt(article: string, sourceUrl?: string) {
+  const trimmed = article.slice(0, 6000);
+  const urlNote = sourceUrl ? `\n\nLink ที่มาของเนื้อหา: ${sourceUrl} — ให้ใส่ไว้ท้ายคอมเมนต์ 3/3 ด้วย` : '';
+  return `คุณคือคนเขียนโพสต์เพจไทยที่เก่งมากในการสรุปบทความให้น่าสนใจ
+
+อ่านเนื้อหาบทความนี้:
+"""
+${trimmed}
+"""${urlNote}
+
+งานของคุณ:
+1. เขียน "headline" — โพสต์หลักแบบ clickbait สั้นๆ (1-3 บรรทัด) ที่ชวนคลิกมาก ต้องมี "(มีต่อ👇)" ต่อท้าย
+   ตัวอย่าง pattern:
+   - เพิ่มประสิทธิภาพการทำธุรกิจด้วย 100 Prompt! วิเคราะห์ธุรกิจ/วางแผนการตลาด/บริหารทีม/จัดการการเงิน (มีต่อ👇)
+   - เคยสงสัยไหมว่าทำไมบางคนถึงบริหารธุรกิจได้อย่างเป็นเลิศ? เพราะพวกเขารู้จักใช้ Prompt ที่ทรงพลัง! (มีต่อ👇)
+   - ทำไมบางแบรนด์ถึงสร้าง Viral Campaign ได้บ่อยจัง? รวม 120 Prompts ลับสำหรับวิเคราะห์เทรนด์ (มีต่อ👇)
+   สำคัญ: ห้ามพูดว่าแจก Prompt ถ้าเนื้อหาไม่ได้แจก ให้ปรับให้ตรงกับเนื้อหาจริง
+
+2. เขียน "postText" — ข้อความสั้น 2-4 บรรทัดชวนให้อ่านต่อในคอมเมนต์
+
+3. เขียน "comments" — 3 คอมเมนต์ เป็นการสรุปเนื้อหาบทความแบ่งเป็น 3 ส่วน:
+   - คอมเมนต์แรกขึ้นต้นด้วย "1/3" แล้วสรุปส่วนแรก
+   - คอมเมนต์สองขึ้นต้นด้วย "2/3" แล้วสรุปส่วนกลาง
+   - คอมเมนต์สามขึ้นต้นด้วย "3/3" แล้วสรุปส่วนท้าย${sourceUrl ? ' พร้อมใส่ link ที่มาตอนท้าย' : ''}
+   แต่ละคอมเมนต์ควรมี 4-8 ข้อ/bullet ใช้ emoji ประกอบได้
+
+ภาษาไทยอ่านง่าย ไม่ต้องมี markdown
+
+ส่งกลับเป็น JSON เท่านั้น:
+{
+  "headline": "...",
+  "postText": "...",
+  "comments": ["1/3...", "2/3...", "3/3..."]
+}`;
+}
+
 function createPayload(
   page: PageConfig,
   topics: string[],
@@ -1406,6 +1442,16 @@ export function PageStockTab() {
   });
   const [clickbaitRunning, setClickbaitRunning] = useState(false);
   const [clickbaitCopied, setClickbaitCopied] = useState(false);
+
+  // CSV Clickbait states
+  const [csvCbFile, setCsvCbFile] = useState('');
+  const [csvCbFileName, setCsvCbFileName] = useState('');
+  const [csvCbRows, setCsvCbRows] = useState<{id: string; title: string; content: string; sourceUrl: string}[]>([]);
+  const [csvCbResults, setCsvCbResults] = useState<ClickbaitPostItem[]>([]);
+  const [csvCbRunning, setCsvCbRunning] = useState(false);
+  const [csvCbProgress, setCsvCbProgress] = useState('');
+  const [csvCbCopied, setCsvCbCopied] = useState(false);
+  const [csvCbPasteMode, setCsvCbPasteMode] = useState(false);
   const [settings, setSettings] = useState<OutputSettings>(() => {
     try {
       return { ...DEFAULT_OUTPUT_SETTINGS, ...JSON.parse(localStorage.getItem(OUTPUT_SETTINGS_KEY) || '{}') };
@@ -3023,6 +3069,163 @@ ${NO_AI_PREAMBLE_RULE}
     URL.revokeObjectURL(link.href);
   };
 
+  // ============ CSV Clickbait helpers ============
+  const parseCsvClickbaitFile = (text: string) => {
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length < 2) return [];
+    const headerLine = lines[0];
+    // Simple CSV parse (handles quoted fields)
+    const splitCsvLine = (line: string) => {
+      const result: string[] = [];
+      let current = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+          if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
+          else inQuotes = !inQuotes;
+        } else if (ch === ',' && !inQuotes) {
+          result.push(current); current = '';
+        } else {
+          current += ch;
+        }
+      }
+      result.push(current);
+      return result.map(s => s.trim());
+    };
+    const headers = splitCsvLine(headerLine).map(h => h.toLowerCase().replace(/["']/g, ''));
+    // Auto-detect content column
+    const contentIdx = headers.findIndex(h => /^(caption|content|text|article|body|description|post_text|posttext|เนื้อหา)$/.test(h));
+    const titleIdx = headers.findIndex(h => /^(title|headline|หัวข้อ|topic)$/.test(h));
+    const urlIdx = headers.findIndex(h => /^(url|link|source_url|sourceurl|source|ลิงก์)$/.test(h));
+    if (contentIdx < 0) return []; // must have a content column
+    const rows: {id: string; title: string; content: string; sourceUrl: string}[] = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cols = splitCsvLine(lines[i]);
+      const content = cols[contentIdx] || '';
+      if (!content.trim() || content.length < 20) continue;
+      rows.push({
+        id: `csvrow-${i}-${Date.now()}`,
+        title: (titleIdx >= 0 ? cols[titleIdx] : '') || content.slice(0, 60).replace(/\n/g, ' '),
+        content,
+        sourceUrl: urlIdx >= 0 ? (cols[urlIdx] || '') : '',
+      });
+    }
+    return rows;
+  };
+
+  const handleCsvCbUpload = (file?: File | null) => {
+    if (!file) return;
+    setCsvCbFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = reader.result as string;
+      setCsvCbFile(text);
+      const rows = parseCsvClickbaitFile(text);
+      setCsvCbRows(rows);
+      setCsvCbProgress(rows.length > 0 ? `พบ ${rows.length} บทความพร้อมสร้าง` : '❌ ไม่พบคอลัมน์เนื้อหา (caption/content/text/article)');
+    };
+    reader.readAsText(file);
+  };
+
+  const handleCsvCbPaste = (text: string) => {
+    setCsvCbFile(text);
+    const rows = parseCsvClickbaitFile(text);
+    setCsvCbRows(rows);
+    setCsvCbProgress(rows.length > 0 ? `พบ ${rows.length} บทความพร้อมสร้าง` : '❌ ไม่พบคอลัมน์เนื้อหา (caption/content/text/article)');
+  };
+
+  const runCsvClickbaitGenerator = async () => {
+    if (csvCbRows.length === 0 || csvCbRunning) return;
+    setCsvCbRunning(true);
+    const generated: ClickbaitPostItem[] = [];
+    const hasKey = getStoredOpenRouterKeyCandidates().length > 0;
+    if (!hasKey) {
+      setCsvCbProgress('❌ ไม่พบ OpenRouter API Key');
+      setCsvCbRunning(false);
+      return;
+    }
+
+    for (let i = 0; i < csvCbRows.length; i++) {
+      const row = csvCbRows[i];
+      setCsvCbProgress(`กำลังสร้าง ${i + 1}/${csvCbRows.length}: ${row.title.slice(0, 40)}...`);
+      try {
+        const prompt = createCsvClickbaitPrompt(row.content, row.sourceUrl || undefined);
+        const raw = await askOpenRouter(prompt, undefined, 2500, manualPromptModel);
+        const body = normalizeClickbaitPayload(row.title, raw);
+        generated.push({
+          ...body,
+          topic: row.title,
+          id: `csv-cb-${Date.now()}-${i}`,
+          createdAt: new Date().toISOString(),
+        });
+      } catch (error: any) {
+        const fallback = createFallbackClickbaitPost(row.title);
+        generated.push({
+          ...fallback,
+          id: `csv-cb-${Date.now()}-${i}`,
+          createdAt: new Date().toISOString(),
+          status: 'error',
+          error: error?.message || String(error),
+        });
+      }
+    }
+
+    setCsvCbResults(prev => [...generated, ...prev]);
+    setCsvCbProgress(`✅ สร้างเสร็จ ${generated.length} โพสต์`);
+    setCsvCbRunning(false);
+  };
+
+  const updateCsvCbPost = (id: string, patch: Partial<ClickbaitPostItem>) => {
+    setCsvCbResults(prev => prev.map(item => item.id === id ? { ...item, ...patch } : item));
+  };
+
+  const updateCsvCbComment = (id: string, index: number, value: string) => {
+    setCsvCbResults(prev => prev.map(item => {
+      if (item.id !== id) return item;
+      const comments = [...item.comments] as [string, string, string];
+      comments[index] = value;
+      return { ...item, comments };
+    }));
+  };
+
+  const csvCbCsvText = useMemo(() => {
+    const headers = ['id', 'topic', 'headline', 'post_text', 'comment_1', 'comment_2', 'comment_3', 'status', 'error', 'created_at'];
+    return [
+      headers.join(','),
+      ...csvCbResults.map(item => headers.map(header => {
+        const row: Record<string, string> = {
+          id: item.id, topic: item.topic, headline: item.headline,
+          post_text: item.postText, comment_1: item.comments[0],
+          comment_2: item.comments[1], comment_3: item.comments[2],
+          status: item.status, error: item.error || '', created_at: item.createdAt,
+        };
+        return csvEscape(row[header]);
+      }).join(',')),
+    ].join('\n');
+  }, [csvCbResults]);
+
+  const csvCbCopyText = useMemo(() => csvCbResults.map(item => [
+    item.headline, '', item.postText, '', item.comments[0], '', item.comments[1], '', item.comments[2],
+  ].join('\n')).join('\n\n----------\n\n'), [csvCbResults]);
+
+  const copyCsvCbPosts = async () => {
+    if (!csvCbCopyText) return;
+    await navigator.clipboard.writeText(csvCbCopyText);
+    setCsvCbCopied(true);
+    window.setTimeout(() => setCsvCbCopied(false), 1500);
+  };
+
+  const downloadCsvCbCsv = () => {
+    if (csvCbResults.length === 0) return;
+    const blob = new Blob(['\uFEFF' + csvCbCsvText], { type: 'text/csv;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `csv-clickbait-posts-${Date.now()}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
+
   const handleCanvasFolderUpload = async (files?: FileList | null) => {
     if (!files?.length) return;
     const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
@@ -3739,6 +3942,15 @@ ${NO_AI_PREAMBLE_RULE}
           aria-selected={builderTab === 'clickbait'}
         >
           สร้าง โพส clickbait
+        </button>
+        <button
+          type="button"
+          className={builderTab === 'csv-clickbait' ? 'active' : ''}
+          onClick={() => setBuilderTab('csv-clickbait')}
+          role="tab"
+          aria-selected={builderTab === 'csv-clickbait'}
+        >
+          CSV → Clickbait
         </button>
         <button
           type="button"
@@ -4592,6 +4804,121 @@ ${NO_AI_PREAMBLE_RULE}
                           className="page-stock-textarea"
                           value={item.comments[index]}
                           onChange={event => updateClickbaitComment(item.id, index, event.target.value)}
+                          rows={7}
+                        />
+                      </label>
+                    ))}
+                  </article>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      ) : builderTab === 'csv-clickbait' ? (
+        <section className="page-stock-panel page-stock-manual-prompt">
+          <div className="page-stock-panel-head">
+            <h2>CSV → Clickbait + ใต้เม้น</h2>
+            <span>{csvCbResults.length} โพสต์ · {csvCbRows.length} บทความ</span>
+          </div>
+          <div className="page-stock-manual-grid">
+            <div className="page-stock-manual-card">
+              <h3>1. นำเข้า CSV บทความ</h3>
+              <p>อัปโหลด CSV ที่มีคอลัมน์เนื้อหา (caption/content/text/article) ระบบจะสร้าง Clickbait + ใต้เม้น 1/3-3/3 จากเนื้อหาจริง</p>
+              <div className="page-stock-manual-actions">
+                <button className={csvCbPasteMode ? '' : 'page-stock-primary'} onClick={() => setCsvCbPasteMode(false)}>อัปโหลดไฟล์</button>
+                <button className={csvCbPasteMode ? 'page-stock-primary' : ''} onClick={() => setCsvCbPasteMode(true)}>วางข้อความ</button>
+              </div>
+              {!csvCbPasteMode ? (
+                <label className="page-stock-upload">
+                  <input
+                    type="file"
+                    accept=".csv,text/csv"
+                    onChange={event => handleCsvCbUpload(event.target.files?.[0])}
+                  />
+                  <span>{csvCbFileName || 'เลือกไฟล์ CSV'}</span>
+                </label>
+              ) : (
+                <textarea
+                  className="page-stock-textarea"
+                  value={csvCbFile}
+                  onChange={event => handleCsvCbPaste(event.target.value)}
+                  rows={8}
+                  placeholder={'วาง CSV ตรงนี้ เช่น:\ncaption,url\n"เนื้อหาบทความยาวๆ...","https://..."'}
+                />
+              )}
+              {csvCbProgress && <div className="page-stock-brain-box"><strong>{csvCbProgress}</strong></div>}
+              {csvCbRows.length > 0 && (
+                <div className="page-stock-trend-box">
+                  <strong>พร้อมสร้าง {csvCbRows.length} โพสต์</strong>
+                  <span>{csvCbRows.slice(0, 5).map(r => r.title.slice(0, 40)).join(' · ')}{csvCbRows.length > 5 ? ' ...' : ''}</span>
+                </div>
+              )}
+              <label>
+                <span>โมเดลเขียนโพสต์</span>
+                <select className="page-stock-manual-input" value={manualPromptModel} onChange={event => setManualPromptModel(event.target.value)}>
+                  {MANUAL_TOPIC_PROMPT_MODELS.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
+                </select>
+              </label>
+              <div className="page-stock-manual-actions">
+                <button className="page-stock-primary" disabled={csvCbRows.length === 0 || csvCbRunning} onClick={runCsvClickbaitGenerator}>
+                  {csvCbRunning ? 'กำลังสร้าง...' : `สร้าง ${csvCbRows.length || ''} Clickbait`}
+                </button>
+                <button disabled={csvCbRows.length === 0 || csvCbRunning} onClick={() => { setCsvCbFile(''); setCsvCbFileName(''); setCsvCbRows([]); setCsvCbProgress(''); }}>ล้าง CSV</button>
+                <button className="page-stock-danger" disabled={csvCbResults.length === 0} onClick={() => setCsvCbResults([])}>ล้างผลลัพธ์</button>
+              </div>
+              {!getStoredOpenRouterKeyCandidates().length && (
+                <p>⚠️ ยังไม่พบ OpenRouter key กรุณาใส่ key ในหน้าตั้งค่าระบบก่อน</p>
+              )}
+            </div>
+
+            <div className="page-stock-manual-card">
+              <h3>2. ส่งออก</h3>
+              <p>ผลลัพธ์แก้ไขได้ก่อนส่งออก CSV โดยคอลัมน์จะแยก headline, post และ comment 1-3</p>
+              <div className="page-stock-manual-actions">
+                <button disabled={csvCbResults.length === 0} onClick={copyCsvCbPosts}>
+                  {csvCbCopied ? 'คัดลอกแล้ว' : 'คัดลอกทั้งหมด'}
+                </button>
+                <button disabled={csvCbResults.length === 0} onClick={downloadCsvCbCsv}>Export CSV</button>
+              </div>
+              <div className="page-stock-result-list page-stock-prompt-results" style={{ maxHeight: 360, overflow: 'auto' }}>
+                {csvCbResults.length === 0 ? (
+                  <em>อัปโหลด CSV แล้วกดสร้าง ผลลัพธ์จะขึ้นตรงนี้</em>
+                ) : csvCbResults.slice(0, 8).map(item => (
+                  <article key={item.id}>
+                    <strong>{item.headline}</strong>
+                    <p>{item.topic}</p>
+                    {item.error && <p>AI error: {item.error}</p>}
+                  </article>
+                ))}
+              </div>
+            </div>
+
+            <div className="page-stock-manual-card page-stock-manual-wide">
+              <h3>3. ผลลัพธ์ที่แก้ไขได้</h3>
+              <div className="page-stock-result-list page-stock-prompt-results">
+                {csvCbResults.length === 0 ? (
+                  <em>ยังไม่มีผลลัพธ์</em>
+                ) : csvCbResults.map(item => (
+                  <article key={item.id}>
+                    <div className="page-stock-panel-head">
+                      <h4>{item.topic}</h4>
+                      <button className="page-stock-danger" onClick={() => setCsvCbResults(prev => prev.filter(post => post.id !== item.id))}>ลบ</button>
+                    </div>
+                    <label>
+                      <span>หัวข้อ clickbait</span>
+                      <textarea className="page-stock-textarea" value={item.headline} onChange={event => updateCsvCbPost(item.id, { headline: event.target.value })} rows={2} />
+                    </label>
+                    <label>
+                      <span>โพสต์หลัก</span>
+                      <textarea className="page-stock-textarea" value={item.postText} onChange={event => updateCsvCbPost(item.id, { postText: event.target.value })} rows={4} />
+                    </label>
+                    {[0, 1, 2].map(index => (
+                      <label key={`${item.id}-cc-${index}`}>
+                        <span>ใต้คอมเมนต์ {index + 1}/3</span>
+                        <textarea
+                          className="page-stock-textarea"
+                          value={item.comments[index]}
+                          onChange={event => updateCsvCbComment(item.id, index, event.target.value)}
                           rows={7}
                         />
                       </label>
