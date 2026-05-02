@@ -370,16 +370,152 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
     return text.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/\s*```$/, '').trim();
   };
 
-  const getOpenRouterKey = () => {
-    const raw = localStorage.getItem('api_global_profiles') || '[]';
-    const activeId = localStorage.getItem('api_global_active_id');
-    try {
-      const profiles = JSON.parse(raw);
-      const p = profiles.find((x: any) => x.id === activeId) || profiles[0];
-      return p ? p.openRouterKey : '';
-    } catch(e) {
-      return localStorage.getItem('openrouter_key') || '';
+  const parseLooseJson = (text: string): any | null => {
+    const cleaned = cleanJsonText(String(text || ''));
+    const candidates = [
+      cleaned,
+      cleaned.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim() || '',
+    ].filter(Boolean);
+
+    for (const candidate of candidates) {
+      try {
+        return JSON.parse(candidate);
+      } catch {}
     }
+
+    const objectStart = cleaned.indexOf('{');
+    const arrayStart = cleaned.indexOf('[');
+    const starts = [objectStart, arrayStart].filter(index => index >= 0);
+    if (starts.length === 0) return null;
+    const start = Math.min(...starts);
+    const candidate = cleaned.slice(start);
+    const ends = [candidate.lastIndexOf('}'), candidate.lastIndexOf(']')].filter(index => index >= 0);
+    for (const end of ends.sort((a, b) => b - a)) {
+      try {
+        return JSON.parse(candidate.slice(0, end + 1));
+      } catch {}
+    }
+    return null;
+  };
+
+  const normalizeScore = (value: any, fallback = 5) => {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return fallback;
+    return Math.max(1, Math.min(10, Math.round(num)));
+  };
+
+  const normalizeTags = (value: any): string[] => {
+    if (Array.isArray(value)) return value.map(tag => String(tag).trim()).filter(Boolean).slice(0, 6);
+    if (typeof value === 'string') return value.split(/[,，、|/]/).map(tag => tag.trim()).filter(Boolean).slice(0, 6);
+    return [];
+  };
+
+  const normalizeTranslatedTitleResults = (parsed: any, batch: ArticleItem[]) => {
+    const rawResults = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.results)
+        ? parsed.results
+        : Array.isArray(parsed?.data)
+          ? parsed.data
+          : Array.isArray(parsed?.translations)
+            ? parsed.translations
+            : parsed && typeof parsed === 'object'
+              ? Object.values(parsed).filter(value => value && typeof value === 'object')
+              : [];
+
+    return rawResults.map((item: any, index: number) => {
+      const source = item || {};
+      const fallbackArticle = batch[index];
+      const id = String(source.id ?? source.ID ?? source.article_id ?? source['รหัสเดิม'] ?? source['รหัส'] ?? fallbackArticle?.id ?? '').trim();
+      const thaiTitle = String(
+        source.thai_title ??
+        source.thaiTitle ??
+        source.translated_title ??
+        source.title_th ??
+        source.thai ??
+        source['หัวข้อแปลไทย'] ??
+        source['หัวข้อข่าวภาษาไทย'] ??
+        source['ชื่อข่าว'] ??
+        source['ชื่อข่าวภาษาไทย'] ??
+        '',
+      ).trim();
+
+      return {
+        id,
+        thaiTitle,
+        newsScore: normalizeScore(source.news_score ?? source.newsScore ?? source.score ?? source['คะแนนข่าว'] ?? source['คะแนน'], 5),
+        evergreenScore: normalizeScore(source.evergreen_score ?? source.evergreenScore ?? source.evergreen ?? source['คะแนน Evergreen'] ?? source['คะแนนเอเวอร์กรีน'], 5),
+        tags: normalizeTags(source.tags ?? source.tag ?? source['tags'] ?? source['แท็ก'] ?? source['หมวดหมู่']),
+      };
+    }).filter(item => item.id && item.thaiTitle);
+  };
+
+  const getOpenRouterKeyCandidates = () => {
+    const candidates: { key: string; label: string }[] = [];
+    const addCandidate = (key: unknown, label: string) => {
+      const clean = String(key || '').trim();
+      if (!clean || candidates.some(item => item.key === clean)) return;
+      candidates.push({ key: clean, label });
+    };
+
+    try {
+      const profiles = JSON.parse(localStorage.getItem('api_global_profiles') || '[]');
+      const activeId = localStorage.getItem('api_global_active_id');
+      if (Array.isArray(profiles)) {
+        const activeProfile = profiles.find((profile: any) => profile.id === activeId);
+        addCandidate(activeProfile?.openRouterKey, `Profile: ${activeProfile?.name || 'active'}`);
+        profiles.forEach((profile: any, index: number) => {
+          addCandidate(profile?.openRouterKey, `Profile ${index + 1}: ${profile?.name || profile?.id || 'unnamed'}`);
+        });
+      }
+    } catch {}
+
+    addCandidate(localStorage.getItem('openrouter_key'), 'Legacy openrouter_key');
+
+    try {
+      const keys = JSON.parse(localStorage.getItem('openrouter_keys') || '[]');
+      if (Array.isArray(keys)) {
+        const active = keys.find((key: any) => key.isActive);
+        addCandidate(active?.key, `OpenRouter key: ${active?.name || 'active'}`);
+        keys.forEach((item: any, index: number) => {
+          addCandidate(item?.key, `OpenRouter key ${index + 1}: ${item?.name || 'saved'}`);
+        });
+      }
+    } catch {}
+
+    return candidates;
+  };
+
+  const getOpenRouterKey = () => {
+    return getOpenRouterKeyCandidates()[0]?.key || '';
+  };
+
+  const callOpenRouterWithFallbackKeys = async (body: Record<string, unknown>) => {
+    const candidates = getOpenRouterKeyCandidates();
+    if (candidates.length === 0) throw new Error('ไม่พบ OpenRouter API Key');
+
+    let lastError = '';
+    for (const candidate of candidates) {
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${candidate.key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (res.ok && !data.error) {
+        return { data, keyLabel: candidate.label };
+      }
+
+      const message = data.error?.message || `OpenRouter error ${res.status}`;
+      lastError = `${candidate.label}: ${message}`;
+      if (/insufficient credits|more credits|credits|can only afford/i.test(message)) {
+        addLog(`🔁 ${candidate.label} ใช้ไม่ได้เพราะเครดิต/ลิมิต → ลอง key ถัดไป`);
+        continue;
+      }
+      throw new Error(lastError);
+    }
+
+    throw new Error(lastError || 'OpenRouter error');
   };
 
   const handleScrape = async () => {
@@ -495,8 +631,7 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
   };
 
   const handleTranslateTitles = async () => {
-    const apiKey = getOpenRouterKey();
-    if (!apiKey) return alert("กรุณาตั้งค่า OpenRouter API Key ก่อน");
+    if (getOpenRouterKeyCandidates().length === 0) return alert("กรุณาตั้งค่า OpenRouter API Key ก่อน");
 
     const allToTranslate = articles.filter(a => !a.thaiTitle);
     if (allToTranslate.length === 0) return alert("ไม่มีหัวเรื่องใหม่ให้แปลแล้ว");
@@ -517,30 +652,28 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
       addLog(`📦 [ชุดที่ ${batchIndex + 1}/${totalBatches}] กำลังแปล ${batch.length} หัวข้อ...`);
 
       try {
-        const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: 'google/gemini-2.5-flash',
-            messages: [{ role: 'user', content: TITLES_TRANSLATE_PROMPT.replace('{content}', JSON.stringify(inputData)) }],
-            temperature: 0.3
-          })
+        const { data, keyLabel } = await callOpenRouterWithFallbackKeys({
+          model: 'google/gemini-2.5-flash',
+          messages: [{ role: 'user', content: TITLES_TRANSLATE_PROMPT.replace('{content}', JSON.stringify(inputData)) }],
+          temperature: 0.3,
         });
-        const data = await res.json();
         const raw = data.choices?.[0]?.message?.content || '{}';
-        const parsed = JSON.parse(cleanJsonText(raw));
-        if (parsed.results && Array.isArray(parsed.results)) {
+        const parsed = parseLooseJson(raw);
+        const normalizedResults = normalizeTranslatedTitleResults(parsed, batch);
+        if (normalizedResults.length > 0) {
+          const resultMap = new Map(normalizedResults.map(result => [result.id, result]));
+          const matchedCount = batch.filter(article => resultMap.has(article.id)).length;
           setArticles(prev => prev.map(a => {
-             const match = parsed.results.find((r: any) => r.id === a.id);
+             const match = resultMap.get(a.id);
              if (match) {
-               return { ...a, thaiTitle: match.thai_title, score: match.news_score ?? match.score, evergreenScore: match.evergreen_score, tags: match.tags || [] };
+               return { ...a, thaiTitle: match.thaiTitle, score: match.newsScore, evergreenScore: match.evergreenScore, tags: match.tags };
              }
              return a;
           }));
-          totalTranslated += parsed.results.length;
-          addLog(`✅ ชุดที่ ${batchIndex + 1}: แปลสำเร็จ ${parsed.results.length} รายการ (รวม ${totalTranslated}/${allToTranslate.length})`);
+          totalTranslated += matchedCount;
+          addLog(`✅ ชุดที่ ${batchIndex + 1}: แปลสำเร็จ ${matchedCount}/${batch.length} รายการ ด้วย ${keyLabel} (รวม ${totalTranslated}/${allToTranslate.length})`);
         } else {
-          addLog(`⚠️ ชุดที่ ${batchIndex + 1}: AI คืนค่าผิดรูปแบบ ข้ามไป`);
+          addLog(`⚠️ ชุดที่ ${batchIndex + 1}: AI คืนค่าผิดรูปแบบ ข้ามไป · ตัวอย่างคำตอบ: ${String(raw).slice(0, 180).replace(/\s+/g, ' ')}`);
         }
       } catch(e: any) {
         addLog(`❌ ชุดที่ ${batchIndex + 1}: แปลล้มเหลว: ${e.message}`);

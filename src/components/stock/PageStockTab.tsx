@@ -31,7 +31,7 @@ type StockMode = 'image-and-post' | 'image-only' | 'post-only';
 type ImageProvider = 'kie-gpt-image-2';
 type AspectRatio = 'auto' | '1:1' | '9:16' | '16:9' | '4:3' | '3:4';
 type ImageResolution = '1K' | '2K' | '4K';
-type PageStockBuilderTab = 'api' | 'prompt' | 'local-image-article' | 'canvas';
+type PageStockBuilderTab = 'api' | 'prompt' | 'local-image-article' | 'clickbait' | 'canvas';
 
 interface ApiProfile {
   id: string;
@@ -108,6 +108,21 @@ interface ManualPromptResult {
   imagePrompt: string;
 }
 
+type ManualBrainEditableField =
+  | 'pageName'
+  | 'summary'
+  | 'keywords'
+  | 'contentAngles'
+  | 'toneGuidelines'
+  | 'topicPatterns'
+  | 'promptRules'
+  | 'visualStyleRules'
+  | 'negativeRules'
+  | 'trendInsights'
+  | 'examplePrompts'
+  | 'feedbackNotes'
+  | 'rawAnalysis';
+
 interface LocalImageArticleItem {
   id: string;
   fileName: string;
@@ -146,6 +161,17 @@ interface StockCanvasImage {
   selected: boolean;
 }
 
+interface ClickbaitPostItem {
+  id: string;
+  topic: string;
+  headline: string;
+  postText: string;
+  comments: [string, string, string];
+  status: 'done' | 'error';
+  error?: string;
+  createdAt: string;
+}
+
 const workflowNodes = (workflow as any).nodes ?? [];
 
 function extractPageConfigs(): PageConfig[] {
@@ -165,6 +191,7 @@ function extractPageConfigs(): PageConfig[] {
 const PAGE_CONFIGS = extractPageConfigs();
 const OUTPUT_SETTINGS_KEY = 'page_stock_output_settings';
 const MANUAL_PROMPT_BRAINS_KEY = 'page_stock_prompt_brains';
+const MANUAL_PROMPT_BRAINS_BACKUP_KEY = 'page_stock_prompt_brains_backup';
 const LOCAL_IMAGE_PROMPT_KEY = 'page_stock_local_image_article_prompt';
 const LOCAL_IMAGE_DROPBOX_PATH_KEY = 'page_stock_local_image_dropbox_path';
 const LOCAL_IMAGE_ARTICLE_BRAINS_KEY = 'page_stock_local_image_article_brains';
@@ -172,6 +199,8 @@ const LOCAL_IMAGE_ARTICLE_MODEL_KEY = 'page_stock_local_image_article_model';
 const MANUAL_BRAIN_MODEL_KEY = 'page_stock_manual_brain_model';
 const MANUAL_TOPIC_MODEL_KEY = 'page_stock_manual_topic_model';
 const MANUAL_PROMPT_MODEL_KEY = 'page_stock_manual_prompt_model';
+const CLICKBAIT_POSTS_KEY = 'page_stock_clickbait_posts';
+const CLICKBAIT_INPUT_KEY = 'page_stock_clickbait_input';
 
 const LOCAL_IMAGE_ARTICLE_MODELS = [
   { id: 'google/gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite · ถูกสุด', note: '$0.10 / $0.40 ต่อ 1M token' },
@@ -319,10 +348,263 @@ function getCsvField(row: Record<string, string>, keywords: string[]) {
 }
 
 function extractPromptExamplesFromRows(rows: Record<string, string>[]) {
-  return rows
+  const direct = rows
     .map(row => getCsvField(row, ['prompt', 'สร้างรูป', 'image generation']))
     .filter(Boolean)
     .slice(0, 8);
+  if (direct.length > 0) return direct;
+
+  return rows
+    .flatMap(row => Object.values(row))
+    .map(value => String(value || '').trim())
+    .filter(value =>
+      value.length >= 80 &&
+      value.length <= 5000 &&
+      /prompt|infographic|1080|สร้างรูป|รูปขนาด|หัวข้อ|รายละเอียด|image/i.test(value)
+    )
+    .slice(0, 8);
+}
+
+function extractTopicExamplesFromRows(rows: Record<string, string>[]) {
+  const direct = rows
+    .map(row => getCsvField(row, ['topic', 'title', 'headline', 'หัวข้อ', 'ชื่อเรื่อง']))
+    .filter(Boolean)
+    .slice(0, 30);
+  if (direct.length > 0) return direct;
+
+  return rows
+    .flatMap(row => Object.values(row))
+    .map(value => String(value || '').trim())
+    .flatMap(value => {
+      const topicFromPrompt = value.match(/หัวข้อ(?:\s*Infographic)?\s*(?:คือ|:)?\s*([^รายละเอียด\n]{8,120})/i)?.[1];
+      return topicFromPrompt ? [topicFromPrompt.trim()] : [];
+    })
+    .slice(0, 30);
+}
+
+function extractKeywordsFromText(text: string, limit = 30, mode: 'concept' | 'pain' | 'mixed' = 'mixed') {
+  const blocked = /^(AI|CSV|Prompt|Infographic|Facebook|Page|Content|Topic|Title|How|To|Use|Case|Tool|Comparison|Introduction|Giveaway|Listicle|the|and|for|with|คือ|ทำไม|วิธี|สร้าง|รูป|เพจ|หัวข้อ|เขียนกลับ|แกนหลัก|ชอบลอง|อยากเรียนรู้|ไม่อยากเรียน|บ้าคลั่ง|เครียด|ตามไม่ทัน|เกาไม่ถูกที่คัน)$/i;
+  const matches = [
+    ...String(text || '').matchAll(/['"“”‘’]([^'"“”‘’]{2,48})['"“”‘’]/g),
+  ].map(match => match[1]);
+  const latin = [...String(text || '').matchAll(/\b[A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,3}\b/g)].map(match => match[0]);
+  const aiThai = [...String(text || '').matchAll(/(?:AI|เอไอ)\s?[\u0E00-\u0E7FA-Za-z0-9 ]{2,32}|[\u0E00-\u0E7F]{2,18}\s?(?:AI|เอไอ|Prompt|Agent)/g)].map(match => match[0]);
+  const painMatches = [...String(text || '').matchAll(/ตามไม่ทัน|เครียด|เกาไม่ถูกที่คัน|กลัวตกเทรนด์|ข้อมูลล้น|เลือกไม่ถูก|ไม่รู้จะเริ่มยังไง|ไม่อยากเรียน|อยากเรียนรู้/g)].map(match => match[0]);
+  const candidates = mode === 'pain' ? painMatches : mode === 'concept' ? [...matches, ...latin, ...aiThai] : [...matches, ...latin, ...aiThai, ...painMatches];
+  return Array.from(new Set(candidates
+    .map(cleanTopicSeed)
+    .filter(item => item && item.length > 1 && !blocked.test(item))
+    .filter(item => mode !== 'concept' || /AI|Agent|Code|OS|System|Claude|Vibe|Niche|Singularity|Karpathy|Remotion|Sora|Veo|Runway|Midjourney|Notebook|Perplexity|ระบบปฏิบัติการ|สถาปนิก/i.test(item))))
+    .slice(0, limit);
+}
+
+function createLocalManualBrainFromCsv(params: {
+  brainKey: string;
+  rows: Record<string, string>[];
+  trendRows: Record<string, string>[];
+  manualCsvName: string;
+  manualTrendCsvName: string;
+  csvPromptExamples: string[];
+  previousFeedback: string[];
+}): ManualPromptBrain {
+  const topicExamples = extractTopicExamplesFromRows(params.rows);
+  const promptText = params.csvPromptExamples.join('\n\n');
+  const topicText = topicExamples.join('\n');
+  const trendText = params.trendRows.slice(0, 200).map(row => Object.values(row).join(' ')).join('\n');
+  const promptConcepts = extractKeywordsFromText(`${topicText}\n${promptText}`, 24, 'concept');
+  const trendConcepts = extractKeywordsFromText(trendText, 30, 'concept');
+  const painPoints = extractKeywordsFromText(trendText, 12, 'pain');
+  const keywords = Array.from(new Set([
+    ...trendConcepts,
+    ...promptConcepts,
+  ])).slice(0, 36);
+  const trendSeeds = trendConcepts.slice(0, 24);
+  const topicPatternsFromExamples = topicExamples.slice(0, 10).map(topic => `ตัวอย่างหัวข้อจาก CSV: ${topic}`);
+
+  return normalizeManualBrain({
+    pageName: params.brainKey,
+    updatedAt: new Date().toISOString(),
+    sourceFileName: params.manualCsvName,
+    sourceRowCount: params.rows.length,
+    trendFileName: params.manualTrendCsvName || '',
+    trendRowCount: params.trendRows.length,
+    summary: `สมองฐานจาก CSV ${params.rows.length} แถว${params.trendRows.length ? ` และ CSV เทรนด์ ${params.trendRows.length} แถว` : ''} สกัดแบบ local เป็นหลายหมวด: concept/tool, pain point, pattern หัวข้อ, prompt format และ trend seed เพื่อใช้ต่อแม้ OpenRouter ยังไม่พร้อม`,
+    keywords: keywords.length ? keywords : ['AI', 'เครื่องมือ AI', params.brainKey],
+    contentAngles: [
+      'How-to: สอนใช้งานเครื่องมือหรือ workflow แบบทำตามได้',
+      'Tool Comparison: เปรียบเทียบเครื่องมือหรือแนวทางที่คล้ายกัน',
+      'Tool Introduction: แนะนำเครื่องมือหรือคอนเซปต์ใหม่ที่กำลังเป็นกระแส',
+      'Use Case: ย่อยเป็นตัวอย่างการใช้งานจริงในงาน/ธุรกิจ/คอนเทนต์',
+      'Prompt Giveaway: แจก prompt หรือ template ที่เอาไปใช้ได้ทันที',
+      'Listicle: รวมเครื่องมือ ขั้นตอน หรือ checklist ให้สแกนง่าย',
+    ],
+    toneGuidelines: [
+      'อธิบายเรื่องยากให้เข้าใจง่าย',
+      'เน้นใช้ได้จริง ไม่เขียนเชิงทฤษฎียาวเกินไป',
+      'หัวข้อควรคม ชัด และมีผลลัพธ์ที่คนอ่านอยากได้',
+      'ภาษาไทยอ่านง่าย เหมาะกับ infographic',
+      ...(painPoints.length ? [`แตะ pain point ของคนอ่านได้ เช่น ${painPoints.slice(0, 6).join(', ')}`] : []),
+    ],
+    topicPatterns: [
+      'ขึ้นต้นด้วยชื่อเครื่องมือ/คอนเซปต์ แล้วตามด้วยประโยชน์',
+      'ใช้รูปแบบ วิธี..., แจก Prompt..., เปรียบเทียบ..., สรุป..., Checklist...',
+      'ดึง trend seed ล่าสุดมาผสมกับ pattern เดิมของเพจ',
+      'หลีกเลี่ยงหัวข้อกว้างเกินไป เช่น AI คืออะไร ถ้ามี trend seed เฉพาะเจาะจงกว่า',
+      ...topicPatternsFromExamples,
+    ],
+    promptRules: [
+      'รักษา format จาก CSV Prompt เดิมให้มากที่สุด',
+      'ระบุหัวข้อ infographic เป็นภาษาไทยชัดเจน',
+      'คุมภาพเป็น infographic 1080x1080 อ่านง่าย',
+      'ใส่รายละเอียด/ไอเดียที่ช่วยให้ภาพเล่าเรื่องได้ครบ',
+    ],
+    visualStyleRules: [
+      'Infographic ภาษาไทย อ่านง่าย',
+      'Layout เป็นลำดับขั้น ตาราง เปรียบเทียบ หรือ checklist ตามหัวข้อ',
+      'เน้นความชัดของข้อความและ hierarchy',
+      'ใช้ภาพประกอบ/ไอคอนที่สัมพันธ์กับเครื่องมือหรือ workflow',
+    ],
+    negativeRules: [
+      'ห้ามลากคำอธิบาย trend/pattern มาเป็นหัวข้อดิบๆ',
+      'ห้ามใช้ keyword กว้างซ้ำๆ ถ้ามี trend seed เฉพาะเจาะจง',
+      'ห้ามสร้างหัวข้อที่ไม่เกี่ยวกับ CSV Prompt หรือ CSV เทรนด์',
+      'ห้ามใส่ field name หรือเศษ JSON เช่น pageName, summary, pattern',
+    ],
+    trendInsights: trendSeeds.length
+      ? [
+        ...trendSeeds.map(seed => `Concept/tool trend: ${seed}`),
+        ...painPoints.map(point => `Audience pain point: ${point}`),
+      ]
+      : ['ยังไม่มี trend seed ชัดเจนจาก CSV เทรนด์ ให้ใช้ keyword และ pattern จาก CSV Prompt เป็นหลัก'],
+    examplePrompts: params.csvPromptExamples,
+    feedbackNotes: params.previousFeedback,
+    rawAnalysis: JSON.stringify({
+      mode: 'local-chunk-fallback',
+      topicExamples,
+      promptConcepts,
+      keywords,
+      trendSeeds,
+      painPoints,
+      promptExampleCount: params.csvPromptExamples.length,
+    }, null, 2),
+  }, params.brainKey);
+}
+
+function hasUsefulManualBrainPayload(parsed: any) {
+  if (!parsed || typeof parsed !== 'object') return false;
+  return [
+    parsed.keywords,
+    parsed.contentAngles,
+    parsed.toneGuidelines,
+    parsed.topicPatterns,
+    parsed.promptRules,
+    parsed.visualStyleRules,
+    parsed.negativeRules,
+    parsed.trendInsights,
+    parsed.examplePrompts,
+  ].some(value => Array.isArray(value) && value.length > 0);
+}
+
+function compactBrainItems(values: unknown[], limit: number) {
+  const blocked = /^(AI|Prompt|Content|Topic|Tool|How|To|Use|Case|JSON|CSV|Page|Title|Niche|Pain Point|ให้ AI|ThailandAI)$/i;
+  return Array.from(new Set(values
+    .flatMap(value => Array.isArray(value) ? value : [value])
+    .map(value => cleanTopicSeed(String(value || '')))
+    .filter(value =>
+      value.length >= 3 &&
+      value.length <= 60 &&
+      !blocked.test(value) &&
+      !/[{}[\]]/.test(value) &&
+      !/^คุณต้องการอะไร/.test(value) &&
+      !/^อย่าปล่อย/.test(value)
+    )))
+    .slice(0, limit);
+}
+
+function synthesizeManualBrainPayloadFromDeepAnalyses(params: {
+  brainKey: string;
+  promptAnalyses: any[];
+  trendAnalyses: any[];
+  csvPromptExamples: string[];
+}) {
+  const promptRaw = params.promptAnalyses.map(item => [item.raw, item.notes, item.summary].filter(Boolean).join('\n')).join('\n');
+  const trendRaw = params.trendAnalyses.map(item => [item.raw, item.notes, item.summary].filter(Boolean).join('\n')).join('\n');
+  const trendTools = compactBrainItems([
+    ...params.trendAnalyses.flatMap(item => item.trendTools || []),
+    ...params.trendAnalyses.flatMap(item => item.trendConcepts || []),
+    ...extractKeywordsFromText(trendRaw, 40, 'concept'),
+  ], 28);
+  const promptKeywords = compactBrainItems([
+    ...params.promptAnalyses.flatMap(item => item.keywords || []),
+    ...extractKeywordsFromText(promptRaw, 32, 'concept'),
+  ], 24);
+  const painPoints = compactBrainItems([
+    ...params.trendAnalyses.flatMap(item => item.audiencePainPoints || []),
+    ...extractKeywordsFromText(trendRaw, 12, 'pain'),
+  ], 12);
+  const contentAngles = compactBrainItems([
+    ...params.promptAnalyses.flatMap(item => item.contentAngles || []),
+    ...params.trendAnalyses.flatMap(item => item.topicOpportunities || []),
+  ], 18);
+  const topicPatterns = compactBrainItems([
+    ...params.promptAnalyses.flatMap(item => item.topicPatterns || []),
+  ], 18);
+  const promptRules = compactBrainItems([
+    ...params.promptAnalyses.flatMap(item => item.promptRules || []),
+  ], 18);
+  const visualStyleRules = compactBrainItems([
+    ...params.promptAnalyses.flatMap(item => item.visualStyleRules || []),
+  ], 18);
+  const negativeRules = compactBrainItems([
+    ...params.promptAnalyses.flatMap(item => item.negativeRules || []),
+    ...params.trendAnalyses.flatMap(item => item.avoidAsKeywords || []).map((item: string) => `อย่าใช้เป็น keyword หลัก: ${item}`),
+  ], 18);
+  const examplePrompts = Array.from(new Set([
+    ...params.promptAnalyses.flatMap(item => asStringArray(item.examplePrompts)),
+    ...params.csvPromptExamples,
+  ])).slice(0, 8);
+
+  return {
+    pageName: params.brainKey,
+    summary: `สมอง Deep Training จากการอ่าน CSV เป็นก้อน ${params.promptAnalyses.length} ชุด และเทรนด์ ${params.trendAnalyses.length} ชุด รวม tool/concept, pattern, prompt rules และ pain point แยกหมวดแล้ว`,
+    keywords: compactBrainItems([...trendTools, ...promptKeywords], 36),
+    contentAngles: contentAngles.length ? contentAngles : [
+      'How-to: สอนใช้งานเครื่องมือหรือ workflow แบบทำตามได้',
+      'Tool Introduction: แนะนำเครื่องมือหรือคอนเซปต์ใหม่ที่กำลังเป็นกระแส',
+      'Use Case: ย่อยเป็นตัวอย่างการใช้งานจริงในงาน/ธุรกิจ/คอนเทนต์',
+      'Tool Comparison: เปรียบเทียบเครื่องมือหรือแนวทางที่คล้ายกัน',
+    ],
+    toneGuidelines: [
+      'อธิบายเรื่องยากให้เข้าใจง่ายและใช้ได้จริง',
+      'เน้นหัวข้อคม ชัด และโยงกับผลลัพธ์ที่คนอ่านอยากได้',
+      ...(painPoints.length ? [`แตะ pain point ที่พบ: ${painPoints.join(', ')}`] : []),
+    ],
+    topicPatterns: topicPatterns.length ? topicPatterns : [
+      'ขึ้นต้นด้วยชื่อเครื่องมือ/คอนเซปต์ แล้วตามด้วยประโยชน์',
+      'ใช้รูปแบบ วิธี..., แจก Prompt..., เปรียบเทียบ..., สรุป..., Checklist...',
+      'ดึง trend seed ล่าสุดมาผสมกับ pattern เดิมของเพจ',
+    ],
+    promptRules: promptRules.length ? promptRules : [
+      'รักษา format จาก CSV Prompt เดิมให้มากที่สุด',
+      'ระบุหัวข้อ infographic เป็นภาษาไทยชัดเจน',
+      'คุมภาพเป็น infographic 1080x1080 อ่านง่าย',
+    ],
+    visualStyleRules: visualStyleRules.length ? visualStyleRules : [
+      'Infographic ภาษาไทย อ่านง่าย',
+      'Layout เป็นลำดับขั้น ตาราง เปรียบเทียบ หรือ checklist ตามหัวข้อ',
+      'เน้น hierarchy และความชัดของข้อความ',
+    ],
+    negativeRules: negativeRules.length ? negativeRules : [
+      'ห้ามเอา pain point หรือประโยคบ่นมาเป็น keyword หลัก',
+      'ห้ามใส่ field name หรือเศษ JSON เช่น pageName, summary, pattern',
+      'ห้ามใช้ keyword กว้างซ้ำๆ ถ้ามี trend seed เฉพาะเจาะจงกว่า',
+    ],
+    trendInsights: [
+      ...trendTools.map(item => `Trend tool/concept: ${item}`),
+      ...painPoints.map(item => `Audience pain point: ${item}`),
+    ].slice(0, 36),
+    examplePrompts,
+  };
 }
 
 function normalizeManualBrain(brain: Partial<ManualPromptBrain> | undefined, fallbackName = 'สมอง Prompt'): ManualPromptBrain {
@@ -368,6 +650,261 @@ function normalizeArticleBrain(brain: Partial<LocalImageArticleBrain> | undefine
     feedbackNotes: asStringArray(brain?.feedbackNotes),
     rawAnalysis: brain?.rawAnalysis || '',
   };
+}
+
+function createManualBrainPromptContext(brain: ManualPromptBrain) {
+  return JSON.stringify({
+    pageName: brain.pageName,
+    summary: brain.summary,
+    keywords: brain.keywords.slice(0, 24),
+    contentAngles: brain.contentAngles.slice(0, 16),
+    toneGuidelines: brain.toneGuidelines.slice(0, 12),
+    topicPatterns: brain.topicPatterns.slice(0, 16),
+    promptRules: brain.promptRules.slice(0, 14),
+    visualStyleRules: brain.visualStyleRules,
+    negativeRules: brain.negativeRules.slice(0, 12),
+    trendInsights: brain.trendInsights.slice(0, 14),
+    examplePrompts: brain.examplePrompts.slice(0, 4),
+    feedbackNotes: brain.feedbackNotes.slice(-8),
+  }, null, 2);
+}
+
+function limitText(value: string, maxLength: number) {
+  const text = String(value || '').trim();
+  return text.length > maxLength ? `${text.slice(0, maxLength).trim()}...` : text;
+}
+
+function createManualTopicBrainContext(brain: ManualPromptBrain) {
+  return [
+    `ชื่อสมอง: ${brain.pageName}`,
+    `สรุป: ${limitText(brain.summary, 420)}`,
+    `Keywords: ${brain.keywords.slice(0, 14).join(', ')}`,
+    `แนวหัวข้อ: ${brain.contentAngles.slice(0, 7).map(item => `- ${limitText(item, 120)}`).join('\n')}`,
+    `Pattern หัวข้อ: ${brain.topicPatterns.slice(0, 7).map(item => `- ${limitText(item, 120)}`).join('\n')}`,
+    `Trend ที่ควรใช้: ${brain.trendInsights.slice(0, 7).map(item => `- ${limitText(item, 150)}`).join('\n')}`,
+    brain.feedbackNotes.length ? `Feedback เจ้าของเพจ: ${brain.feedbackNotes.slice(-4).map(item => `- ${limitText(item, 120)}`).join('\n')}` : '',
+  ].filter(Boolean).join('\n\n');
+}
+
+function pickRotatingItems(items: string[], start: number, count: number, maxLength: number) {
+  if (items.length === 0) return [];
+  return Array.from({ length: Math.min(count, items.length) }, (_, index) => {
+    const item = items[(start + index) % items.length];
+    return limitText(item, maxLength);
+  });
+}
+
+function createManualTopicBrainChunkContext(brain: ManualPromptBrain, batchIndex: number, ultraCompact = false) {
+  const offset = batchIndex * (ultraCompact ? 2 : 3);
+  const keywordCount = ultraCompact ? 10 : 18;
+  const keywords = pickRotatingItems(brain.keywords, offset, keywordCount, 80).join(', ');
+  const angles = pickRotatingItems(brain.contentAngles, offset, ultraCompact ? 2 : 3, ultraCompact ? 80 : 110);
+  const patterns = pickRotatingItems(brain.topicPatterns, offset, ultraCompact ? 2 : 3, ultraCompact ? 80 : 110);
+  const trends = pickRotatingItems(brain.trendInsights, offset, ultraCompact ? 2 : 3, ultraCompact ? 90 : 120);
+
+  return [
+    `เพจ: ${brain.pageName}`,
+    `สรุป: ${limitText(brain.summary, ultraCompact ? 180 : 260)}`,
+    keywords ? `Allowed Keywords (ใช้เป็น allowlist ของชื่อ tool/concept): ${keywords}` : '',
+    angles.length ? `Angle ชุดนี้:\n${angles.map(item => `- ${item}`).join('\n')}` : '',
+    patterns.length ? `Pattern ชุดนี้:\n${patterns.map(item => `- ${item}`).join('\n')}` : '',
+    trends.length ? `Trend ชุดนี้:\n${trends.map(item => `- ${item}`).join('\n')}` : '',
+    brain.feedbackNotes.length && !ultraCompact ? `Feedback: ${brain.feedbackNotes.slice(-2).map(item => `- ${limitText(item, 90)}`).join('\n')}` : '',
+  ].filter(Boolean).join('\n');
+}
+
+function extractTopicStrings(answer: string) {
+  const parsed = extractJsonPayload<any>(answer, []);
+  const values = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray(parsed?.topics)
+      ? parsed.topics
+      : [];
+  const fromJson = values.map((item: unknown) => String(item).trim()).filter(Boolean);
+  if (fromJson.length > 0) return fromJson;
+
+  return answer
+    .split('\n')
+    .map(line => line.replace(/^\s*(?:[-*]|\d+[.)])\s*/, '').trim())
+    .filter(line => line.length > 4 && !/^(json|หัวข้อ|topics|\[|\]|```)/i.test(line));
+}
+
+function cleanTopicSeed(value: string) {
+  const raw = String(value || '').trim();
+  const acronym = raw.match(/\(([A-Z][A-Z0-9]{2,})\)/)?.[1] || '';
+  const text = raw
+    .split(/[:：]|—|–|- ตัวอย่าง|- กลยุทธ์|เช่น|ได้แก่|จากข้อมูล CSV|จากข้อมูล|กลยุทธ์คือ/i)[0]
+    .replace(/\([^)]*\)/g, '')
+    .replace(/["'“”‘’]/g, '')
+    .replace(/^(?:Tool Comparison|Prompt Giveaway|How-to|Educational|Listicles|เปรียบเทียบ|ฮาวทู)\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 40);
+  return acronym || text || '';
+}
+
+function extractTrendTopicSeeds(brain: ManualPromptBrain) {
+  const trendText = brain.trendInsights.join('\n');
+  const patternText = [...brain.contentAngles, ...brain.topicPatterns].join('\n');
+  const allText = [trendText, patternText].join('\n');
+  const blockedSeeds = /^(AI|ปัญญาประดิษฐ์|เครื่องมือ AI|แจก Prompt|Productivity|How|to|Tool|Comparison|Introduction|Use|Case|Prompt|Giveaway|Listicle|pageName|summary|pattern|CSV|Infographic|Operating|System|Dream|Machine|vs Udio|thailand|com|ย่อย|รีวิว)$/i;
+  const normalizeSeeds = (values: string[]) => values
+    .map(seed => cleanTopicSeed(seed))
+    .filter(seed => seed && !seed.includes('...') && !/[\[\]{}]/.test(seed) && !blockedSeeds.test(seed))
+    .filter((seed, index, all) => all.findIndex(item => item.toLowerCase() === seed.toLowerCase()) === index);
+
+  const extractFromText = (text: string) => {
+    const seeds = new Set<string>();
+    const addSeed = (value: string) => {
+      const seed = cleanTopicSeed(value);
+      if (!seed || blockedSeeds.test(seed)) return;
+      seeds.add(seed);
+    };
+
+    const quotedMatches = text.matchAll(/['"“”‘’]([^'"“”‘’]{2,48})['"“”‘’]/g);
+    for (const match of quotedMatches) addSeed(match[1]);
+
+    const acronymMatches = text.matchAll(/\(([A-Z][A-Z0-9]{2,})\)/g);
+    for (const match of acronymMatches) addSeed(match[1]);
+
+    return normalizeSeeds(Array.from(seeds));
+  };
+
+  const trendSeeds = extractFromText(trendText);
+  const patternSeeds = extractFromText(patternText);
+  const addSeed = (value: string) => {
+    const seed = cleanTopicSeed(value);
+    return seed && !blockedSeeds.test(seed) ? seed : '';
+  };
+
+  const preferred = [
+    'AI Agent',
+    'AIOS',
+    'AI Operating System',
+    'Claude Code',
+    'Vibe Editing',
+    'Vibe Coding',
+    'ChatGPT Agent',
+    'Google Flow',
+    'Remotion',
+    'NotebookLM',
+    'Perplexity',
+    'Sora',
+    'Veo',
+    'Runway',
+    'Midjourney',
+    'Nano Banana',
+    'ComfyUI',
+    'ElevenLabs',
+  ];
+  const preferredTrendSeeds = preferred
+    .filter(seed => trendText.toLowerCase().includes(seed.toLowerCase()))
+    .map(addSeed)
+    .filter(Boolean);
+  const patternExampleSeeds = [
+    'Suno',
+    'Udio',
+    'Suno vs Udio',
+    'Luma Dream Machine',
+    'AI ช่วยคิดเมนูอาหาร',
+    'แจก Prompt ทำโลโก้สไตล์ Minimal',
+    'AI ช่วยตัดต่อวิดีโอ',
+  ];
+  const preferredPatternSeeds = (preferredTrendSeeds.length >= 4 ? [] : patternExampleSeeds)
+    .filter(seed => allText.toLowerCase().includes(seed.toLowerCase()))
+    .map(addSeed)
+    .filter(Boolean);
+
+  return normalizeSeeds([
+    ...preferredTrendSeeds,
+    ...trendSeeds,
+    ...preferredPatternSeeds,
+    ...patternSeeds,
+  ]).slice(0, 80);
+}
+
+function getBrainCapabilityMap(brain: ManualPromptBrain) {
+  const trendSeeds = extractTrendTopicSeeds(brain);
+  const capabilities = [
+    {
+      label: 'แตกหัวข้อ',
+      value: Math.min(100, Math.round(((brain.keywords.length + brain.contentAngles.length + trendSeeds.length) / 24) * 100)),
+      detail: `${brain.keywords.length} keywords · ${brain.contentAngles.length} angles`,
+    },
+    {
+      label: 'จับเทรนด์',
+      value: Math.min(100, Math.round(((brain.trendInsights.length + trendSeeds.length) / 14) * 100)),
+      detail: `${brain.trendInsights.length} insights · ${trendSeeds.length} seeds`,
+    },
+    {
+      label: 'คุมสไตล์',
+      value: Math.min(100, Math.round(((brain.toneGuidelines.length + brain.visualStyleRules.length) / 18) * 100)),
+      detail: `${brain.toneGuidelines.length} tone · ${brain.visualStyleRules.length} visual`,
+    },
+    {
+      label: 'สร้าง Prompt',
+      value: Math.min(100, Math.round(((brain.promptRules.length + brain.examplePrompts.length) / 18) * 100)),
+      detail: `${brain.promptRules.length} rules · ${brain.examplePrompts.length} examples`,
+    },
+  ];
+
+  return {
+    trendSeeds,
+    capabilities,
+    primaryKeywords: brain.keywords.slice(0, 10),
+    primaryPatterns: brain.contentAngles.slice(0, 6),
+    promptRules: brain.promptRules.slice(0, 5),
+    guardrails: brain.negativeRules.slice(0, 5),
+  };
+}
+
+function createLocalManualTopics(brain: ManualPromptBrain, count: number, existingTopics: string[], offset = 0) {
+  const editedKeywords = Array.from(new Set(brain.keywords.map(cleanTopicSeed).filter(Boolean)));
+  const fallbackTrendSeeds = extractTrendTopicSeeds(brain);
+  const keywords = editedKeywords.length ? editedKeywords : fallbackTrendSeeds.length ? fallbackTrendSeeds : [brain.pageName];
+  const templates = [
+    '{keyword} คืออะไร? ทำไมคนทำงานยุค AI ต้องรู้',
+    'วิธีเริ่มใช้ {keyword} ให้ช่วยงานได้จริงในวันเดียว',
+    'แจก Prompt ใช้ {keyword} วางระบบงานอัตโนมัติ',
+    '{keyword} เหมาะกับงานแบบไหน? เช็กก่อนเสียเวลา',
+    'เปรียบเทียบ {keyword} กับเครื่องมือ AI เดิม: ต่างกันตรงไหน',
+    '5 ไอเดียใช้ {keyword} ทำคอนเทนต์ให้เร็วขึ้น',
+    'ข้อผิดพลาดที่มือใหม่มักเจอเมื่อใช้ {keyword}',
+    'Workflow ใช้ {keyword} ทำงาน 1 วันให้จบไวขึ้น',
+    'อัปเดต {keyword}: เทรนด์นี้กระทบคนทำคอนเทนต์ยังไง',
+    'Checklist ก่อนนำ {keyword} ไปใช้กับงานจริง',
+    'กรณีใช้งาน {keyword} ที่คนทำเพจเอาไปปรับใช้ได้ทันที',
+    '{keyword} จะมาแทนงานส่วนไหน และงานไหนยังต้องใช้คน',
+  ];
+  const existing = new Set(existingTopics.map(topic => topic.trim().toLowerCase()));
+  const topics: string[] = [];
+  const createTopic = (cursor: number) => {
+    const keyword = cleanTopicSeed(keywords[cursor % keywords.length] || brain.pageName);
+    const template = templates[cursor % templates.length];
+    return template.replace('{keyword}', keyword).replace(/\s+/g, ' ').slice(0, 120).trim();
+  };
+
+  let cursor = offset;
+  while (topics.length < count && cursor < offset + count * 200) {
+    const topic = createTopic(cursor);
+    const fingerprint = topic.toLowerCase();
+    if (topic && !existing.has(fingerprint)) {
+      existing.add(fingerprint);
+      topics.push(topic);
+    }
+    cursor += 1;
+  }
+
+  cursor = offset;
+  while (topics.length < count && cursor < offset + count * 200) {
+    const topic = createTopic(cursor);
+    if (topic && !topics.some(item => item.toLowerCase() === topic.toLowerCase())) {
+      topics.push(topic);
+    }
+    cursor += 1;
+  }
+
+  return topics;
 }
 
 function getLikelyPostExamples(rows: Record<string, string>[], limit = 12): string[] {
@@ -621,6 +1158,91 @@ function toCsv(rows: Record<string, unknown>[]) {
   ].join('\n');
 }
 
+function cleanClickbaitText(text: string) {
+  return text
+    .replace(/```(?:json)?/gi, '')
+    .replace(/```/g, '')
+    .trim();
+}
+
+function createFallbackClickbaitPost(topic: string): Omit<ClickbaitPostItem, 'id' | 'createdAt'> {
+  const cleanTopic = topic.trim();
+  const shortTopic = cleanTopic.replace(/[.!?。]+$/g, '');
+  const promptLines = [
+    `1. วิเคราะห์ "${shortTopic}" แบบคนไม่มีพื้นฐาน แล้วสรุปเป็นขั้นตอนที่ทำตามได้ภายใน 15 นาที`,
+    `2. ทำ checklist ก่อนเริ่มใช้ "${shortTopic}" ว่าต้องเตรียมข้อมูลอะไรบ้าง และอะไรที่ไม่ควรทำ`,
+    `3. เขียน prompt ให้ AI ช่วยวางแผน "${shortTopic}" พร้อมตัวอย่าง output ที่ควรได้`,
+    `4. แปลง "${shortTopic}" เป็นแผนงาน 7 วัน โดยแบ่งงานรายวันให้ชัดเจนและวัดผลได้`,
+    `5. ช่วยหาจุดพลาดที่คนส่วนใหญ่มักมองข้ามเวลาใช้ "${shortTopic}" พร้อมวิธีแก้แบบง่ายๆ`,
+  ];
+  const secondLines = [
+    `6. สร้าง template สำหรับนำ "${shortTopic}" ไปใช้กับงานจริงของฉัน โดยเว้นช่อง [ข้อมูลของฉัน] ให้เติมเอง`,
+    `7. เปรียบเทียบวิธีทำ "${shortTopic}" แบบเร็ว vs แบบละเอียด และบอกว่าแบบไหนเหมาะกับสถานการณ์ไหน`,
+    `8. ช่วยตั้งคำถาม 10 ข้อเพื่อหาโอกาสใหม่ๆ จาก "${shortTopic}"`,
+    `9. สรุป "${shortTopic}" เป็น framework 3 ขั้น: เริ่มต้น / ลงมือ / ปรับปรุง`,
+    `10. ทำ prompt สำหรับตรวจคุณภาพผลลัพธ์ของ "${shortTopic}" และให้คะแนนพร้อมคำแนะนำ`,
+  ];
+  const thirdLines = [
+    `11. เอา "${shortTopic}" ไปสร้างไอเดียคอนเทนต์ 30 วัน แยกเป็น Hook / เนื้อหา / CTA`,
+    `12. เขียน prompt ให้ AI ทำหน้าที่เป็นที่ปรึกษาเรื่อง "${shortTopic}" และถามกลับก่อนตอบทุกครั้งที่ข้อมูลไม่พอ`,
+    `13. สร้าง SOP ใช้งาน "${shortTopic}" สำหรับทีมเล็ก พร้อมบทบาทและขั้นตอนส่งมอบงาน`,
+    `14. ทำเวอร์ชันง่ายสุดของ "${shortTopic}" สำหรับมือใหม่ที่มีเวลาแค่วันละ 20 นาที`,
+    `15. ช่วยปรับ "${shortTopic}" ให้เหมาะกับธุรกิจ/เพจ/งานของฉัน โดยถามข้อมูลเพิ่ม 5 ข้อก่อน`,
+  ];
+
+  return {
+    topic: cleanTopic,
+    headline: `แจก Prompt ลับ! เปลี่ยน "${shortTopic}" ให้กลายเป็นระบบทำงานที่ใช้ได้จริง (มีต่อ👇)`,
+    postText: `ใครกำลังสนใจเรื่อง "${shortTopic}" เก็บโพสต์นี้ไว้ได้เลย\n\nผมรวมชุด Prompt ที่เอาไปคุยกับ AI แล้วต่อยอดเป็นแผน งาน หรือคอนเทนต์ได้ทันที\n\nเริ่มจาก 5 ข้อนี้ก่อน แล้วที่เหลืออยู่ใต้คอมเมนต์ 👇`,
+    comments: [
+      `1/3\n${promptLines.join('\n')}\n\nต่อใน 2/3 👇`,
+      `2/3\n${secondLines.join('\n')}\n\nต่อใน 3/3 👇`,
+      `3/3\n${thirdLines.join('\n')}\n\nเซฟไว้ แล้วลองแทนคำว่า "${shortTopic}" ด้วยโจทย์จริงของคุณ`,
+    ],
+    status: 'done',
+  };
+}
+
+function normalizeClickbaitPayload(topic: string, rawText: string): Omit<ClickbaitPostItem, 'id' | 'createdAt'> {
+  const fallback = createFallbackClickbaitPost(topic);
+  const parsed = extractJsonPayload<any>(rawText, null);
+  const source = Array.isArray(parsed) ? parsed[0] : parsed;
+  if (!source || typeof source !== 'object') return fallback;
+  const comments = Array.isArray(source.comments)
+    ? source.comments
+    : [source.comment_1, source.comment_2, source.comment_3];
+  return {
+    topic,
+    headline: cleanClickbaitText(String(source.headline || fallback.headline)),
+    postText: cleanClickbaitText(String(source.postText || source.post_text || fallback.postText)),
+    comments: [
+      cleanClickbaitText(String(comments[0] || fallback.comments[0])),
+      cleanClickbaitText(String(comments[1] || fallback.comments[1])),
+      cleanClickbaitText(String(comments[2] || fallback.comments[2])),
+    ],
+    status: 'done',
+  };
+}
+
+function createClickbaitPrompt(topic: string) {
+  return `คุณคือคนเขียนโพสต์เพจไทยสไตล์แจก Prompt/แจกวิธีทำ แบบหัวข้อ clickbait พอดีๆ ไม่หลอกลวง
+ให้สร้างโพสต์ Facebook สำหรับหัวข้อ: "${topic}"
+
+Pattern ที่ต้องเลียนแบบจากตัวอย่าง CSV:
+- หัวข้อหลักต้องชวนคลิก มีคำแนว แจก Prompt, ขุมทรัพย์, เซฟไว้, เอาไปใช้ได้ทันที, มีต่อ👇
+- โพสต์หลักสั้น ชวนให้อ่านต่อในคอมเมนต์
+- ใต้คอมเมนต์ต้องมี 3 ตอนเท่านั้น โดยขึ้นต้นด้วย 1/3, 2/3, 3/3
+- แต่ละคอมเมนต์ควรมีรายการ Prompt/วิธีทำ 4-6 ข้อ ใช้เลขลำดับต่อเนื่อง
+- ภาษาไทยอ่านง่าย ใช้ได้จริง ไม่ต้องมี markdown, ไม่ต้องใส่คำอธิบายงาน
+
+ส่งกลับเป็น JSON เท่านั้น:
+{
+  "headline": "...",
+  "postText": "...",
+  "comments": ["1/3...", "2/3...", "3/3..."]
+}`;
+}
+
 function createPayload(
   page: PageConfig,
   topics: string[],
@@ -737,7 +1359,10 @@ export function PageStockTab() {
   const [manualPromptsCopied, setManualPromptsCopied] = useState(false);
   const [manualTaskId, setManualTaskId] = useState('');
   const [manualPaused, setManualPaused] = useState(false);
+  const [manualBrainEditingField, setManualBrainEditingField] = useState<ManualBrainEditableField | ''>('');
+  const [manualBrainDraft, setManualBrainDraft] = useState('');
   const manualPausedRef = useRef(false);
+  const lastOpenRouterKeyLabelRef = useRef('');
   const [localImagePrompt, setLocalImagePrompt] = useState(() => localStorage.getItem(LOCAL_IMAGE_PROMPT_KEY) || DEFAULT_LOCAL_IMAGE_ARTICLE_PROMPT);
   const [localImageDropboxPath, setLocalImageDropboxPath] = useState(() => localStorage.getItem(LOCAL_IMAGE_DROPBOX_PATH_KEY) || '');
   const [localImageModel, setLocalImageModel] = useState(() => localStorage.getItem(LOCAL_IMAGE_ARTICLE_MODEL_KEY) || 'google/gemini-2.5-flash-lite');
@@ -770,6 +1395,17 @@ export function PageStockTab() {
   const [canvasLogoY, setCanvasLogoY] = useState(10);
   const [canvasLogoSize, setCanvasLogoSize] = useState(12);
   const canvasPreviewRef = useRef<HTMLCanvasElement>(null);
+  const [clickbaitInput, setClickbaitInput] = useState(() => localStorage.getItem(CLICKBAIT_INPUT_KEY) || '');
+  const [clickbaitPosts, setClickbaitPosts] = useState<ClickbaitPostItem[]>(() => {
+    try {
+      const data = JSON.parse(localStorage.getItem(CLICKBAIT_POSTS_KEY) || '[]');
+      return Array.isArray(data) ? data : [];
+    } catch {
+      return [];
+    }
+  });
+  const [clickbaitRunning, setClickbaitRunning] = useState(false);
+  const [clickbaitCopied, setClickbaitCopied] = useState(false);
   const [settings, setSettings] = useState<OutputSettings>(() => {
     try {
       return { ...DEFAULT_OUTPUT_SETTINGS, ...JSON.parse(localStorage.getItem(OUTPUT_SETTINGS_KEY) || '{}') };
@@ -871,9 +1507,15 @@ export function PageStockTab() {
     [canvasImages],
   );
 
-  const getStoredOpenRouterKey = () => {
-    const profileKey = activeProfile?.openRouterKey?.trim();
-    if (profileKey) return profileKey;
+  const getStoredOpenRouterKeyCandidates = () => {
+    const candidates: { key: string; label: string }[] = [];
+    const addCandidate = (key: unknown, label: string) => {
+      const clean = String(key || '').trim();
+      if (!clean || candidates.some(item => item.key === clean)) return;
+      candidates.push({ key: clean, label });
+    };
+
+    addCandidate(activeProfile?.openRouterKey, `Profile: ${activeProfile?.name || 'active'}`);
 
     try {
       const savedProfiles = JSON.parse(localStorage.getItem('api_global_profiles') || '[]');
@@ -881,20 +1523,36 @@ export function PageStockTab() {
       const savedProfile = Array.isArray(savedProfiles)
         ? savedProfiles.find((profile: ApiProfile) => profile.id === activeId) || savedProfiles[0]
         : undefined;
-      const savedProfileKey = savedProfile?.openRouterKey?.trim();
-      if (savedProfileKey) return savedProfileKey;
+      addCandidate(savedProfile?.openRouterKey, `Saved profile: ${savedProfile?.name || 'active'}`);
+      if (Array.isArray(savedProfiles)) {
+        savedProfiles.forEach((profile: ApiProfile, index: number) => {
+          addCandidate(profile?.openRouterKey, `Saved profile ${index + 1}: ${profile?.name || profile?.id || 'unnamed'}`);
+        });
+      }
     } catch {}
 
-    const legacyKey = localStorage.getItem('openrouter_key')?.trim();
-    if (legacyKey) return legacyKey;
+    profiles.forEach((profile, index) => {
+      addCandidate(profile?.openRouterKey, `Loaded profile ${index + 1}: ${profile?.name || profile?.id || 'unnamed'}`);
+    });
+
+    addCandidate(localStorage.getItem('openrouter_key'), 'Legacy openrouter_key');
 
     try {
       const keys = JSON.parse(localStorage.getItem('openrouter_keys') || '[]');
-      const active = Array.isArray(keys) ? keys.find((key: any) => key.isActive) || keys[0] : undefined;
-      return String(active?.key || '').trim();
-    } catch {
-      return '';
-    }
+      if (Array.isArray(keys)) {
+        const active = keys.find((key: any) => key.isActive);
+        addCandidate(active?.key, `OpenRouter key: ${active?.name || 'active'}`);
+        keys.forEach((item: any, index: number) => {
+          addCandidate(item?.key, `OpenRouter key ${index + 1}: ${item?.name || 'saved'}`);
+        });
+      }
+    } catch {}
+
+    return candidates;
+  };
+
+  const getStoredOpenRouterKey = () => {
+    return getStoredOpenRouterKeyCandidates()[0]?.key || '';
   };
 
   const openRouterKey = getStoredOpenRouterKey();
@@ -949,29 +1607,45 @@ export function PageStockTab() {
   }, []);
 
   useEffect(() => {
-    fetch(`/api/get-app-data?key=${MANUAL_PROMPT_BRAINS_KEY}`)
-      .then(res => res.json())
-      .then(data => {
-        if (data && typeof data === 'object' && !Array.isArray(data)) {
-          const normalized = Object.fromEntries(
-            Object.entries(data).map(([key, brain]) => [key, normalizeManualBrain(brain as Partial<ManualPromptBrain>, key)]),
-          );
-          setManualBrains(normalized);
-          setManualBrainKey(prev => prev || Object.keys(normalized)[0] || '');
-        }
-      })
-      .catch(() => {
+    const normalizeBrainMap = (data: unknown): Record<string, ManualPromptBrain> | null => {
+      if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+      const raw = 'brains' in data ? (data as { brains?: unknown }).brains : data;
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+      const normalized = Object.fromEntries(
+        Object.entries(raw).map(([key, brain]) => [key, normalizeManualBrain(brain as Partial<ManualPromptBrain>, key)]),
+      ) as Record<string, ManualPromptBrain>;
+      return Object.keys(normalized).length > 0 ? normalized : null;
+    };
+
+    const readLocalBrainMap = (key: string) => {
+      try {
+        return normalizeBrainMap(JSON.parse(localStorage.getItem(key) || '{}'));
+      } catch {
+        return null;
+      }
+    };
+
+    const loadBrainMap = async () => {
+      const sources = [
+        async () => normalizeBrainMap(await fetch(`/api/get-app-data?key=${MANUAL_PROMPT_BRAINS_KEY}`).then(res => res.json())),
+        async () => normalizeBrainMap(await fetch(`/api/get-app-data?key=${MANUAL_PROMPT_BRAINS_BACKUP_KEY}`).then(res => res.json())),
+        async () => readLocalBrainMap(MANUAL_PROMPT_BRAINS_KEY),
+        async () => readLocalBrainMap(MANUAL_PROMPT_BRAINS_BACKUP_KEY),
+      ];
+
+      for (const source of sources) {
         try {
-          const data = JSON.parse(localStorage.getItem(MANUAL_PROMPT_BRAINS_KEY) || '{}');
-          if (data && typeof data === 'object' && !Array.isArray(data)) {
-            const normalized = Object.fromEntries(
-              Object.entries(data).map(([key, brain]) => [key, normalizeManualBrain(brain as Partial<ManualPromptBrain>, key)]),
-            );
+          const normalized = await source();
+          if (normalized) {
             setManualBrains(normalized);
             setManualBrainKey(prev => prev || Object.keys(normalized)[0] || '');
+            return;
           }
         } catch {}
-      });
+      }
+    };
+
+    loadBrainMap();
   }, []);
 
   useEffect(() => {
@@ -1034,6 +1708,14 @@ export function PageStockTab() {
   }, [manualPromptModel]);
 
   useEffect(() => {
+    localStorage.setItem(CLICKBAIT_INPUT_KEY, clickbaitInput);
+  }, [clickbaitInput]);
+
+  useEffect(() => {
+    localStorage.setItem(CLICKBAIT_POSTS_KEY, JSON.stringify(clickbaitPosts));
+  }, [clickbaitPosts]);
+
+  useEffect(() => {
     if (!selectedPage) return;
     setSettings(prev => ({
       ...prev,
@@ -1089,48 +1771,123 @@ export function PageStockTab() {
     return data.choices?.[0]?.message?.content?.trim() || '';
   };
 
+  const getAffordableMaxTokens = (message: string) => {
+    const match = message.match(/can only afford\s+(\d+)/i);
+    if (!match) return 0;
+    return Math.max(32, Math.floor(Number(match[1]) * 0.75));
+  };
+
+  const explainOpenRouterError = (message: string) => {
+    if (message.startsWith('OpenRouter เครดิตไม่พอ') || message.startsWith('OpenRouter prompt ยาวเกิน')) return message;
+    if (/prompt tokens limit exceeded/i.test(message)) {
+      return `OpenRouter prompt ยาวเกินเพดานของบัญชี/โมเดลตอนนี้: ${message}`;
+    }
+    if (/more credits|fewer max_tokens|can only afford|credits/i.test(message)) {
+      return `OpenRouter เครดิตไม่พอสำหรับรอบนี้ หรือ max_tokens สูงเกินเครดิตที่เหลือ: ${message}`;
+    }
+    return message;
+  };
+
   const askOpenRouter = async (prompt: string, signal?: AbortSignal, maxTokens = 6000, modelOverride?: string) => {
-    const apiKey = getStoredOpenRouterKey();
-    if (!apiKey) throw new Error('ไม่พบ OpenRouter API Key');
+    const apiKeys = getStoredOpenRouterKeyCandidates();
+    if (apiKeys.length === 0) throw new Error('ไม่พบ OpenRouter API Key');
     const tokenAttempts = Array.from(new Set([
       maxTokens,
       Math.min(maxTokens, 1800),
       Math.min(maxTokens, 1200),
       Math.min(maxTokens, 800),
+      Math.min(maxTokens, 400),
+      Math.min(maxTokens, 240),
+      Math.min(maxTokens, 160),
+      Math.min(maxTokens, 96),
+      Math.min(maxTokens, 64),
+      Math.min(maxTokens, 40),
     ])).filter(tokens => tokens > 0);
     let lastError = '';
-    for (const tokens of tokenAttempts) {
-      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        signal,
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: modelOverride || settings.openRouterModel || 'google/gemini-2.5-pro',
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.72,
-          max_tokens: tokens,
-        }),
-      });
-      const data = await res.json();
-      if (res.ok && !data.error) return data.choices?.[0]?.message?.content?.trim() || '';
-      lastError = data.error?.message || `OpenRouter error ${res.status}`;
-      const canRetryLowerTokens = /more credits|fewer max_tokens|can only afford|credits/i.test(lastError);
-      if (!canRetryLowerTokens) throw new Error(lastError);
+    for (const apiKeyInfo of apiKeys) {
+      const attemptsForKey = [...tokenAttempts];
+      for (let index = 0; index < attemptsForKey.length; index++) {
+        const tokens = attemptsForKey[index];
+        const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          signal,
+          headers: {
+            'Authorization': `Bearer ${apiKeyInfo.key}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: modelOverride || settings.openRouterModel || 'google/gemini-2.5-pro',
+            messages: [{ role: 'user', content: prompt }],
+            temperature: 0.72,
+            max_tokens: tokens,
+          }),
+        });
+        const data = await res.json();
+        if (res.ok && !data.error) {
+          lastOpenRouterKeyLabelRef.current = apiKeyInfo.label;
+          return data.choices?.[0]?.message?.content?.trim() || '';
+        }
+        lastError = `${apiKeyInfo.label}: ${data.error?.message || `OpenRouter error ${res.status}`}`;
+        const rawError = data.error?.message || `OpenRouter error ${res.status}`;
+        const canRetryLowerTokens = /more credits|fewer max_tokens|can only afford|credits/i.test(rawError);
+        const affordableTokens = getAffordableMaxTokens(rawError);
+        if (canRetryLowerTokens && affordableTokens > 0 && !attemptsForKey.includes(affordableTokens)) {
+          attemptsForKey.splice(index + 1, 0, affordableTokens);
+        }
+        if (!canRetryLowerTokens) break;
+      }
     }
-    throw new Error(lastError || 'OpenRouter error');
+    throw new Error(explainOpenRouterError(lastError || 'OpenRouter error'));
+  };
+
+  const askOpenRouterDeep = async (
+    prompt: string,
+    signal?: AbortSignal,
+    maxTokens = 1200,
+    preferredModel = manualBrainModel,
+  ) => {
+    const models = Array.from(new Set([
+      preferredModel,
+      'google/gemini-2.5-flash',
+      'google/gemini-2.5-flash-lite',
+      'openai/gpt-4o-mini',
+      'google/gemini-2.0-flash-lite-001',
+    ].filter(Boolean)));
+    let lastError = '';
+    for (const model of models) {
+      try {
+        const text = await askOpenRouter(prompt, signal, maxTokens, model);
+        return {
+          model,
+          keyLabel: lastOpenRouterKeyLabelRef.current,
+          text,
+        };
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+      }
+    }
+    throw new Error(lastError || 'OpenRouter deep analysis failed');
   };
 
   const saveManualBrains = async (nextBrains: Record<string, ManualPromptBrain>) => {
     setManualBrains(nextBrains);
+    const backupPayload = { updatedAt: new Date().toISOString(), brains: nextBrains };
     localStorage.setItem(MANUAL_PROMPT_BRAINS_KEY, JSON.stringify(nextBrains));
-    await fetch('/api/save-app-data', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: MANUAL_PROMPT_BRAINS_KEY, data: nextBrains }),
-    }).catch(() => undefined);
+    localStorage.setItem(MANUAL_PROMPT_BRAINS_BACKUP_KEY, JSON.stringify(backupPayload));
+    const persist = async (key: string, data: unknown) => {
+      const res = await fetch('/api/save-app-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, data }),
+      });
+      if (!res.ok) throw new Error(`Save ${key} failed`);
+    };
+    try {
+      await persist(MANUAL_PROMPT_BRAINS_KEY, nextBrains);
+      await persist(MANUAL_PROMPT_BRAINS_BACKUP_KEY, backupPayload);
+    } catch (error) {
+      console.warn('Cannot persist manual prompt brain to app_data; localStorage backup remains available.', error);
+    }
   };
 
   const saveLocalImageBrains = async (nextBrains: Record<string, LocalImageArticleBrain>) => {
@@ -1174,15 +1931,44 @@ export function PageStockTab() {
     setManualTrendCsvText(text);
   };
 
+  const buildManualBrainFromParsed = (params: {
+    parsed: any;
+    answer: string;
+    brainKey: string;
+    rows: Record<string, string>[];
+    trendRows: Record<string, string>[];
+    csvPromptExamples: string[];
+  }): ManualPromptBrain => {
+    const inferredName = String(params.parsed.pageName || params.brainKey).trim() || params.brainKey;
+    return {
+      pageName: inferredName,
+      updatedAt: new Date().toISOString(),
+      sourceFileName: manualCsvName,
+      sourceRowCount: params.rows.length,
+      trendFileName: manualTrendCsvName || '',
+      trendRowCount: params.trendRows.length,
+      summary: String(params.parsed.summary || 'AI วิเคราะห์ไฟล์ CSV แล้ว แต่ไม่ได้ส่ง summary เป็น JSON ชัดเจน'),
+      keywords: Array.isArray(params.parsed.keywords) ? params.parsed.keywords.map(String) : [],
+      contentAngles: Array.isArray(params.parsed.contentAngles) ? params.parsed.contentAngles.map(String) : [],
+      toneGuidelines: Array.isArray(params.parsed.toneGuidelines) ? params.parsed.toneGuidelines.map(String) : [],
+      topicPatterns: Array.isArray(params.parsed.topicPatterns) ? params.parsed.topicPatterns.map(String) : [],
+      promptRules: Array.isArray(params.parsed.promptRules) ? params.parsed.promptRules.map(String) : [],
+      visualStyleRules: Array.isArray(params.parsed.visualStyleRules) ? params.parsed.visualStyleRules.map(String) : [],
+      negativeRules: Array.isArray(params.parsed.negativeRules) ? params.parsed.negativeRules.map(String) : [],
+      trendInsights: Array.isArray(params.parsed.trendInsights) ? params.parsed.trendInsights.map(String) : [],
+      examplePrompts: asStringArray(params.parsed.examplePrompts).length > 0
+        ? asStringArray(params.parsed.examplePrompts)
+        : params.csvPromptExamples,
+      feedbackNotes: manualBrain?.feedbackNotes || [],
+      rawAnalysis: params.answer,
+    };
+  };
+
   const startAnalyzeManualCsv = () => {
     if (!manualCsvText.trim() || !getStoredOpenRouterKey()) return;
     const rows = parseCsvTable(manualCsvText);
-    const csvSample = JSON.stringify(rows.slice(0, 80), null, 2).slice(0, 32000);
     const csvPromptExamples = extractPromptExamplesFromRows(rows);
     const trendRows = manualTrendCsvText.trim() ? parseCsvTable(manualTrendCsvText) : [];
-    const trendSample = trendRows.length > 0
-      ? JSON.stringify(trendRows.slice(0, 120), null, 2).slice(0, 32000)
-      : '';
     const brainKey = manualBrainKey || createManualBrainKey(manualCsvName || 'CSV Prompt');
     setManualBrainKey(brainKey);
     const nextTaskId = `manual-brain-${Date.now()}`;
@@ -1201,70 +1987,146 @@ export function PageStockTab() {
         ctx.log('2/6 ไม่มี CSV เทรนด์ล่าสุด: สร้างสมองจาก CSV Prompt อย่างเดียว');
       }
       await waitIfManualPaused(ctx);
-      const prompt = `คุณคือ AI strategist ที่เก่งมากในการแกะ pattern คอนเทนต์และ prompt สร้างรูปจากตัวอย่าง CSV
+      const rowChunks = Array.from({ length: Math.ceil(rows.length / 15) }, (_, index) => rows.slice(index * 15, index * 15 + 15));
+      const trendChunks = trendRows.length
+        ? Array.from({ length: Math.ceil(trendRows.length / 40) }, (_, index) => trendRows.slice(index * 40, index * 40 + 40))
+        : [];
+      const promptAnalyses: any[] = [];
+      const trendAnalyses: any[] = [];
+      ctx.log(`3/6 Deep Brain Training: แบ่ง CSV Prompt ${rowChunks.length} ก้อน และ CSV Trend ${trendChunks.length} ก้อน`);
+      ctx.log(`OpenRouter keys ที่จะลองใช้: ${getStoredOpenRouterKeyCandidates().map(item => item.label).join(' → ') || 'ไม่พบ key'}`);
 
-ชื่อสมองเบื้องต้นจากไฟล์: ${brainKey}
-สำคัญมาก: อย่าใช้เพจที่เลือกในเมนูซ้ายหรือ config อื่นใดมาตัดสิน ให้ยึดข้อมูลจาก CSV Prompt เป็นหลัก และใช้ CSV เทรนด์เป็นข้อมูลเสริมเท่านั้น
+      try {
+        for (let index = 0; index < rowChunks.length; index++) {
+          if (ctx.isCancelled()) break;
+          await waitIfManualPaused(ctx);
+          const chunkText = JSON.stringify(rowChunks[index], null, 2).slice(0, 12000);
+          ctx.log(`อ่าน Prompt CSV ก้อน ${index + 1}/${rowChunks.length}: วิเคราะห์ pattern/prompt/style`);
+          const result = await askOpenRouterDeep(`คุณคือ Content Strategist อ่าน CSV Prompt ก้อนย่อยนี้อย่างละเอียด
 
-ตัวอย่าง CSV Prompt ที่เคยใช้งานได้ เป็น JSON rows:
-${csvSample}
+ชื่อสมอง: ${brainKey}
+ก้อน: ${index + 1}/${rowChunks.length}
+ข้อมูล JSON rows:
+${chunkText}
 
-${trendSample ? `ข้อมูล CSV เทรนด์ล่าสุด เป็น JSON rows:
-${trendSample}` : 'ไม่มี CSV เทรนด์ล่าสุด'}
+แยกให้ชัด:
+- tools/concepts ที่เป็นแกนจริง ไม่เอา pain point มาเป็น keyword
+- topic patterns ที่เห็นจากหัวข้อจริง
+- prompt format/rules ที่ต้องรักษา
+- visual style/layout/text rules
+- tone/style ของเพจ
+- negative rules
+- example prompts ที่สมบูรณ์ถ้ามี
 
-งานของคุณ:
-1. วิเคราะห์ keyword หลักและ keyword รองที่ควรใช้
-2. วิเคราะห์ว่าหัวข้อควรทำแนวไหนบ้าง โดยถ้ามีเทรนด์ ให้บอกว่าจะใช้เทรนด์เลือกหัวข้อยังไง
-3. วิเคราะห์สำนวน/น้ำเสียง/วิธีเล่าให้เหมือน pattern ของ CSV Prompt
-4. วิเคราะห์ prompt สร้างรูปที่ดีว่าต้องมีโครงสร้างแบบไหน ต้องตรงกับ pattern ตัวอย่างที่แนบ
-5. สร้างตัวอย่าง Prompt สร้างรูป 3-5 ตัวอย่าง โดยต้องเหมือน format/pattern ที่มีใน CSV Prompt และพร้อมเอาไปใช้ได้
-6. แยกกฎภาพ สี อารมณ์ องค์ประกอบ ฟอนต์ layout และข้อห้าม
-7. เขียนคำอธิบายให้เจ้าของเพจอ่านเข้าใจว่า สมองนี้ควรเอาไปใช้อย่างไร
+ตอบ JSON เท่านั้น:
+{"keywords":[],"contentAngles":[],"toneGuidelines":[],"topicPatterns":[],"promptRules":[],"visualStyleRules":[],"negativeRules":[],"examplePrompts":[],"notes":"..."}`, ctx.signal, 1100, manualBrainModel);
+          const parsedChunk = extractJsonPayload<any>(result.text, {});
+          promptAnalyses.push({ model: result.model, keyLabel: result.keyLabel, ...parsedChunk, raw: result.text.slice(0, 3000) });
+          ctx.log(`ได้ผลก้อน Prompt ${index + 1}: ${result.model} · ${result.keyLabel || 'OpenRouter key'}`);
+        }
 
-ตอบเป็น JSON เท่านั้น:
+        for (let index = 0; index < trendChunks.length; index++) {
+          if (ctx.isCancelled()) break;
+          await waitIfManualPaused(ctx);
+          const chunkText = JSON.stringify(trendChunks[index], null, 2).slice(0, 12000);
+          ctx.log(`อ่าน Trend CSV ก้อน ${index + 1}/${trendChunks.length}: หา trend/tool/pain/opportunity`);
+          const result = await askOpenRouterDeep(`คุณคือ Trend Analyst อ่าน CSV เทรนด์ก้อนย่อยนี้อย่างละเอียด
+
+ชื่อสมอง: ${brainKey}
+ก้อน: ${index + 1}/${trendChunks.length}
+ข้อมูล JSON rows:
+${chunkText}
+
+แยกให้ชัด:
+- trend tools/concepts หลัก
+- trend รอง
+- audience pain point
+- topic opportunities ที่ควรทำ
+- อะไรเป็นแค่คำผ่าน/เสียงบ่น ไม่ใช่ keyword หลัก
+
+ตอบ JSON เท่านั้น:
+{"trendTools":[],"trendConcepts":[],"audiencePainPoints":[],"topicOpportunities":[],"avoidAsKeywords":[],"notes":"..."}`, ctx.signal, 1000, manualBrainModel);
+          const parsedChunk = extractJsonPayload<any>(result.text, {});
+          trendAnalyses.push({ model: result.model, keyLabel: result.keyLabel, ...parsedChunk, raw: result.text.slice(0, 3000) });
+          ctx.log(`ได้ผลก้อน Trend ${index + 1}: ${result.model} · ${result.keyLabel || 'OpenRouter key'}`);
+        }
+
+        ctx.log('4/6 รวมผลทุกก้อน แล้วให้ AI synthesize เป็นสมองฉบับสุดท้าย');
+        const synthesisInput = JSON.stringify({ promptAnalyses, trendAnalyses }, null, 2).slice(0, 60000);
+        let result: { model: string; keyLabel?: string; text: string } | null = null;
+        let parsed: any = {};
+        try {
+          result = await askOpenRouterDeep(`คุณคือ Senior AI Brain Architect รวมผลวิเคราะห์หลายก้อนให้กลายเป็นสมองเดียวที่ฉลาดและใช้ได้จริง
+
+ชื่อสมอง: ${brainKey}
+ผลวิเคราะห์ย่อย:
+${synthesisInput}
+
+กฎสำคัญ:
+- keyword ต้องเป็น tool/concept/topic seed ที่เอาไปตั้งหัวข้อได้จริง
+- pain point ต้องอยู่ใน trendInsights/tone ไม่ใช่ keywords
+- แยก trend หลัก/รองออกจาก pattern เก่า
+- examplePrompts ต้องเป็น prompt พร้อมใช้ ไม่ใช่ object
+- ห้ามมีเศษ JSON field name, คำเดี่ยวไร้ความหมาย, หรือคำบ่นเป็น keyword
+
+ตอบ JSON เท่านั้น:
 {
-  "pageName": "ชื่อสมอง/ชื่อเพจที่เหมาะสมจาก CSV",
-  "summary": "สรุปสั้นๆ",
-  "keywords": ["keyword ที่ควรใช้"],
-  "contentAngles": ["แนวหัวข้อที่ควรทำ"],
-  "toneGuidelines": ["สำนวน/น้ำเสียงที่ควรใช้"],
-  "topicPatterns": ["..."],
-  "promptRules": ["..."],
-  "visualStyleRules": ["..."],
-  "negativeRules": ["..."],
-  "trendInsights": ["ถ้ามี CSV เทรนด์ วิเคราะห์ว่าควรจับกระแสอะไร ถ้าไม่มีให้เป็น []"],
-  "examplePrompts": ["ต้องเป็น string เท่านั้น ห้ามเป็น object และต้องเป็น prompt เต็มที่พร้อมใช้"]
-}`;
-      ctx.log(`3/6 ส่งให้ OpenRouter (${manualBrainModel}) วิเคราะห์ CSV Prompt + เทรนด์ และสร้างสมองฉบับสมบูรณ์`);
-      const answer = await askOpenRouter(prompt, ctx.signal, 6000, manualBrainModel);
-      ctx.log(`4/6 AI วิเคราะห์กลับมาแล้ว (${answer.length.toLocaleString()} ตัวอักษร)`);
-      const parsed = extractJsonPayload<any>(answer, {});
-      const inferredName = String(parsed.pageName || brainKey).trim() || brainKey;
-      const brain: ManualPromptBrain = {
-        pageName: inferredName,
-        updatedAt: new Date().toISOString(),
-        sourceFileName: manualCsvName,
-        sourceRowCount: rows.length,
-        trendFileName: manualTrendCsvName || '',
-        trendRowCount: trendRows.length,
-        summary: String(parsed.summary || 'AI วิเคราะห์ไฟล์ CSV แล้ว แต่ไม่ได้ส่ง summary เป็น JSON ชัดเจน'),
-        keywords: Array.isArray(parsed.keywords) ? parsed.keywords.map(String) : [],
-        contentAngles: Array.isArray(parsed.contentAngles) ? parsed.contentAngles.map(String) : [],
-        toneGuidelines: Array.isArray(parsed.toneGuidelines) ? parsed.toneGuidelines.map(String) : [],
-        topicPatterns: Array.isArray(parsed.topicPatterns) ? parsed.topicPatterns.map(String) : [],
-        promptRules: Array.isArray(parsed.promptRules) ? parsed.promptRules.map(String) : [],
-        visualStyleRules: Array.isArray(parsed.visualStyleRules) ? parsed.visualStyleRules.map(String) : [],
-        negativeRules: Array.isArray(parsed.negativeRules) ? parsed.negativeRules.map(String) : [],
-        trendInsights: Array.isArray(parsed.trendInsights) ? parsed.trendInsights.map(String) : [],
-        examplePrompts: asStringArray(parsed.examplePrompts).length > 0
-          ? asStringArray(parsed.examplePrompts)
-          : csvPromptExamples,
-        feedbackNotes: manualBrain?.feedbackNotes || [],
-        rawAnalysis: answer,
-      };
-      ctx.log('5/6 บันทึกสมองเพจลง app_data และ localStorage');
-      await saveManualBrains({ ...manualBrains, [brainKey]: brain });
-      ctx.log('6/6 สมองเพจพร้อมใช้: มี keyword, topic pattern, style, prompt pattern และตัวอย่าง prompt');
+  "pageName": "${brainKey}",
+  "summary": "...",
+  "keywords": [],
+  "contentAngles": [],
+  "toneGuidelines": [],
+  "topicPatterns": [],
+  "promptRules": [],
+  "visualStyleRules": [],
+  "negativeRules": [],
+  "trendInsights": [],
+  "examplePrompts": []
+}`, ctx.signal, 1800, manualBrainModel);
+          parsed = extractJsonPayload<any>(result.text, {});
+        } catch (synthesisError) {
+          const message = synthesisError instanceof Error ? synthesisError.message : String(synthesisError);
+          ctx.log(`AI synthesize รอบสุดท้ายไม่สำเร็จ: ${explainOpenRouterError(message)} · จะรวมผลจากก้อนย่อยเอง`);
+        }
+        if (!hasUsefulManualBrainPayload(parsed)) {
+          ctx.log('ผล synthesize ไม่มี field ใช้งานได้: รวมสมองจาก raw/parsed ของก้อนย่อยแทน');
+          parsed = synthesizeManualBrainPayloadFromDeepAnalyses({
+            brainKey,
+            promptAnalyses,
+            trendAnalyses,
+            csvPromptExamples,
+          });
+        }
+        const answer = JSON.stringify({ model: result?.model || 'local-deep-synthesis', promptAnalyses, trendAnalyses, synthesis: parsed }, null, 2);
+        const brain = buildManualBrainFromParsed({ parsed, answer, brainKey, rows, trendRows, csvPromptExamples });
+        ctx.log(`4.5/6 สร้างสมองด้วย Deep Training สำเร็จ: ${result?.model || 'local-deep-synthesis'} · ${result?.keyLabel || 'รวมจากก้อนย่อย'}`);
+        ctx.log(`Keyword: ${brain.keywords.slice(0, 12).join(', ') || 'ไม่มี'}`);
+        ctx.log(`Trend: ${brain.trendInsights.slice(0, 6).join(' | ') || 'ไม่มี'}`);
+        ctx.log('5/6 บันทึกสมองเพจลง app_data และ localStorage');
+        await saveManualBrains({ ...manualBrains, [brainKey]: brain });
+        ctx.log('6/6 สมองเพจพร้อมใช้: ผ่านการอ่านเป็นก้อนและ synthesize แล้ว');
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        ctx.log(`Deep Training ใช้ AI ไม่สำเร็จ: ${explainOpenRouterError(message)}`);
+        ctx.log('สลับเป็นโหมด local fallback แบบแยกหมวด เพื่อให้ยังได้สมองฐานไว้แก้ต่อ');
+        const fallbackBrain = createLocalManualBrainFromCsv({
+          brainKey,
+          rows,
+          trendRows,
+          manualCsvName,
+          manualTrendCsvName,
+          csvPromptExamples,
+          previousFeedback: manualBrain?.feedbackNotes || [],
+        });
+        ctx.log(`4/6 สร้างสมองฐานสำเร็จ: keyword ${fallbackBrain.keywords.length} รายการ · trend insight ${fallbackBrain.trendInsights.length} รายการ · example prompt ${fallbackBrain.examplePrompts.length} รายการ`);
+        ctx.log(`ตัวอย่าง keyword ที่จับได้: ${fallbackBrain.keywords.slice(0, 12).join(', ') || 'ยังไม่มี'}`);
+        ctx.log(`ตัวอย่าง trend insight: ${fallbackBrain.trendInsights.slice(0, 8).join(' | ') || 'ยังไม่มี'}`);
+        ctx.log('5/6 บันทึกสมองฐานลง app_data และ localStorage');
+        await saveManualBrains({ ...manualBrains, [brainKey]: fallbackBrain });
+        ctx.log('6/6 สมองฐานพร้อมใช้: เปิด Brain Map เพื่อตรวจ/แก้ไข แล้วค่อยสร้างหัวข้อหรือ prompt ต่อได้');
+        return;
+      }
       } finally {
         setManualTaskId('');
       }
@@ -1301,6 +2163,44 @@ ${trendSample}` : 'ไม่มี CSV เทรนด์ล่าสุด'}
     setManualFeedback('');
   };
 
+  const manualBrainFieldToText = (brain: ManualPromptBrain, field: ManualBrainEditableField) => {
+    const value = brain[field];
+    if (Array.isArray(value)) return value.join('\n');
+    return String(value ?? '');
+  };
+
+  const parseManualBrainField = (field: ManualBrainEditableField, value: string) => {
+    if (field === 'pageName' || field === 'summary' || field === 'rawAnalysis') return value.trim();
+    const splitter = field === 'keywords' ? /[\n,]+/ : /\n+/;
+    return value
+      .split(splitter)
+      .map(item => item.trim())
+      .filter(Boolean);
+  };
+
+  const startEditManualBrainField = (field: ManualBrainEditableField) => {
+    if (!manualBrain) return;
+    setManualBrainEditingField(field);
+    setManualBrainDraft(manualBrainFieldToText(manualBrain, field));
+  };
+
+  const saveManualBrainField = async () => {
+    if (!manualBrain || !manualBrainKey || !manualBrainEditingField) return;
+    const nextBrain = normalizeManualBrain({
+      ...manualBrain,
+      [manualBrainEditingField]: parseManualBrainField(manualBrainEditingField, manualBrainDraft),
+      updatedAt: new Date().toISOString(),
+    }, manualBrain.pageName || manualBrainKey);
+    await saveManualBrains({ ...manualBrains, [manualBrainKey]: nextBrain });
+    setManualBrainEditingField('');
+    setManualBrainDraft('');
+  };
+
+  const cancelEditManualBrainField = () => {
+    setManualBrainEditingField('');
+    setManualBrainDraft('');
+  };
+
   const startGenerateManualTopics = () => {
     if (!manualBrain || !getStoredOpenRouterKey()) return;
     const total = Number(manualTopicCount);
@@ -1313,34 +2213,100 @@ ${trendSample}` : 'ไม่มี CSV เทรนด์ล่าสุด'}
       progress: `เตรียมสร้างหัวข้อ ${total} หัวข้อ`,
     }, async ctx => {
       setManualTaskId(nextTaskId);
-      const batchSize = 12;
-      const nextTopics: string[] = [];
-      const brainText = JSON.stringify(manualBrain, null, 2);
-      ctx.log(manualBrain.trendRowCount ? `ใช้ข้อมูลเทรนด์จากสมอง: ${manualBrain.trendFileName || 'trend.csv'} (${manualBrain.trendRowCount} แถว)` : 'สมองนี้ไม่มี CSV เทรนด์: ใช้ pattern จาก CSV Prompt เป็นหลัก');
-      for (let start = 0; start < total; start += batchSize) {
-        if (ctx.isCancelled()) break;
-        await waitIfManualPaused(ctx);
-        const amount = Math.min(batchSize, total - start);
-        ctx.log(`สร้างหัวข้อ batch ${Math.floor(start / batchSize) + 1}: ขอ ${amount} หัวข้อจาก AI`);
-        const answer = await askOpenRouter(`จากสมองเพจนี้:\n${brainText}
+      try {
+        const batchSize = 10;
+        const totalRounds = Math.ceil(total / batchSize);
+        const nextTopics: string[] = [];
+        const localTrendSeeds = extractTrendTopicSeeds(manualBrain);
+        const editedKeywordCount = manualBrain.keywords.map(cleanTopicSeed).filter(Boolean).length;
+        ctx.log(manualBrain.trendRowCount ? `ใช้ข้อมูลเทรนด์จากสมอง: ${manualBrain.trendFileName || 'trend.csv'} (${manualBrain.trendRowCount} แถว)` : 'สมองนี้ไม่มี CSV เทรนด์: ใช้ pattern จาก CSV Prompt เป็นหลัก');
+        ctx.log(`ใช้ OpenRouter จาก Profile: ${activeProfile?.name || 'ไม่พบชื่อโปรไฟล์'} · โมเดลสร้างหัวข้อ: ${manualTopicModel}`);
+        ctx.log(`Allowed Keywords จากสมองที่บันทึกไว้: ${editedKeywordCount} รายการ · ระบบจะไม่สร้างชื่อ tool/concept นอก list นี้`);
+        ctx.log(`Keyword เทรนด์ที่จับได้: ${localTrendSeeds.slice(0, 18).join(', ') || 'ยังจับไม่ได้ จะใช้ keyword หลักของสมอง'}`);
+        ctx.log('ทยอยส่งสมองเป็นก้อนเล็กๆ ต่อ batch เพื่อไม่ให้ชน prompt token limit และไม่ได้เทรนใหม่');
+        let batchIndex = 0;
+        let emptyStreak = 0;
+        let forceLocalTopics = false;
+        while (nextTopics.length < total) {
+          if (ctx.isCancelled()) break;
+          await waitIfManualPaused(ctx);
+          const amount = Math.min(batchSize, total - nextTopics.length);
+          const roundLabel = `${batchIndex + 1}/${totalRounds}`;
+          const recentTopics = [...manualTopics, ...nextTopics].slice(-24);
+          const buildTopicPrompt = (requestAmount = amount, ultraCompact = false) => `จากสมองเพจชุดย่อยนี้:
+${createManualTopicBrainChunkContext(manualBrain, batchIndex, ultraCompact)}
 
-สร้างหัวข้อใหม่ ${amount} หัวข้อสำหรับ "${manualBrain.pageName}"
-ให้ใช้ keyword, contentAngles, topicPatterns และ trendInsights ในสมองเป็นหลัก
-ถ้าสมองมี trendInsights ให้เลือกหัวข้อที่ทันกระแส แต่ยังต้องตรงกับ pattern เดิม
-ห้ามซ้ำกับรายการนี้:
-${[...manualTopics, ...nextTopics].join('\n')}
+สร้างหัวข้อใหม่ ${requestAmount} หัวข้อสำหรับ "${manualBrain.pageName}"
+กติกา:
+- ใช้ Allowed Keywords เป็นแหล่งชื่อ tool/concept หลักเท่านั้น
+- ห้ามสร้างหรือดึงชื่อ tool/concept ที่ไม่มีใน Allowed Keywords แม้จะอยู่ใน trendInsights หรือ rawAnalysis
+- ใช้ angle/pattern/trend เป็นบริบทในการตั้งมุมเล่า ไม่ใช่แหล่ง keyword ใหม่
+- หัวข้อต้องทันกระแสแต่ยังตรง pattern เดิม
+- ห้ามซ้ำหรือใกล้เคียงกับรายการนี้:
+${recentTopics.join('\n') || '- ยังไม่มี'}
 
-ตอบเป็น JSON array ของ string เท่านั้น`, ctx.signal, 6000, manualTopicModel);
-        const parsed = extractJsonPayload<string[]>(answer, []);
-        const clean = parsed.map(item => String(item).trim()).filter(Boolean);
-        nextTopics.push(...clean.slice(0, amount));
-        const accepted = clean.slice(0, amount);
-        setManualTopics(prev => [...prev, ...accepted]);
-        setManualTopicsText(prev => [...getTopics(prev), ...accepted].join('\n'));
-        ctx.log(`ได้หัวข้อเพิ่ม ${clean.slice(0, amount).length} หัวข้อ รวม ${nextTopics.length}/${total}`);
+ตอบเป็น JSON array ของ string เท่านั้น`;
+          ctx.log(`สร้างหัวข้อรอบ ${roundLabel}: ขอ ${amount} หัวข้อ`);
+          let answer = '';
+          let clean: string[] = [];
+          if (forceLocalTopics) {
+            clean = createLocalManualTopics(manualBrain, amount, [...manualTopics, ...nextTopics], batchIndex * batchSize);
+            ctx.log(`รอบ ${roundLabel}: สร้างจากสมอง local ${clean.length} หัวข้อ`);
+          } else {
+            try {
+              answer = await askOpenRouter(buildTopicPrompt(amount, false), ctx.signal, 700, manualTopicModel);
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              if (/insufficient credits/i.test(message)) {
+                ctx.log('OpenRouter แจ้ง Insufficient credits: สลับไปสร้างหัวข้อจากสมองที่บันทึกไว้แบบ local ต่อทันที');
+                forceLocalTopics = true;
+                clean = createLocalManualTopics(manualBrain, amount, [...manualTopics, ...nextTopics], batchIndex * batchSize);
+                ctx.log(`รอบ ${roundLabel}: สร้างจากสมอง local ${clean.length} หัวข้อ`);
+              } else if (/prompt tokens limit exceeded|prompt ยาวเกิน/i.test(message)) {
+                ctx.log('Prompt ยังยาวเกิน: retry ด้วยก้อนสมองฉุกเฉินที่สั้นลงอีก');
+                answer = await askOpenRouter(buildTopicPrompt(Math.min(3, amount), true), ctx.signal, 300, manualTopicModel);
+              } else if (/more credits|fewer max_tokens|can only afford|credits|เครดิตไม่พอ/i.test(message)) {
+                ctx.log('OpenRouter ให้ token ต่อ request ต่ำมาก: retry แบบจิ๋วทีละ 1-3 หัวข้อ');
+                const tinyAmount = Math.min(3, amount);
+                try {
+                  answer = await askOpenRouter(buildTopicPrompt(tinyAmount, true), ctx.signal, 120, manualTopicModel);
+                } catch (tinyError) {
+                  const tinyMessage = tinyError instanceof Error ? tinyError.message : String(tinyError);
+                  if (/insufficient credits/i.test(tinyMessage)) {
+                    ctx.log('OpenRouter ยังแจ้ง Insufficient credits: ใช้ local topic generator ต่อจนจบ');
+                    forceLocalTopics = true;
+                    clean = createLocalManualTopics(manualBrain, amount, [...manualTopics, ...nextTopics], batchIndex * batchSize);
+                    ctx.log(`รอบ ${roundLabel}: สร้างจากสมอง local ${clean.length} หัวข้อ`);
+                  } else {
+                    if (manualTopicModel === 'google/gemini-2.5-flash-lite') throw tinyError;
+                    ctx.log('ยังติด token/credit: ลอง fallback เป็น Gemini 2.5 Flash Lite สำหรับ batch นี้');
+                    answer = await askOpenRouter(buildTopicPrompt(Math.min(2, amount), true), ctx.signal, 96, 'google/gemini-2.5-flash-lite');
+                  }
+                }
+              } else {
+                throw error;
+              }
+            }
+            if (clean.length === 0) clean = extractTopicStrings(answer);
+          }
+          const accepted = clean.slice(0, amount);
+          nextTopics.push(...accepted);
+          setManualTopics(prev => [...prev, ...accepted]);
+          setManualTopicsText(prev => [...getTopics(prev), ...accepted].join('\n'));
+          ctx.log(`ได้หัวข้อเพิ่ม ${clean.slice(0, amount).length} หัวข้อ รวม ${nextTopics.length}/${total}`);
+          batchIndex += 1;
+          emptyStreak = accepted.length === 0 ? emptyStreak + 1 : 0;
+          if (emptyStreak >= 5) throw new Error('AI ตอบกลับมาไม่เป็นหัวข้อ 5 รอบติด ระบบหยุดเพื่อกันวนลูปไม่รู้จบ');
+          if (accepted.length === 0) await wait(500);
+        }
+        ctx.log(`สร้างหัวข้อเสร็จ: ได้ ${nextTopics.length}/${total} หัวข้อ`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        ctx.log(explainOpenRouterError(message));
+        throw new Error(explainOpenRouterError(message));
+      } finally {
+        setManualTaskId('');
       }
-      ctx.log(`สร้างหัวข้อเสร็จ: ได้ ${nextTopics.length}/${total} หัวข้อ`);
-      setManualTaskId('');
     });
     setManualTaskId(taskId);
   };
@@ -1356,16 +2322,17 @@ ${[...manualTopics, ...nextTopics].join('\n')}
       progress: `เตรียมสร้าง Prompt รูป ${topicsForPrompt.length} หัวข้อ`,
     }, async ctx => {
       setManualTaskId(nextTaskId);
-      const existing = new Map(manualPromptResults.map(result => [result.topic, result.imagePrompt]));
-      const pendingTopics = topicsForPrompt.filter(topic => !existing.has(topic));
-      const batchSize = 6;
-      const brainText = JSON.stringify(manualBrain, null, 2);
-      for (let start = 0; start < pendingTopics.length; start += batchSize) {
-        if (ctx.isCancelled()) break;
-        await waitIfManualPaused(ctx);
-        const batch = pendingTopics.slice(start, start + batchSize);
-        ctx.log(`สร้าง Prompt รูป batch ${Math.floor(start / batchSize) + 1}: ${batch.length} หัวข้อ`);
-        const answer = await askOpenRouter(`คุณคือ AI ที่มีหน้าที่เขียน Prompt ตาม Pattern เดิมแบบเข้มงวด
+      try {
+        const existing = new Map(manualPromptResults.map(result => [result.topic, result.imagePrompt]));
+        const pendingTopics = topicsForPrompt.filter(topic => !existing.has(topic));
+        const batchSize = 6;
+        const brainText = createManualBrainPromptContext(manualBrain);
+        for (let start = 0; start < pendingTopics.length; start += batchSize) {
+          if (ctx.isCancelled()) break;
+          await waitIfManualPaused(ctx);
+          const batch = pendingTopics.slice(start, start + batchSize);
+          ctx.log(`สร้าง Prompt รูป batch ${Math.floor(start / batchSize) + 1}: ${batch.length} หัวข้อ`);
+          const answer = await askOpenRouter(`คุณคือ AI ที่มีหน้าที่เขียน Prompt ตาม Pattern เดิมแบบเข้มงวด
 
 ใช้สมองเพจนี้เป็นกฎหลัก:
 ${brainText}
@@ -1384,15 +2351,21 @@ ${batch.map((topic, index) => `${index + 1}. ${topic}`).join('\n')}
 
 ตอบเป็น JSON array เท่านั้น:
 [{"topic":"หัวข้อเดิม","imagePrompt":"prompt..."}]`, ctx.signal, 6000, manualPromptModel);
-        const parsed = extractJsonPayload<ManualPromptResult[]>(answer, []);
-        const clean = parsed
-          .map(item => ({ topic: String(item.topic || '').trim(), imagePrompt: String(item.imagePrompt || '').trim() }))
-          .filter(item => item.topic && item.imagePrompt);
-        setManualPromptResults(prev => [...prev, ...clean]);
-        ctx.log(`ได้ Prompt รูปเพิ่ม ${clean.length} รายการ รวม ${start + clean.length}/${pendingTopics.length}`);
+          const parsed = extractJsonPayload<ManualPromptResult[]>(answer, []);
+          const clean = parsed
+            .map(item => ({ topic: String(item.topic || '').trim(), imagePrompt: String(item.imagePrompt || '').trim() }))
+            .filter(item => item.topic && item.imagePrompt);
+          setManualPromptResults(prev => [...prev, ...clean]);
+          ctx.log(`ได้ Prompt รูปเพิ่ม ${clean.length} รายการ รวม ${start + clean.length}/${pendingTopics.length}`);
+        }
+        ctx.log('สร้าง Prompt รูปเสร็จ: พร้อม Export CSV');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        ctx.log(explainOpenRouterError(message));
+        throw new Error(explainOpenRouterError(message));
+      } finally {
+        setManualTaskId('');
       }
-      ctx.log('สร้าง Prompt รูปเสร็จ: พร้อม Export CSV');
-      setManualTaskId('');
     });
     setManualTaskId(taskId);
   };
@@ -1948,6 +2921,108 @@ ${NO_AI_PREAMBLE_RULE}
     URL.revokeObjectURL(link.href);
   };
 
+  const clickbaitTopics = clickbaitInput
+    .split('\n')
+    .map(item => item.trim())
+    .filter(Boolean);
+
+  const runClickbaitGenerator = async () => {
+    const uniqueTopics = Array.from(new Set(clickbaitTopics));
+    if (uniqueTopics.length === 0 || clickbaitRunning) return;
+    setClickbaitRunning(true);
+    const generated: ClickbaitPostItem[] = [];
+    const hasOpenRouter = getStoredOpenRouterKeyCandidates().length > 0;
+
+    for (const topic of uniqueTopics) {
+      try {
+        const body = hasOpenRouter
+          ? normalizeClickbaitPayload(topic, await askOpenRouter(createClickbaitPrompt(topic), undefined, 1800, manualPromptModel))
+          : createFallbackClickbaitPost(topic);
+        generated.push({
+          ...body,
+          id: `clickbait-${Date.now()}-${generated.length}`,
+          createdAt: new Date().toISOString(),
+        });
+      } catch (error: any) {
+        const fallback = createFallbackClickbaitPost(topic);
+        generated.push({
+          ...fallback,
+          id: `clickbait-${Date.now()}-${generated.length}`,
+          createdAt: new Date().toISOString(),
+          status: 'error',
+          error: error?.message || String(error),
+        });
+      }
+    }
+
+    setClickbaitPosts(prev => [...generated, ...prev]);
+    setClickbaitRunning(false);
+  };
+
+  const updateClickbaitPost = (id: string, patch: Partial<ClickbaitPostItem>) => {
+    setClickbaitPosts(prev => prev.map(item => item.id === id ? { ...item, ...patch } : item));
+  };
+
+  const updateClickbaitComment = (id: string, index: number, value: string) => {
+    setClickbaitPosts(prev => prev.map(item => {
+      if (item.id !== id) return item;
+      const comments = [...item.comments] as [string, string, string];
+      comments[index] = value;
+      return { ...item, comments };
+    }));
+  };
+
+  const clickbaitCsv = useMemo(() => {
+    const headers = ['id', 'topic', 'headline', 'post_text', 'comment_1', 'comment_2', 'comment_3', 'status', 'error', 'created_at'];
+    return [
+      headers.join(','),
+      ...clickbaitPosts.map(item => headers.map(header => {
+        const row = {
+          id: item.id,
+          topic: item.topic,
+          headline: item.headline,
+          post_text: item.postText,
+          comment_1: item.comments[0],
+          comment_2: item.comments[1],
+          comment_3: item.comments[2],
+          status: item.status,
+          error: item.error || '',
+          created_at: item.createdAt,
+        };
+        return csvEscape(row[header as keyof typeof row]);
+      }).join(',')),
+    ].join('\n');
+  }, [clickbaitPosts]);
+
+  const clickbaitCopyText = useMemo(() => clickbaitPosts.map(item => [
+    item.headline,
+    '',
+    item.postText,
+    '',
+    item.comments[0],
+    '',
+    item.comments[1],
+    '',
+    item.comments[2],
+  ].join('\n')).join('\n\n----------\n\n'), [clickbaitPosts]);
+
+  const copyClickbaitPosts = async () => {
+    if (!clickbaitCopyText) return;
+    await navigator.clipboard.writeText(clickbaitCopyText);
+    setClickbaitCopied(true);
+    window.setTimeout(() => setClickbaitCopied(false), 1500);
+  };
+
+  const downloadClickbaitCsv = () => {
+    if (clickbaitPosts.length === 0) return;
+    const blob = new Blob(['\uFEFF' + clickbaitCsv], { type: 'text/csv;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `clickbait-posts-${Date.now()}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
+
   const handleCanvasFolderUpload = async (files?: FileList | null) => {
     if (!files?.length) return;
     const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
@@ -2488,6 +3563,113 @@ ${NO_AI_PREAMBLE_RULE}
     if (data?.success && data.dir) updateSettings({ localSaveDir: data.dir });
   };
 
+  const renderManualBrainField = (
+    field: ManualBrainEditableField,
+    title: string,
+    description: string,
+    options: { wide?: boolean; mono?: boolean } = {},
+  ) => {
+    if (!manualBrain) return null;
+    const valueText = manualBrainFieldToText(manualBrain, field);
+    const isEditing = manualBrainEditingField === field;
+    const lines = field === 'pageName' || field === 'summary' || field === 'rawAnalysis'
+      ? [valueText || 'ยังไม่มีข้อมูล']
+      : valueText.split('\n').filter(Boolean);
+
+    return (
+      <article className={options.wide ? 'wide' : ''}>
+        <div className="page-stock-brain-field-head">
+          <div>
+            <h4>{title}</h4>
+            <small>{description}</small>
+          </div>
+          <button
+            type="button"
+            className="page-stock-mini-button"
+            onClick={() => startEditManualBrainField(field)}
+            disabled={Boolean(manualBrainEditingField && !isEditing)}
+          >
+            แก้ไข
+          </button>
+        </div>
+        {isEditing ? (
+          <div className="page-stock-brain-editor">
+            <textarea
+              className="page-stock-textarea"
+              value={manualBrainDraft}
+              onChange={event => setManualBrainDraft(event.target.value)}
+              rows={field === 'summary' || field === 'pageName' ? 4 : field === 'rawAnalysis' ? 12 : 8}
+              placeholder={field === 'keywords' ? 'ใส่ keyword คั่นด้วยบรรทัดใหม่หรือ comma' : 'ใส่ข้อมูล บรรทัดละ 1 รายการ'}
+            />
+            <div>
+              <button type="button" className="page-stock-primary" onClick={saveManualBrainField}>บันทึกเข้าสมอง</button>
+              <button type="button" onClick={cancelEditManualBrainField}>ยกเลิก</button>
+            </div>
+          </div>
+        ) : field === 'rawAnalysis' ? (
+          <pre className="page-stock-brain-raw">{valueText || 'ยังไม่มี raw analysis'}</pre>
+        ) : field === 'pageName' || field === 'summary' ? (
+          <p>{valueText || 'ยังไม่มีข้อมูล'}</p>
+        ) : (
+          <ul className={options.mono ? 'page-stock-brain-mono-list' : undefined}>
+            {(lines.length ? lines : ['ยังไม่มีข้อมูล']).map((item, index) => <li key={`${field}-${index}`}>{item}</li>)}
+          </ul>
+        )}
+      </article>
+    );
+  };
+
+  const renderManualBrainInfographic = () => {
+    if (!manualBrain) return null;
+    const map = getBrainCapabilityMap(manualBrain);
+    return (
+      <div className="page-stock-brain-map" aria-label="ภาพรวมแกนสมอง">
+        <div className="page-stock-brain-map-core">
+          <span>Brain Core</span>
+          <strong>{manualBrain.pageName}</strong>
+          <p>{limitText(manualBrain.summary, 160)}</p>
+          <div>
+            <b>{manualBrain.sourceRowCount}</b><small>CSV Prompt</small>
+            <b>{manualBrain.trendRowCount || 0}</b><small>Trend rows</small>
+          </div>
+        </div>
+        <div className="page-stock-brain-map-panel keywords">
+          <h4>Keyword Memory</h4>
+          <div className="page-stock-chip-cloud">
+            {(map.primaryKeywords.length ? map.primaryKeywords : ['ยังไม่มี keyword']).map(item => <span key={item}>{item}</span>)}
+          </div>
+        </div>
+        <div className="page-stock-brain-map-panel trends">
+          <h4>Trend Radar</h4>
+          <div className="page-stock-chip-cloud accent">
+            {(map.trendSeeds.length ? map.trendSeeds.slice(0, 12) : ['ยังจับ trend seed ไม่ได้']).map(item => <span key={item}>{item}</span>)}
+          </div>
+        </div>
+        <div className="page-stock-brain-map-panel patterns">
+          <h4>Content Patterns</h4>
+          <ul>{(map.primaryPatterns.length ? map.primaryPatterns : ['ยังไม่มี pattern']).map((item, index) => <li key={index}>{item}</li>)}</ul>
+        </div>
+        <div className="page-stock-brain-map-panel rules">
+          <h4>Prompt Engine</h4>
+          <ul>{(map.promptRules.length ? map.promptRules : ['ยังไม่มีกฎ prompt']).map((item, index) => <li key={index}>{item}</li>)}</ul>
+        </div>
+        <div className="page-stock-brain-map-panel guardrails">
+          <h4>Guardrails</h4>
+          <ul>{(map.guardrails.length ? map.guardrails : ['ยังไม่มีข้อห้าม']).map((item, index) => <li key={index}>{item}</li>)}</ul>
+        </div>
+        <div className="page-stock-brain-map-panel meters">
+          <h4>Capability Meter</h4>
+          {map.capabilities.map(item => (
+            <div className="page-stock-brain-meter" key={item.label}>
+              <div><span>{item.label}</span><small>{item.detail}</small></div>
+              <meter min="0" max="100" value={item.value} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   if (!selectedPage) {
     return (
       <div className="page-stock-empty">
@@ -2548,6 +3730,15 @@ ${NO_AI_PREAMBLE_RULE}
           aria-selected={builderTab === 'local-image-article'}
         >
           เขียนบทความจากรูป Dropbox
+        </button>
+        <button
+          type="button"
+          className={builderTab === 'clickbait' ? 'active' : ''}
+          onClick={() => setBuilderTab('clickbait')}
+          role="tab"
+          aria-selected={builderTab === 'clickbait'}
+        >
+          สร้าง โพส clickbait
         </button>
         <button
           type="button"
@@ -2961,32 +4152,31 @@ ${NO_AI_PREAMBLE_RULE}
             {manualBrain && (
               <div className="page-stock-manual-card page-stock-manual-wide">
                 <div className="page-stock-manual-headline">
-                  <h3>สมองนี้วิเคราะห์ว่าอะไร</h3>
-                  <span>{manualBrain.pageName}</span>
+                  <h3>แผงตรวจสมองแบบละเอียด</h3>
+                  <span>{manualBrain.pageName} · แก้ไขแล้วบันทึกกลับเข้าสมองได้</span>
                 </div>
+                <div className="page-stock-brain-audit-summary">
+                  <span>ไฟล์ต้นทาง: {manualBrain.sourceFileName || 'ไม่ระบุ'}</span>
+                  <span>CSV Prompt {manualBrain.sourceRowCount} แถว</span>
+                  <span>CSV Trend {manualBrain.trendRowCount || 0} แถว</span>
+                  <span>Trend seeds: {extractTrendTopicSeeds(manualBrain).slice(0, 12).join(', ') || 'ยังจับไม่ได้'}</span>
+                  <span>อัปเดต {new Date(manualBrain.updatedAt).toLocaleString('th-TH')}</span>
+                </div>
+                {renderManualBrainInfographic()}
                 <div className="page-stock-brain-detail-grid">
-                  <article>
-                    <h4>Keyword ที่ควรใช้</h4>
-                    <p>{manualBrain.keywords.length ? manualBrain.keywords.join(', ') : 'ยังไม่มีข้อมูล keyword'}</p>
-                  </article>
-                  <article>
-                    <h4>แนวหัวข้อที่ควรทำ</h4>
-                    <ul>{(manualBrain.contentAngles.length ? manualBrain.contentAngles : manualBrain.topicPatterns).slice(0, 8).map((item, index) => <li key={index}>{item}</li>)}</ul>
-                  </article>
-                  <article>
-                    <h4>สำนวนที่ใช้</h4>
-                    <ul>{(manualBrain.toneGuidelines.length ? manualBrain.toneGuidelines : ['ยังไม่มีข้อมูลสำนวน']).slice(0, 8).map((item, index) => <li key={index}>{item}</li>)}</ul>
-                  </article>
-                  <article>
-                    <h4>เทรนด์ที่สมองจับได้</h4>
-                    <ul>{(manualBrain.trendInsights.length ? manualBrain.trendInsights : ['ไม่มี CSV เทรนด์ หรือ AI ไม่พบ trend insight ชัดเจน']).slice(0, 8).map((item, index) => <li key={index}>{item}</li>)}</ul>
-                  </article>
-                  <article className="wide">
-                    <h4>ตัวอย่าง Prompt ที่ควรสร้าง</h4>
-                    <div className="page-stock-example-prompts">
-                      {(manualBrain.examplePrompts.length ? manualBrain.examplePrompts : manualBrain.promptRules).slice(0, 5).map((item, index) => <pre key={index}>{item}</pre>)}
-                    </div>
-                  </article>
+                  {renderManualBrainField('pageName', 'ชื่อสมอง / เพจ', 'ใช้เป็นชื่ออ้างอิงตอนสร้างหัวข้อและ prompt')}
+                  {renderManualBrainField('summary', 'สรุปสมอง', 'ภาพรวมที่ AI ถอดได้จาก CSV และ trend', { wide: true })}
+                  {renderManualBrainField('keywords', 'Keyword หลักที่สมองจำไว้', 'คำแกนกลางที่ generator ใช้เป็น seed สร้างหัวข้อ')}
+                  {renderManualBrainField('contentAngles', 'Pattern / Angle ที่สมองจับได้', 'ประเภทหัวข้อที่ควรทำ เช่น How-to, Comparison, Use Case')}
+                  {renderManualBrainField('topicPatterns', 'โครงสร้างหัวข้อ', 'รูปแบบการตั้งหัวข้อที่ควรเลียนแบบจาก CSV เดิม')}
+                  {renderManualBrainField('trendInsights', 'เทรนด์ที่สมองจับได้', 'สิ่งที่มาจาก CSV เทรนด์ล่าสุด ควรเป็นหัวใจของหัวข้อใหม่')}
+                  {renderManualBrainField('toneGuidelines', 'สำนวนและน้ำเสียง', 'วิธีเล่า ภาษา และบุคลิกของเพจ')}
+                  {renderManualBrainField('promptRules', 'กฎการเขียน Prompt รูป', 'โครงสร้าง prompt ที่ต้องรักษาเวลาสร้าง prompt รูป')}
+                  {renderManualBrainField('visualStyleRules', 'กฎภาพ / สไตล์ภาพ', 'โทนสี layout ฟอนต์ องค์ประกอบ และสุนทรียศาสตร์ที่ถอดมา')}
+                  {renderManualBrainField('negativeRules', 'ข้อห้าม', 'สิ่งที่ไม่ควรทำตอนสร้างหัวข้อหรือ prompt')}
+                  {renderManualBrainField('examplePrompts', 'ตัวอย่าง Prompt ที่สมองจำไว้', 'ตัวอย่างที่ใช้เป็น pattern อ้างอิงตอนสร้าง prompt รูป', { wide: true, mono: true })}
+                  {renderManualBrainField('feedbackNotes', 'Feedback ที่เจ้าของเพจสอนเพิ่ม', 'โน้ตที่คุณเพิ่มเองและถูกส่งเข้า workflow ต่อไป')}
+                  {renderManualBrainField('rawAnalysis', 'Raw Analysis จาก AI', 'คำตอบดิบจากตอนวิเคราะห์สมอง เก็บไว้ตรวจย้อนหลัง', { wide: true, mono: true })}
                 </div>
               </div>
             )}
@@ -3312,6 +4502,102 @@ ${NO_AI_PREAMBLE_RULE}
                 <button disabled={localImageDoneCount === 0} onClick={downloadLocalImageArticleCsv}>
                   Export CSV
                 </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      ) : builderTab === 'clickbait' ? (
+        <section className="page-stock-panel page-stock-manual-prompt">
+          <div className="page-stock-panel-head">
+            <h2>สร้าง โพส clickbait</h2>
+            <span>{clickbaitPosts.length} รายการ</span>
+          </div>
+          <div className="page-stock-manual-grid">
+            <div className="page-stock-manual-card">
+              <h3>1. ใส่หัวข้อ</h3>
+              <p>ใส่หัวข้อที่อยากทำโพสต์ บรรทัดละ 1 หัวข้อ ระบบจะสร้างโพสต์หลักและคอมเมนต์ 1/3 ถึง 3/3 ให้ทีละหลายอัน</p>
+              <label>
+                <span>หัวข้อ</span>
+                <textarea
+                  className="page-stock-textarea"
+                  value={clickbaitInput}
+                  onChange={event => setClickbaitInput(event.target.value)}
+                  rows={10}
+                  placeholder={'เช่น\n100 Prompt สำหรับเจ้าของธุรกิจ\nวิธีใช้ AI วางแผนคอนเทนต์ 30 วัน\nPrompt วิเคราะห์คู่แข่ง'}
+                />
+              </label>
+              <label>
+                <span>โมเดลเขียนโพสต์</span>
+                <select className="page-stock-manual-input" value={manualPromptModel} onChange={event => setManualPromptModel(event.target.value)}>
+                  {MANUAL_TOPIC_PROMPT_MODELS.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
+                </select>
+              </label>
+              <div className="page-stock-manual-actions">
+                <button className="page-stock-primary" disabled={clickbaitTopics.length === 0 || clickbaitRunning} onClick={runClickbaitGenerator}>
+                  {clickbaitRunning ? 'กำลังสร้าง...' : `สร้าง ${clickbaitTopics.length || ''} โพสต์`}
+                </button>
+                <button disabled={clickbaitInput.trim().length === 0} onClick={() => setClickbaitInput('')}>ล้างหัวข้อ</button>
+                <button className="page-stock-danger" disabled={clickbaitPosts.length === 0} onClick={() => setClickbaitPosts([])}>ล้างผลลัพธ์</button>
+              </div>
+              {!getStoredOpenRouterKeyCandidates().length && (
+                <p>ยังไม่พบ OpenRouter key ระบบจะใช้ template local ให้ก่อน พอใส่ key แล้วกดสร้างใหม่จะได้งานที่หลากหลายขึ้น</p>
+              )}
+            </div>
+
+            <div className="page-stock-manual-card">
+              <h3>2. ส่งออก</h3>
+              <p>ผลลัพธ์แก้ไขได้ก่อนส่งออก CSV โดยคอลัมน์จะแยก headline, post และ comment 1-3 เพื่อเอาไปใช้ต่อกับ workflow ได้ง่าย</p>
+              <div className="page-stock-manual-actions">
+                <button disabled={clickbaitPosts.length === 0} onClick={copyClickbaitPosts}>
+                  {clickbaitCopied ? 'คัดลอกแล้ว' : 'คัดลอกทั้งหมด'}
+                </button>
+                <button disabled={clickbaitPosts.length === 0} onClick={downloadClickbaitCsv}>Export CSV</button>
+              </div>
+              <div className="page-stock-result-list page-stock-prompt-results" style={{ maxHeight: 360, overflow: 'auto' }}>
+                {clickbaitPosts.length === 0 ? (
+                  <em>ยังไม่มีโพสต์ clickbait</em>
+                ) : clickbaitPosts.slice(0, 8).map(item => (
+                  <article key={item.id}>
+                    <strong>{item.headline}</strong>
+                    <p>{item.topic}</p>
+                    {item.error && <p>AI error: {item.error} · ใช้ fallback template แล้ว</p>}
+                  </article>
+                ))}
+              </div>
+            </div>
+
+            <div className="page-stock-manual-card page-stock-manual-wide">
+              <h3>3. ผลลัพธ์ที่แก้ไขได้</h3>
+              <div className="page-stock-result-list page-stock-prompt-results">
+                {clickbaitPosts.length === 0 ? (
+                  <em>กดสร้างโพสต์ก่อน แล้วผลลัพธ์จะขึ้นตรงนี้</em>
+                ) : clickbaitPosts.map(item => (
+                  <article key={item.id}>
+                    <div className="page-stock-panel-head">
+                      <h4>{item.topic}</h4>
+                      <button className="page-stock-danger" onClick={() => setClickbaitPosts(prev => prev.filter(post => post.id !== item.id))}>ลบ</button>
+                    </div>
+                    <label>
+                      <span>หัวข้อ clickbait</span>
+                      <textarea className="page-stock-textarea" value={item.headline} onChange={event => updateClickbaitPost(item.id, { headline: event.target.value })} rows={2} />
+                    </label>
+                    <label>
+                      <span>โพสต์หลัก</span>
+                      <textarea className="page-stock-textarea" value={item.postText} onChange={event => updateClickbaitPost(item.id, { postText: event.target.value })} rows={5} />
+                    </label>
+                    {[0, 1, 2].map(index => (
+                      <label key={`${item.id}-comment-${index}`}>
+                        <span>ใต้คอมเมนต์ {index + 1}/3</span>
+                        <textarea
+                          className="page-stock-textarea"
+                          value={item.comments[index]}
+                          onChange={event => updateClickbaitComment(item.id, index, event.target.value)}
+                          rows={7}
+                        />
+                      </label>
+                    ))}
+                  </article>
+                ))}
               </div>
             </div>
           </div>

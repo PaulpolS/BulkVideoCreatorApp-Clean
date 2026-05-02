@@ -17,6 +17,7 @@ pnpm-debug.log*
 public/app_data/*
 !public/app_data/.gitkeep
 !public/app_data/page_stock_prompt_brains.json
+!public/app_data/competitors.json
 public/Image_stock/*
 !public/Image_stock/.gitkeep
 public/Sound_stock/*

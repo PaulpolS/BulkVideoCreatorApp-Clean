@@ -150,21 +150,44 @@ interface AIPagePostGeneratorProps {
 }
 
 export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsConsumed }: AIPagePostGeneratorProps = {}) {
+  const getOpenRouterKeyCandidates = () => {
+    const candidates: { key: string; label: string }[] = [];
+    const addCandidate = (key: unknown, label: string) => {
+      const clean = String(key || '').trim();
+      if (!clean || candidates.some(item => item.key === clean)) return;
+      candidates.push({ key: clean, label });
+    };
+
+    try {
+      const profiles = JSON.parse(localStorage.getItem('api_global_profiles') || '[]');
+      const activeId = localStorage.getItem('api_global_active_id');
+      if (Array.isArray(profiles)) {
+        const activeProfile = profiles.find((profile: any) => profile.id === activeId);
+        addCandidate(activeProfile?.openRouterKey, `Profile: ${activeProfile?.name || 'active'}`);
+        profiles.forEach((profile: any, index: number) => {
+          addCandidate(profile?.openRouterKey, `Profile ${index + 1}: ${profile?.name || profile?.id || 'unnamed'}`);
+        });
+      }
+    } catch {}
+
+    addCandidate(localStorage.getItem('openrouter_key'), 'Legacy openrouter_key');
+
+    try {
+      const keys = JSON.parse(localStorage.getItem('openrouter_keys') || '[]');
+      if (Array.isArray(keys)) {
+        const active = keys.find((key: any) => key.isActive);
+        addCandidate(active?.key, `OpenRouter key: ${active?.name || 'active'}`);
+        keys.forEach((item: any, index: number) => {
+          addCandidate(item?.key, `OpenRouter key ${index + 1}: ${item?.name || 'saved'}`);
+        });
+      }
+    } catch {}
+
+    return candidates;
+  };
+
   const getOpenRouterKey = () => {
-    const globalKey = localStorage.getItem('api_global_active_id') 
-                      ? JSON.parse(localStorage.getItem('api_global_profiles') || '[]')
-                        .find((p: any) => p.id === localStorage.getItem('api_global_active_id'))?.openRouterKey 
-                      : null;
-    const oldKey = localStorage.getItem('openrouter_key');
-    let aiKey = globalKey || oldKey;
-    
-    if (!aiKey) {
-        try {
-            const arr = JSON.parse(localStorage.getItem('openrouter_keys') || '[]');
-            if(arr.length > 0) aiKey = arr[0].key;
-        } catch(e) {}
-    }
-    return aiKey;
+    return getOpenRouterKeyCandidates()[0]?.key || '';
   };
   
   const getKieKey = () => {
@@ -605,25 +628,37 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
   };
 
   const callOpenRouter = async (messages: any[], model: string = textModel) => {
-    const apiKey = getOpenRouterKey();
-    if (!apiKey) throw new Error('กรุณาตั้งค่า OpenRouter API Key ในหน้าตั้งค่าระบบ');
-    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model,
-        messages
-      })
-    });
-    if (!res.ok) {
-       const err = await res.json();
-       throw new Error(err.error?.message || 'API Error');
+    const candidates = getOpenRouterKeyCandidates();
+    if (candidates.length === 0) throw new Error('กรุณาตั้งค่า OpenRouter API Key ในหน้าตั้งค่าระบบ');
+
+    let lastError = '';
+    for (const candidate of candidates) {
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${candidate.key}`
+        },
+        body: JSON.stringify({
+          model,
+          messages
+        })
+      });
+      const data = await res.json();
+      if (res.ok && !data.error) {
+        return data.choices[0].message.content;
+      }
+
+      const message = data.error?.message || `OpenRouter error ${res.status}`;
+      lastError = `${candidate.label}: ${message}`;
+      if (/insufficient credits|more credits|credits|can only afford/i.test(message)) {
+        console.warn(`[AIPage] ${candidate.label} credit/limit error, trying next OpenRouter key`);
+        continue;
+      }
+      throw new Error(lastError);
     }
-    const data = await res.json();
-    return data.choices[0].message.content;
+
+    throw new Error(lastError ? `ลอง OpenRouter key แล้ว ${candidates.length} ตัว แต่ยังไม่ผ่าน: ${lastError}` : 'OpenRouter API Error');
   };
 
   const handleAnalyzePrompt = async () => {
