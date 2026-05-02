@@ -3,6 +3,7 @@ import { Card } from '../ui/Card';
 import { useYtQueueStore } from '../../hooks/useYtQueueStore';
 import { NumInput } from '../ui/NumInput';
 import { globalTaskStore } from '../../hooks/useBackgroundTasks';
+import { GithubFinderTab } from './GithubFinderTab';
 
 interface ArticleItem {
   id: string;
@@ -132,7 +133,7 @@ const TITLES_TRANSLATE_PROMPT = `หน้าที่ของคุณคื�
 }`;
 
 export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSendToAIPage, initialYoutubeUrls, onYoutubeUrlsConsumed }) => {
-  const [activeMode, setActiveMode] = useState<'rss' | 'youtube'>('rss');
+  const [activeMode, setActiveMode] = useState<'rss' | 'youtube' | 'github'>('rss');
 
   // RSS states
   const [url, setUrl] = useState('https://36kr.com/information/AI/');
@@ -806,6 +807,12 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
         >
           🎬 YouTube Script + รูปภาพ
         </button>
+        <button
+          onClick={() => setActiveMode('github')}
+          className={`px-5 py-2.5 rounded-lg text-sm font-bold transition-all ${activeMode === 'github' ? 'bg-violet-600 text-white shadow-lg shadow-violet-500/20' : 'text-gray-400 hover:text-white'}`}
+        >
+          🐙 หาของดีจาก Github
+        </button>
       </div>
 
       {/* YouTube Mode */}
@@ -1171,6 +1178,13 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
               )}
             </>
           )}
+        </div>
+      )}
+
+      {/* GitHub Finder Mode */}
+      {activeMode === 'github' && (
+        <div className="space-y-4">
+          <GithubFinderTab />
         </div>
       )}
 
