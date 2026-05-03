@@ -3,6 +3,7 @@ import { NumInput } from '../ui/NumInput';
 import { globalTaskStore } from '../../hooks/useBackgroundTasks';
 import { useKieTTS } from '../../hooks/useKieTTS';
 import { useStockKeywords } from '../../hooks/useStockKeywords';
+import { getActiveOpenRouterKey } from '../../hooks/useApiSettings';
 
 export interface SceneData {
   id: string;
@@ -69,13 +70,7 @@ export function SceneBuilder() {
   useEffect(() => {
     localStorage.setItem('selected_api_key_id', selectedKeyId);
     // Fetch OpenRouter key for AI
-    const keys = localStorage.getItem('openrouter_keys');
-    if (keys) {
-      try {
-        const parsed = JSON.parse(keys);
-        if (parsed.length > 0) setOpenRouterKey(parsed[0].key);
-      } catch(e) {}
-    }
+    setOpenRouterKey(getActiveOpenRouterKey());
   }, [selectedKeyId]);
 
   const [voiceModel, setVoiceModel] = useState('mac_Kanya'); // Mac Free Default

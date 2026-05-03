@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { getActiveOpenRouterKey } from '../../hooks/useApiSettings';
 
 export function FlowAutomatorTab() {
   const [dropboxKey, setDropboxKey] = useState(localStorage.getItem('dropbox_api_key') || '');
@@ -117,18 +118,7 @@ Rules (กฎเหล็ก):
     setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} - ${msg}`]);
   };
 
-  const getOpenRouterKey = () => {
-    // ดึงจาก Global Settings เป็นหลักก่อนเลย
-    const globalKey = localStorage.getItem('openrouter_key');
-    if (globalKey && globalKey.trim() !== '') return globalKey.trim();
-
-    try {
-      const keys = JSON.parse(localStorage.getItem('openrouter_keys') || '[]');
-      const active = keys.find((k: any) => k.isActive) || keys[0];
-      if (active && active.key) return active.key.trim();
-    } catch(e) {}
-    return '';
-  };
+  const getOpenRouterKey = () => getActiveOpenRouterKey();
   
   const handleAddClientId = () => {
     if (newClientId && !clientIds.includes(newClientId)) {

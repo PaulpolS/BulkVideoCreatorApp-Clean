@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Card } from '../ui/Card';
+import { getOpenRouterKeyCandidates } from '../../hooks/useApiSettings';
 
 const KEYWORDS = [
   { label: 'Claude Code', query: 'claude-code', emoji: '🤖' },
@@ -93,6 +94,16 @@ function downloadCSV(rows: string[][], filename: string) {
   URL.revokeObjectURL(url);
 }
 
+const GH_MODEL_OPTIONS = [
+  { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash (แนะนำ/เร็ว/ถูก)' },
+  { id: 'google/gemini-3-flash-preview', name: 'Gemini 3 Flash (ใหม่/เร็ว)' },
+  { id: 'google/gemini-2.5-pro', name: 'Gemini 2.5 Pro (ฉลาด)' },
+  { id: 'openai/gpt-4o-mini', name: 'GPT-4o Mini (คุ้มค่า)' },
+  { id: 'openai/gpt-oss-20b:free', name: 'GPT OSS 20B (ฟรี!)' },
+  { id: 'openai/gpt-4o', name: 'GPT-4o (เก่งสุด)' },
+  { id: 'google/gemma-3-27b-it:free', name: 'Gemma 3 27B (ฟรี!)' },
+];
+
 export function GithubFinderTab() {
   const [selectedQuery, setSelectedQuery] = useState(KEYWORDS[0].query);
   const [count, setCount] = useState('10');
@@ -106,55 +117,50 @@ export function GithubFinderTab() {
   const [isCheckingRate, setIsCheckingRate] = useState(false);
   const [genLog, setGenLog] = useState('');
   const stopRef = useRef(false);
+  const [ghModel, setGhModel] = useState<string>(() => localStorage.getItem('gh_finder_model') || GH_MODEL_OPTIONS[0].id);
 
-  // ─── OpenRouter helpers (same pattern as NewsScraperTab) ───────────────────
-  const getOpenRouterKeyCandidates = () => {
-    const candidates: { key: string; label: string }[] = [];
-    const addCandidate = (key: unknown, label: string) => {
-      const clean = String(key || '').trim();
-      if (!clean || candidates.some(c => c.key === clean)) return;
-      candidates.push({ key: clean, label });
-    };
-    try {
-      const profiles = JSON.parse(localStorage.getItem('api_global_profiles') || '[]');
-      const activeId = localStorage.getItem('api_global_active_id');
-      if (Array.isArray(profiles)) {
-        const active = profiles.find((p: any) => p.id === activeId);
-        addCandidate(active?.openRouterKey, `Profile: ${active?.name || 'active'}`);
-        profiles.forEach((p: any, i: number) =>
-          addCandidate(p?.openRouterKey, `Profile ${i + 1}: ${p?.name || p?.id}`)
-        );
-      }
-    } catch {}
-    addCandidate(localStorage.getItem('openrouter_key'), 'Legacy');
-    try {
-      const keys = JSON.parse(localStorage.getItem('openrouter_keys') || '[]');
-      if (Array.isArray(keys)) {
-        const active = keys.find((k: any) => k.isActive);
-        addCandidate(active?.key, `OR key: ${active?.name || 'active'}`);
-        keys.forEach((k: any, i: number) => addCandidate(k?.key, `OR key ${i + 1}`));
-      }
-    } catch {}
-    return candidates;
-  };
+  // ─── OpenRouter helpers (ดึง key จาก shared utility) ───────────
 
   const callOpenRouter = async (messages: { role: string; content: string }[]) => {
-    const candidates = getOpenRouterKeyCandidates();
-    if (candidates.length === 0) throw new Error('ไม่พบ OpenRouter API Key');
+    const candidates = await getOpenRouterKeyCandidates();
+    if (candidates.length === 0) throw new Error('ไม่พบ OpenRouter API Key — กรุณาไปตั้งค่า API Key ก่อน');
+    
+    // ลอง model ที่เลือก → ถ้าไม่ได้ fallback ไป model ราคาถูกกว่า
+    const modelsToTry = [ghModel, ...GH_MODEL_OPTIONS.map(m => m.id).filter(m => m !== ghModel)];
     let lastErr = '';
+    
     for (const cand of candidates) {
-      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${cand.key}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'google/gemini-2.5-flash', messages, temperature: 0.9 }),
-      });
-      const data = await res.json();
-      if (res.ok && !data.error) return data.choices?.[0]?.message?.content || '';
-      lastErr = data.error?.message || `error ${res.status}`;
-      if (/credits|afford/i.test(lastErr)) continue;
-      throw new Error(lastErr);
+      for (const model of modelsToTry) {
+        try {
+          const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${cand.key}`,
+              'Content-Type': 'application/json',
+              'HTTP-Referer': window.location.origin,
+              'X-Title': 'Bulk Video Creator - GitHub Finder',
+            },
+            body: JSON.stringify({ model, messages, temperature: 0.9 }),
+          });
+          const data = await res.json();
+          if (res.ok && !data.error) {
+            return data.choices?.[0]?.message?.content || '';
+          }
+          lastErr = data.error?.message || `error ${res.status}`;
+          // ถ้าเป็น credits error → ลอง model ถัดไปก่อน
+          if (/credits|afford/i.test(lastErr)) {
+            console.warn(`[GH Finder] Model ${model} credits error, trying next...`);
+            continue;
+          }
+          // error อื่นๆ → ลอง key ถัดไป
+          break;
+        } catch (fetchErr: any) {
+          lastErr = fetchErr.message || 'Network error';
+          break;
+        }
+      }
     }
-    throw new Error(lastErr || 'OpenRouter error');
+    throw new Error(lastErr || 'OpenRouter error — ลองเปลี่ยน model หรือเติม credit');
   };
 
   // ─── Extract GIF URLs only from README markdown ────────────────────────────
@@ -246,7 +252,8 @@ export function GithubFinderTab() {
   const handleGeneratePosts = async () => {
     const selected = repos.filter(r => selectedIds.has(r.id));
     if (!selected.length) return alert('กรุณาเลือก repo ก่อน');
-    if (getOpenRouterKeyCandidates().length === 0) return alert('กรุณาตั้งค่า OpenRouter API Key ก่อน');
+    const keyCandidates = await getOpenRouterKeyCandidates();
+    if (keyCandidates.length === 0) return alert('กรุณาตั้งค่า OpenRouter API Key ก่อน');
 
     stopRef.current = false;
     setIsGenerating(true);
@@ -485,6 +492,22 @@ ${readme ? `\nเนื้อหา README (ส่วนหนึ่ง):\n${rea
         >
           {isLoading ? '⏳ กำลังค้นหา...' : '🔍 ค้นหา'}
         </button>
+      </div>
+
+      {/* ── AI Model Selector ── */}
+      <div className="flex items-center gap-3 mb-4 p-3 rounded-lg border" style={{ backgroundColor: 'var(--bg-card, #1a1a2e)', borderColor: 'var(--border-color, #333)' }}>
+        <span className="text-xs text-gray-400 font-semibold whitespace-nowrap">🤖 โมเดล AI:</span>
+        <select
+          value={ghModel}
+          onChange={e => { setGhModel(e.target.value); localStorage.setItem('gh_finder_model', e.target.value); }}
+          className="flex-1 px-3 py-1.5 rounded-lg text-sm font-semibold border-0 outline-none cursor-pointer"
+          style={{ backgroundColor: 'rgba(139, 92, 246, 0.15)', color: 'var(--text-main, #fff)' }}
+        >
+          {GH_MODEL_OPTIONS.map(m => (
+            <option key={m.id} value={m.id}>{m.name}</option>
+          ))}
+        </select>
+        <span className="text-[10px] text-gray-500">ถ้า model ใช้ไม่ได้ ระบบจะ fallback อัตโนมัติ</span>
       </div>
 
       {/* ── Rate limit checker ── */}

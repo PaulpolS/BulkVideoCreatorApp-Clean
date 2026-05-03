@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import * as XLSX from 'xlsx';
+import { getActiveOpenRouterKey, getActiveKieKey } from '../../hooks/useApiSettings';
 
 type LazadaItem = {
   id: string;
@@ -146,21 +147,10 @@ CRITICAL: The text MUST be placed inside a clean, modern text box or semi-transp
   };
 
   const getApiKeys = () => {
-    let openRouterKey = '';
-    try {
-      const keys = JSON.parse(localStorage.getItem('openrouter_keys') || '[]');
-      openRouterKey = keys.find((k: any) => k.isActive)?.key || keys[0]?.key || localStorage.getItem('openrouter_key') || '';
-    } catch(e) {}
-    return { openRouterKey };
+    return { openRouterKey: getActiveOpenRouterKey() };
   };
 
-  const getKieApiKey = () => {
-    try {
-      const profiles = JSON.parse(localStorage.getItem('api_key_profiles') || '[]');
-      const targetId = localStorage.getItem('selected_api_key_id');
-      return profiles.find((p: any) => p.id === targetId)?.key || profiles[0]?.key || '';
-    } catch(e) { return ''; }
-  };
+  const getKieApiKey = () => getActiveKieKey();
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { checkOpenRouterCredits } from '../../hooks/useApiSettings';
 
 interface ApiProfile {
   id: string;
@@ -28,6 +29,8 @@ export default function GlobalSettings() {
   const [kieKey, setKieKey] = useState('');
   const [googleKey, setGoogleKey] = useState('');
   const [apifyKey, setApifyKey] = useState('');
+  const [isCheckingCredits, setIsCheckingCredits] = useState(false);
+  const [creditResult, setCreditResult] = useState('');
   
   const hasAttemptedAuth = useRef(false);
   const getDropboxRedirectUri = () => `${window.location.origin.replace(/\/$/, '')}/`;
@@ -231,6 +234,7 @@ export default function GlobalSettings() {
     setKieKey('');
     setGoogleKey('');
     setApifyKey('');
+    setCreditResult('');
   };
 
   const loadProfile = (id: string) => {
@@ -246,6 +250,7 @@ export default function GlobalSettings() {
       setKieKey(p.kieKey || '');
       setGoogleKey(p.googleKey || '');
       setApifyKey(p.apifyKey || '');
+      setCreditResult('');
       
       // Update backwards compatibility immediately so switching takes effect
       localStorage.setItem('api_global_active_id', p.id);
@@ -295,6 +300,24 @@ export default function GlobalSettings() {
     };
     reader.readAsText(file);
     e.target.value = ''; // reset file input
+  };
+
+  const handleCheckCredits = async () => {
+    if (!openRouterKey) return;
+    setIsCheckingCredits(true);
+    setCreditResult('');
+    try {
+      const credits = await checkOpenRouterCredits(openRouterKey);
+      if (credits !== null) {
+        setCreditResult(`✅ เครดิตคงเหลือ: $${credits.toFixed(4)}`);
+      } else {
+        setCreditResult('❌ ไม่สามารถดึงข้อมูลเครดิตได้ (Key อาจไม่ถูกต้อง)');
+      }
+    } catch (err: any) {
+      setCreditResult(`❌ เกิดข้อผิดพลาด: ${err.message}`);
+    } finally {
+      setIsCheckingCredits(false);
+    }
   };
 
   return (
@@ -349,14 +372,35 @@ export default function GlobalSettings() {
               <hr className="border-gray-100 dark:border-gray-800 my-4" />
 
               <div>
-                <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">🧠 OpenRouter API Key <span className="text-red-500">*</span></label>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-sm font-bold text-gray-700 dark:text-gray-300">🧠 OpenRouter API Key <span className="text-red-500">*</span></label>
+                  <button 
+                    onClick={handleCheckCredits}
+                    disabled={isCheckingCredits || !openRouterKey}
+                    className="text-xs px-2 py-1 bg-violet-100 text-violet-700 hover:bg-violet-200 dark:bg-violet-900/30 dark:text-violet-300 rounded transition-colors disabled:opacity-50 flex items-center gap-1"
+                  >
+                    {isCheckingCredits ? '⏳ กำลังเช็ค...' : '💰 เช็คเครดิต'}
+                  </button>
+                </div>
                 <input 
                   type="password"
                   value={openRouterKey}
-                  onChange={(e) => setOpenRouterKey(e.target.value)}
+                  onChange={(e) => {
+                    setOpenRouterKey(e.target.value);
+                    if (creditResult) setCreditResult('');
+                  }}
                   className="w-full px-4 py-2 bg-gray-50 dark:bg-black border border-[var(--border-color)] rounded-lg focus:outline-none focus:border-indigo-500"
                   placeholder="sk-or-v1-..."
                 />
+                {creditResult && (
+                  <div className={`mt-2 text-xs px-3 py-2 rounded-lg font-medium ${
+                    creditResult.includes('❌') 
+                      ? 'bg-red-50 text-red-600 border border-red-100 dark:bg-red-900/20 dark:border-red-900/30 dark:text-red-400' 
+                      : 'bg-green-50 text-green-700 border border-green-100 dark:bg-green-900/20 dark:border-green-900/30 dark:text-green-400'
+                  }`}>
+                    {creditResult}
+                  </div>
+                )}
               </div>
 
               <div className="bg-blue-50 dark:bg-blue-900/10 p-4 rounded-xl border border-blue-100 dark:border-blue-800">

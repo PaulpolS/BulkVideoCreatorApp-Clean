@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { globalTaskStore } from '../../hooks/useBackgroundTasks';
 import { SlideViewerModal } from './SlideViewerModal';
+import { getActiveOpenRouterKeyAsync as getOpenRouterKey } from '../../hooks/useApiSettings';
 
 interface CourseEP {
   id: string;
@@ -73,18 +74,7 @@ export function OnlineCourseTab() {
     });
   };
 
-  async function getOpenRouterKey(): Promise<string> {
-    try {
-      const res = await fetch('/api/get-app-data?key=api_profiles');
-      const profiles = await res.json();
-      if (Array.isArray(profiles) && profiles.length > 0) {
-        const activeId = localStorage.getItem('api_global_active_id') || profiles[0].id;
-        const activeProfile = profiles.find((p: any) => p.id === activeId) || profiles[0];
-        return activeProfile.openRouterKey || '';
-      }
-    } catch (e) { console.error(e); }
-    return localStorage.getItem('openrouter_key') || '';
-  }
+
 
   const handleGenerateCourse = async () => {
     if (!newTitle) return alert('กรุณาตั้งชื่อคอร์ส');

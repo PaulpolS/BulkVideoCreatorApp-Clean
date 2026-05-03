@@ -4,6 +4,7 @@ import { useYtQueueStore } from '../../hooks/useYtQueueStore';
 import { NumInput } from '../ui/NumInput';
 import { globalTaskStore } from '../../hooks/useBackgroundTasks';
 import { GithubFinderTab } from './GithubFinderTab';
+import { getOpenRouterKeyCandidates as getOpenRouterKeyCandidatesShared, getActiveOpenRouterKeyAsync } from '../../hooks/useApiSettings';
 
 interface ArticleItem {
   id: string;
@@ -451,72 +452,69 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
     }).filter(item => item.id && item.thaiTitle);
   };
 
-  const getOpenRouterKeyCandidates = () => {
-    const candidates: { key: string; label: string }[] = [];
-    const addCandidate = (key: unknown, label: string) => {
-      const clean = String(key || '').trim();
-      if (!clean || candidates.some(item => item.key === clean)) return;
-      candidates.push({ key: clean, label });
-    };
+  const FREE_FALLBACK_MODELS = ['openai/gpt-oss-20b:free', 'google/gemma-3-27b-it:free'];
 
-    try {
-      const profiles = JSON.parse(localStorage.getItem('api_global_profiles') || '[]');
-      const activeId = localStorage.getItem('api_global_active_id');
-      if (Array.isArray(profiles)) {
-        const activeProfile = profiles.find((profile: any) => profile.id === activeId);
-        addCandidate(activeProfile?.openRouterKey, `Profile: ${activeProfile?.name || 'active'}`);
-        profiles.forEach((profile: any, index: number) => {
-          addCandidate(profile?.openRouterKey, `Profile ${index + 1}: ${profile?.name || profile?.id || 'unnamed'}`);
-        });
-      }
-    } catch {}
+  const getOpenRouterKeyCandidates = () => getOpenRouterKeyCandidatesShared();
 
-    addCandidate(localStorage.getItem('openrouter_key'), 'Legacy openrouter_key');
-
-    try {
-      const keys = JSON.parse(localStorage.getItem('openrouter_keys') || '[]');
-      if (Array.isArray(keys)) {
-        const active = keys.find((key: any) => key.isActive);
-        addCandidate(active?.key, `OpenRouter key: ${active?.name || 'active'}`);
-        keys.forEach((item: any, index: number) => {
-          addCandidate(item?.key, `OpenRouter key ${index + 1}: ${item?.name || 'saved'}`);
-        });
-      }
-    } catch {}
-
-    return candidates;
-  };
-
-  const getOpenRouterKey = () => {
-    return getOpenRouterKeyCandidates()[0]?.key || '';
+  const getOpenRouterKey = async () => {
+    return await getActiveOpenRouterKeyAsync();
   };
 
   const callOpenRouterWithFallbackKeys = async (body: Record<string, unknown>) => {
-    const candidates = getOpenRouterKeyCandidates();
+    const candidates = await getOpenRouterKeyCandidates();
     if (candidates.length === 0) throw new Error('ไม่พบ OpenRouter API Key');
 
+    const originalModel = body.model as string;
+    // ถ้า paid model ไม่ได้ → ลอง free models อัตโนมัติ
+    const modelsToTry = [originalModel, ...FREE_FALLBACK_MODELS.filter(m => m !== originalModel)];
     let lastError = '';
-    for (const candidate of candidates) {
-      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${candidate.key}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (res.ok && !data.error) {
-        return { data, keyLabel: candidate.label };
-      }
 
-      const message = data.error?.message || `OpenRouter error ${res.status}`;
-      lastError = `${candidate.label}: ${message}`;
-      if (/insufficient credits|more credits|credits|can only afford/i.test(message)) {
-        addLog(`🔁 ${candidate.label} ใช้ไม่ได้เพราะเครดิต/ลิมิต → ลอง key ถัดไป`);
-        continue;
+    for (const candidate of candidates) {
+      for (const model of modelsToTry) {
+        try {
+          const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${candidate.key}`,
+              'Content-Type': 'application/json',
+              'HTTP-Referer': window.location.origin,
+              'X-Title': 'Bulk Video Creator - News Scraper',
+            },
+            body: JSON.stringify({ ...body, model }),
+          });
+          const data = await res.json();
+          if (res.ok && !data.error) {
+            const modelLabel = model !== originalModel ? ` [fallback: ${model.split('/')[1]}]` : '';
+            return { data, keyLabel: `${candidate.label}${modelLabel}` };
+          }
+
+          const message = data.error?.message || `OpenRouter error ${res.status}`;
+          lastError = `${candidate.label}: ${message}`;
+
+          if (/insufficient credits|more credits|credits|can only afford/i.test(message)) {
+            if (model !== modelsToTry[modelsToTry.length - 1]) {
+              addLog(`🔁 ${candidate.label} + ${model} credits ไม่พอ → ลอง free model...`);
+              continue; // try next model
+            }
+            addLog(`🔁 ${candidate.label} ใช้ไม่ได้กับทุก model → ลอง key ถัดไป`);
+            break; // try next key
+          }
+
+          if (/not a valid model/i.test(message)) {
+            addLog(`⚠️ Model ${model} ไม่มีแล้ว → ลอง model ถัดไป`);
+            continue; // try next model
+          }
+
+          throw new Error(lastError);
+        } catch (fetchErr: any) {
+          if (fetchErr.message === lastError) throw fetchErr; // re-throw structured error
+          lastError = `${candidate.label}: ${fetchErr.message || 'Network error'}`;
+          break; // network error, try next key
+        }
       }
-      throw new Error(lastError);
     }
 
-    throw new Error(lastError || 'OpenRouter error');
+    throw new Error(lastError || 'OpenRouter error — ลองเปลี่ยน model หรือเติม credit');
   };
 
   const handleScrape = async () => {
@@ -632,7 +630,7 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
   };
 
   const handleTranslateTitles = async () => {
-    if (getOpenRouterKeyCandidates().length === 0) return alert("กรุณาตั้งค่า OpenRouter API Key ก่อน");
+    if ((await getOpenRouterKeyCandidates()).length === 0) return alert("กรุณาตั้งค่า OpenRouter API Key ก่อน");
 
     const allToTranslate = articles.filter(a => !a.thaiTitle);
     if (allToTranslate.length === 0) return alert("ไม่มีหัวเรื่องใหม่ให้แปลแล้ว");
@@ -692,7 +690,7 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
   };
 
   const handleProcessArticle = async (article: ArticleItem) => {
-    const apiKey = getOpenRouterKey();
+    const apiKey = await getOpenRouterKey();
     if (!apiKey) return alert("กรุณาตั้งค่า OpenRouter API Key ก่อน");
 
     setProcessingId(article.id);
@@ -715,34 +713,24 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
       let fullText = await jinaRes.text();
       fullText = fullText.substring(0, 8000); // ตัดแค่ 8000 ตัวแรก ประหยัด Token
 
-      // Step 2: ประเมินคะแนนไวรัล
+      // Step 2: ประเมินคะแนนไวรัล (ใช้ fallback อัตโนมัติ)
       addLog(`🌡️ ให้ AI ตรวจสอบคะแนนความไวรัล...`);
-      const scoreRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'google/gemini-2.5-flash',
-          messages: [{ role: 'user', content: SCORE_PROMPT.replace('{content}', `${article.title}\n\n${fullText}`) }],
-          temperature: 0.3
-        })
+      const { data: scoreData } = await callOpenRouterWithFallbackKeys({
+        model: 'google/gemini-2.5-flash',
+        messages: [{ role: 'user', content: SCORE_PROMPT.replace('{content}', `${article.title}\n\n${fullText}`) }],
+        temperature: 0.3
       });
-      const scoreData = await scoreRes.json();
       const scoreJsonRaw = scoreData.choices?.[0]?.message?.content || '{}';
       const scoreParsed = JSON.parse(cleanJsonText(scoreJsonRaw));
       addLog(`⭐ ประเมินความน่าสนใจได้: ${scoreParsed.คะแนน || 0}/10`);
 
-      // Step 3: เขียนลง Detail
+      // Step 3: เขียนลง Detail (ใช้ fallback อัตโนมัติ)
       addLog(`✍️ กำลังให้ AI เขียนบทความสไตล์เพจการเงิน...`);
-      const writeRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'google/gemini-2.5-flash',
-          messages: [{ role: 'user', content: WRITE_PROMPT.replace('{content}', `${article.title}\n\n${fullText}`) }],
-          temperature: 0.7
-        })
+      const { data: writeData } = await callOpenRouterWithFallbackKeys({
+        model: 'google/gemini-2.5-flash',
+        messages: [{ role: 'user', content: WRITE_PROMPT.replace('{content}', `${article.title}\n\n${fullText}`) }],
+        temperature: 0.7
       });
-      const writeData = await writeRes.json();
       const writeJsonRaw = writeData.choices?.[0]?.message?.content || '{}';
       let mappedData;
       try {

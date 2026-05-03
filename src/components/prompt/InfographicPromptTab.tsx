@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { getActiveOpenRouterKey } from '../../hooks/useApiSettings';
 
 const DEFAULT_AI_MODEL = "google/gemini-2.5-flash"; // Excellent vision model
 
@@ -135,22 +136,7 @@ export function InfographicPromptTab() {
     setAnalysisResult('');
   };
 
-  const getOpenRouterKey = () => {
-    const globalKey = localStorage.getItem('api_global_active_id') 
-                      ? JSON.parse(localStorage.getItem('api_global_profiles') || '[]')
-                        .find((p: any) => p.id === localStorage.getItem('api_global_active_id'))?.openRouterKey 
-                      : null;
-    const oldKey = localStorage.getItem('openrouter_key');
-    let aiKey = globalKey || oldKey;
-    
-    if (!aiKey) {
-        try {
-            const arr = JSON.parse(localStorage.getItem('openrouter_keys') || '[]');
-            if(arr.length > 0) aiKey = arr[0].key;
-        } catch(e) {}
-    }
-    return aiKey;
-  };
+  const getOpenRouterKey = () => getActiveOpenRouterKey();
 
   const compressImageBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {

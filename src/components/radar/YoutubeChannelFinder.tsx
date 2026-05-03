@@ -34,18 +34,7 @@ interface AIChannelSuggestion {
   whyMatch: string;
 }
 
-async function getOpenRouterKey(): Promise<string> {
-  try {
-    const res = await fetch('/api/get-app-data?key=api_profiles');
-    const profiles = await res.json();
-    if (Array.isArray(profiles) && profiles.length > 0) {
-      const activeId = localStorage.getItem('api_global_active_id') || profiles[0].id;
-      const activeProfile = profiles.find((p: any) => p.id === activeId) || profiles[0];
-      return activeProfile.openRouterKey || '';
-    }
-  } catch (e) { console.error(e); }
-  return localStorage.getItem('openrouter_key') || '';
-}
+import { getActiveOpenRouterKeyAsync as getOpenRouterKey } from '../../hooks/useApiSettings';
 
 function formatSubs(n: number | null): string {
   if (n == null) return '-';
@@ -70,7 +59,7 @@ export function YoutubeChannelFinder() {
   const [scanningId, setScanningId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [scanLimit, setScanLimit] = useState(30);
-  const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('radar_selected_model') || 'google/gemini-flash-1.5');
+  const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('radar_selected_model') || 'google/gemini-2.5-flash');
   const [scoringId, setScoringId] = useState<string | null>(null);
   const [selectedVideoIds, setSelectedVideoIds] = useState<Record<string, Set<string>>>({});
   const savedChannelsRef = React.useRef<YTChannel[]>([]);
@@ -422,11 +411,13 @@ export function YoutubeChannelFinder() {
             className="px-3 py-2 rounded-lg border bg-transparent text-sm outline-none cursor-pointer"
             style={{ borderColor: 'var(--border-color)', color: 'var(--text-main)' }}
           >
-            <option value="google/gemini-flash-1.5">Gemini Flash 1.5</option>
-            <option value="google/gemini-3-flash-preview">Gemini 3 Flash</option>
-            <option value="anthropic/claude-3.5-haiku">Claude 3.5 Haiku</option>
+            <option value="google/gemini-2.5-flash">Gemini 2.5 Flash (แนะนำ)</option>
+            <option value="google/gemini-3-flash-preview">Gemini 3 Flash Preview</option>
+            <option value="google/gemini-2.5-pro">Gemini 2.5 Pro</option>
             <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
-            <option value="meta-llama/llama-3.1-70b-instruct">Llama 3.1 70B</option>
+            <option value="openai/gpt-4o">GPT-4o</option>
+            <option value="openai/gpt-oss-20b:free">🆓 GPT OSS 20B (ฟรี!)</option>
+            <option value="google/gemma-3-27b-it:free">🆓 Gemma 3 27B (ฟรี!)</option>
           </select>
           <button
             onClick={handleAISearch}

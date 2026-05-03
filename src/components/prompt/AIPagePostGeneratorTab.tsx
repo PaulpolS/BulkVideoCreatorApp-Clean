@@ -4,6 +4,7 @@ import { globalTaskStore } from '../../hooks/useBackgroundTasks';
 import { useHeadlinePacks } from '../../hooks/useHeadlinePacks';
 import { useWritingStyles } from '../../hooks/useWritingStyles';
 import { useImagePromptStyles } from '../../hooks/useImagePromptStyles';
+import { getOpenRouterKeyCandidates, getActiveOpenRouterKeyAsync, getActiveKieKey, getActiveDropboxCreds } from '../../hooks/useApiSettings';
 
 interface AIPageTemplateFolder { name: string; fileCount: number; }
 interface GenerationTask {
@@ -150,71 +151,19 @@ interface AIPagePostGeneratorProps {
 }
 
 export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsConsumed }: AIPagePostGeneratorProps = {}) {
-  const getOpenRouterKeyCandidates = () => {
-    const candidates: { key: string; label: string }[] = [];
-    const addCandidate = (key: unknown, label: string) => {
-      const clean = String(key || '').trim();
-      if (!clean || candidates.some(item => item.key === clean)) return;
-      candidates.push({ key: clean, label });
-    };
+  const FREE_FALLBACK_MODELS = ['openai/gpt-oss-20b:free', 'google/gemma-3-27b-it:free'];
 
-    try {
-      const profiles = JSON.parse(localStorage.getItem('api_global_profiles') || '[]');
-      const activeId = localStorage.getItem('api_global_active_id');
-      if (Array.isArray(profiles)) {
-        const activeProfile = profiles.find((profile: any) => profile.id === activeId);
-        addCandidate(activeProfile?.openRouterKey, `Profile: ${activeProfile?.name || 'active'}`);
-        profiles.forEach((profile: any, index: number) => {
-          addCandidate(profile?.openRouterKey, `Profile ${index + 1}: ${profile?.name || profile?.id || 'unnamed'}`);
-        });
-      }
-    } catch {}
+  // getOpenRouterKeyCandidates is imported from useApiSettings
 
-    addCandidate(localStorage.getItem('openrouter_key'), 'Legacy openrouter_key');
-
-    try {
-      const keys = JSON.parse(localStorage.getItem('openrouter_keys') || '[]');
-      if (Array.isArray(keys)) {
-        const active = keys.find((key: any) => key.isActive);
-        addCandidate(active?.key, `OpenRouter key: ${active?.name || 'active'}`);
-        keys.forEach((item: any, index: number) => {
-          addCandidate(item?.key, `OpenRouter key ${index + 1}: ${item?.name || 'saved'}`);
-        });
-      }
-    } catch {}
-
-    return candidates;
-  };
-
-  const getOpenRouterKey = () => {
-    return getOpenRouterKeyCandidates()[0]?.key || '';
+  const getOpenRouterKey = async () => {
+    return await getActiveOpenRouterKeyAsync();
   };
   
-  const getKieKey = () => {
-    const globalKey = localStorage.getItem('api_global_active_id') 
-                      ? JSON.parse(localStorage.getItem('api_global_profiles') || '[]')
-                        .find((p: any) => p.id === localStorage.getItem('api_global_active_id'))?.kieKey 
-                      : null;
-    const oldKey = localStorage.getItem('kie_api_key');
-    let aiKey = globalKey || oldKey;
-    
-    if (!aiKey) {
-        try {
-            const arr = JSON.parse(localStorage.getItem('kie_api_keys') || '[]');
-            if(arr.length > 0) aiKey = arr[0].key;
-        } catch(e) {}
-    }
-    return aiKey;
-  };
+  const getKieKey = () => getActiveKieKey();
 
   const getDropboxCreds = () => {
-    try {
-      const profiles = JSON.parse(localStorage.getItem('api_global_profiles') || '[]');
-      const activeId = localStorage.getItem('api_global_active_id');
-      const p = profiles.find((x: any) => x.id === activeId) || profiles[0];
-      if (p) return { accessToken: p.dropboxKey || '', refreshToken: p.dropboxRefreshToken || '', appKey: p.dropboxAppKey || '', appSecret: p.dropboxAppSecret || '' };
-    } catch(e) {}
-    return { accessToken: '', refreshToken: '', appKey: '', appSecret: '' };
+    const creds = getActiveDropboxCreds();
+    return creds;
   };
 
 
@@ -628,41 +577,62 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
   };
 
   const callOpenRouter = async (messages: any[], model: string = textModel) => {
-    const candidates = getOpenRouterKeyCandidates();
+    const candidates = await getOpenRouterKeyCandidates();
     if (candidates.length === 0) throw new Error('กรุณาตั้งค่า OpenRouter API Key ในหน้าตั้งค่าระบบ');
 
+    // ถ้า paid model ไม่ได้ → ลอง free models อัตโนมัติ
+    const modelsToTry = [model, ...FREE_FALLBACK_MODELS.filter(m => m !== model)];
     let lastError = '';
-    for (const candidate of candidates) {
-      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${candidate.key}`
-        },
-        body: JSON.stringify({
-          model,
-          messages
-        })
-      });
-      const data = await res.json();
-      if (res.ok && !data.error) {
-        return data.choices[0].message.content;
-      }
 
-      const message = data.error?.message || `OpenRouter error ${res.status}`;
-      lastError = `${candidate.label}: ${message}`;
-      if (/insufficient credits|more credits|credits|can only afford/i.test(message)) {
-        console.warn(`[AIPage] ${candidate.label} credit/limit error, trying next OpenRouter key`);
-        continue;
+    for (const candidate of candidates) {
+      for (const tryModel of modelsToTry) {
+        try {
+          const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${candidate.key}`,
+              'HTTP-Referer': window.location.origin,
+              'X-Title': 'Bulk Video Creator - AI Page Post',
+            },
+            body: JSON.stringify({ model: tryModel, messages })
+          });
+          const data = await res.json();
+          if (res.ok && !data.error) {
+            return data.choices[0].message.content;
+          }
+
+          const message = data.error?.message || `OpenRouter error ${res.status}`;
+          lastError = `${candidate.label}: ${message}`;
+
+          if (/insufficient credits|more credits|credits|can only afford/i.test(message)) {
+            if (tryModel !== modelsToTry[modelsToTry.length - 1]) {
+              console.warn(`[AIPage] ${candidate.label} + ${tryModel} credits ไม่พอ → ลอง free model...`);
+              continue; // try next model
+            }
+            console.warn(`[AIPage] ${candidate.label} ใช้ไม่ได้กับทุก model → ลอง key ถัดไป`);
+            break; // try next key
+          }
+
+          if (/not a valid model/i.test(message)) {
+            console.warn(`[AIPage] Model ${tryModel} ไม่มีแล้ว → ลอง model ถัดไป`);
+            continue;
+          }
+
+          throw new Error(lastError);
+        } catch (fetchErr: any) {
+          if (fetchErr.message === lastError) throw fetchErr;
+          lastError = `${candidate.label}: ${fetchErr.message || 'Network error'}`;
+          break;
+        }
       }
-      throw new Error(lastError);
     }
 
     throw new Error(lastError ? `ลอง OpenRouter key แล้ว ${candidates.length} ตัว แต่ยังไม่ผ่าน: ${lastError}` : 'OpenRouter API Error');
   };
 
   const handleAnalyzePrompt = async () => {
-    const apiKey = getOpenRouterKey();
+    const apiKey = await getOpenRouterKey();
     if (!apiKey) return alert('กรุณาตั้งค่า OpenRouter API Key ในเมนูตั้งค่า');
     if (folderImages.length === 0) return alert('กรุณา Scan รูปภาพก่อน');
     setIsScanningTemplate(true);
@@ -728,7 +698,7 @@ Return the result as a raw JSON string like this (no markdown blocks):
   };
 
   const handleAnalyzeOCR = async () => {
-    const apiKey = getOpenRouterKey();
+    const apiKey = await getOpenRouterKey();
     if (!apiKey) return alert('กรุณาตั้งค่า OpenRouter API Key');
     if (folderImages.length === 0) return alert('กรุณา Scan รูปภาพก่อน');
     setIsScanningTemplate(true);
@@ -1907,10 +1877,10 @@ Return ONLY valid JSON format.`;
 
   const selectedBulkCount = bulkItems.filter(b => b.isSelected).length;
 
-  const attachedPostStyles = writingStyles.filter(s => s.name.trim() === 'AI Trendtech');
-  const commentPostStyles = writingStyles.filter(s => s.name.trim() === 'โพสเพจAI');
-  const defaultAttachedPostStyleId = attachedPostStyles[0]?.id || '';
-  const defaultCommentPostStyleId = commentPostStyles[0]?.id || '';
+  const attachedPostStyles = writingStyles;
+  const commentPostStyles = writingStyles;
+  const defaultAttachedPostStyleId = writingStyles.find(s => s.name.trim() === 'AI Trendtech')?.id || writingStyles[0]?.id || '';
+  const defaultCommentPostStyleId = writingStyles.find(s => s.name.trim() === 'โพสเพจAI')?.id || writingStyles[0]?.id || '';
 
   useEffect(() => {
     if (defaultAttachedPostStyleId && !selectedStyleId) {
@@ -3337,6 +3307,8 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                   <option value="google/gemini-2.5-flash">Gemini 2.5 Flash</option>
                   <option value="google/gemini-2.5-pro">Gemini 2.5 Pro</option>
                   <option value="openai/gpt-4o">GPT-4o</option>
+                  <option value="openai/gpt-oss-20b:free">🆓 GPT OSS 20B (ฟรี!)</option>
+                  <option value="google/gemma-3-27b-it:free">🆓 Gemma 3 27B (ฟรี!)</option>
                 </select>
               </div>
               <button
@@ -3558,6 +3530,8 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                           <option value="google/gemini-2.5-flash">Gemini 2.5 Flash</option>
                           <option value="google/gemini-2.5-pro">Gemini 2.5 Pro</option>
                           <option value="openai/gpt-4o">GPT-4o</option>
+                          <option value="openai/gpt-oss-20b:free">🆓 GPT OSS 20B (ฟรี!)</option>
+                          <option value="google/gemma-3-27b-it:free">🆓 Gemma 3 27B (ฟรี!)</option>
                         </select>
                       </div>
                       <div>

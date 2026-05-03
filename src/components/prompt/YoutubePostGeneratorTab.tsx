@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { globalTaskStore } from '../../hooks/useBackgroundTasks';
+import { getActiveOpenRouterKey } from '../../hooks/useApiSettings';
 const DEFAULT_AI_MODEL = "google/gemini-2.5-flash";
 
 const BASE_SYSTEM_PROMPT = `You are an expert Content Creator and Viral Copywriter.
@@ -396,22 +397,7 @@ export function YoutubePostGeneratorTab() {
     screenshotUrls: string[];
   } | null>(null);
 
-  const getOpenRouterKey = () => {
-    const globalKey = localStorage.getItem('api_global_active_id') 
-                      ? JSON.parse(localStorage.getItem('api_global_profiles') || '[]')
-                        .find((p: any) => p.id === localStorage.getItem('api_global_active_id'))?.openRouterKey 
-                      : null;
-    const oldKey = localStorage.getItem('openrouter_key');
-    let aiKey = globalKey || oldKey;
-    
-    if (!aiKey) {
-        try {
-            const arr = JSON.parse(localStorage.getItem('openrouter_keys') || '[]');
-            if(arr.length > 0) aiKey = arr[0].key;
-        } catch(e) {}
-    }
-    return aiKey;
-  };
+  const getOpenRouterKey = () => getActiveOpenRouterKey();
 
   const handleGenerate = async () => {
     const urls = youtubeUrls.split('\n').map(u => u.trim()).filter(u => u.length > 0);

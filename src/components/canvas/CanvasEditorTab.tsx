@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { getActiveOpenRouterKey } from '../../hooks/useApiSettings';
 import { NumInput } from '../ui/NumInput';
 
 interface TextSegment { text: string; color: string; fontSize: number; bold: boolean; }
@@ -92,21 +93,7 @@ export function CanvasEditorTab() {
     } catch(e) {}
   };
 
-  // === OpenRouter Key ===
-  const getOpenRouterKey = () => {
-    let key = '';
-    try {
-      const profiles = JSON.parse(localStorage.getItem('api_global_profiles') || '[]');
-      const activeId = localStorage.getItem('api_global_active_id');
-      const p = profiles.find((x: any) => x.id === activeId) || profiles[0];
-      if (p && p.openRouterKey) key = p.openRouterKey;
-      if (!key) key = localStorage.getItem('openrouter_key') || '';
-      console.log('[API Key check] profiles count:', profiles.length, 'activeId:', activeId, 'found key length:', key.length);
-    } catch(e) { 
-      key = localStorage.getItem('openrouter_key') || ''; 
-    }
-    return key.trim();
-  };
+  const getOpenRouterKey = () => getActiveOpenRouterKey();
 
   const urlToBase64 = async (url: string): Promise<string> => {
     const res = await fetch(url);

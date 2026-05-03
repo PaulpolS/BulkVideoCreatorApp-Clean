@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { getActiveOpenRouterKey } from '../../hooks/useApiSettings';
 import { NumInput } from '../ui/NumInput';
 
 import { Option, SETTINGS, ACTIONS, REACTIONS, CAMERA_STYLES, AESTHETICS, HOOKS } from './promptData';
@@ -463,25 +464,7 @@ ${topicList}
     setAnalysisResult(null);
   };
 
-  const getOpenRouterKey = () => {
-    // Check multiple places for the key
-    const globalKey = localStorage.getItem('api_global_active_id') 
-                      ? JSON.parse(localStorage.getItem('api_global_profiles') || '[]')
-                        .find((p: any) => p.id === localStorage.getItem('api_global_active_id'))?.openRouterKey 
-                      : null;
-    const oldKey = localStorage.getItem('openrouter_key');
-    let aiKey = globalKey || oldKey;
-    
-    // Also check openrouter_keys array from old AI Generator
-    if (!aiKey) {
-        try {
-            const arr = JSON.parse(localStorage.getItem('openrouter_keys') || '[]');
-            if(arr.length > 0) aiKey = arr[0].key;
-        }catch(e) {}
-    }
-    
-    return aiKey;
-  };
+  const getOpenRouterKey = () => getActiveOpenRouterKey();
 
   const extractFrameAndAnalyze = async () => {
     if (!videoRef.current || !videoFile) return;

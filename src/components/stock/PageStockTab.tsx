@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import workflow from '../../../[All Pages] ทำรูปStock ทุกเพจ.json';
 import { globalTaskStore } from '../../hooks/useBackgroundTasks';
+import { getActiveOpenRouterKey, getActiveOpenRouterKeyAsync, getOpenRouterKeyCandidates } from '../../hooks/useApiSettings';
 
 interface PageConfig {
   name: string;
@@ -1553,55 +1554,7 @@ export function PageStockTab() {
     [canvasImages],
   );
 
-  const getStoredOpenRouterKeyCandidates = () => {
-    const candidates: { key: string; label: string }[] = [];
-    const addCandidate = (key: unknown, label: string) => {
-      const clean = String(key || '').trim();
-      if (!clean || candidates.some(item => item.key === clean)) return;
-      candidates.push({ key: clean, label });
-    };
-
-    addCandidate(activeProfile?.openRouterKey, `Profile: ${activeProfile?.name || 'active'}`);
-
-    try {
-      const savedProfiles = JSON.parse(localStorage.getItem('api_global_profiles') || '[]');
-      const activeId = settings.profileId || localStorage.getItem('api_global_active_id') || '';
-      const savedProfile = Array.isArray(savedProfiles)
-        ? savedProfiles.find((profile: ApiProfile) => profile.id === activeId) || savedProfiles[0]
-        : undefined;
-      addCandidate(savedProfile?.openRouterKey, `Saved profile: ${savedProfile?.name || 'active'}`);
-      if (Array.isArray(savedProfiles)) {
-        savedProfiles.forEach((profile: ApiProfile, index: number) => {
-          addCandidate(profile?.openRouterKey, `Saved profile ${index + 1}: ${profile?.name || profile?.id || 'unnamed'}`);
-        });
-      }
-    } catch {}
-
-    profiles.forEach((profile, index) => {
-      addCandidate(profile?.openRouterKey, `Loaded profile ${index + 1}: ${profile?.name || profile?.id || 'unnamed'}`);
-    });
-
-    addCandidate(localStorage.getItem('openrouter_key'), 'Legacy openrouter_key');
-
-    try {
-      const keys = JSON.parse(localStorage.getItem('openrouter_keys') || '[]');
-      if (Array.isArray(keys)) {
-        const active = keys.find((key: any) => key.isActive);
-        addCandidate(active?.key, `OpenRouter key: ${active?.name || 'active'}`);
-        keys.forEach((item: any, index: number) => {
-          addCandidate(item?.key, `OpenRouter key ${index + 1}: ${item?.name || 'saved'}`);
-        });
-      }
-    } catch {}
-
-    return candidates;
-  };
-
-  const getStoredOpenRouterKey = () => {
-    return getStoredOpenRouterKeyCandidates()[0]?.key || '';
-  };
-
-  const openRouterKey = getStoredOpenRouterKey();
+  const openRouterKey = getActiveOpenRouterKey();
   const hasOpenRouterKey = Boolean(openRouterKey);
 
   const loadProfiles = () => {
@@ -1798,7 +1751,7 @@ export function PageStockTab() {
   };
 
   const writePost = async (prompt: string) => {
-    const apiKey = getStoredOpenRouterKey();
+    const apiKey = await getActiveOpenRouterKeyAsync();
     if (!apiKey) throw new Error('ไม่พบ OpenRouter API Key');
     const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
@@ -1835,7 +1788,7 @@ export function PageStockTab() {
   };
 
   const askOpenRouter = async (prompt: string, signal?: AbortSignal, maxTokens = 6000, modelOverride?: string) => {
-    const apiKeys = getStoredOpenRouterKeyCandidates();
+    const apiKeys = await getOpenRouterKeyCandidates();
     if (apiKeys.length === 0) throw new Error('ไม่พบ OpenRouter API Key');
     const tokenAttempts = Array.from(new Set([
       maxTokens,
@@ -2011,7 +1964,7 @@ export function PageStockTab() {
   };
 
   const startAnalyzeManualCsv = () => {
-    if (!manualCsvText.trim() || !getStoredOpenRouterKey()) return;
+    if (!manualCsvText.trim() || !hasOpenRouterKey) return;
     const rows = parseCsvTable(manualCsvText);
     const csvPromptExamples = extractPromptExamplesFromRows(rows);
     const trendRows = manualTrendCsvText.trim() ? parseCsvTable(manualTrendCsvText) : [];
@@ -2040,7 +1993,8 @@ export function PageStockTab() {
       const promptAnalyses: any[] = [];
       const trendAnalyses: any[] = [];
       ctx.log(`3/6 Deep Brain Training: แบ่ง CSV Prompt ${rowChunks.length} ก้อน และ CSV Trend ${trendChunks.length} ก้อน`);
-      ctx.log(`OpenRouter keys ที่จะลองใช้: ${getStoredOpenRouterKeyCandidates().map(item => item.label).join(' → ') || 'ไม่พบ key'}`);
+      const currentCandidates = await getOpenRouterKeyCandidates();
+      ctx.log(`OpenRouter keys ที่จะลองใช้: ${currentCandidates.map(item => item.label).join(' → ') || 'ไม่พบ key'}`);
 
       try {
         for (let index = 0; index < rowChunks.length; index++) {
@@ -2248,7 +2202,7 @@ ${synthesisInput}
   };
 
   const startGenerateManualTopics = () => {
-    if (!manualBrain || !getStoredOpenRouterKey()) return;
+    if (!manualBrain || !hasOpenRouterKey) return;
     const total = Number(manualTopicCount);
     if (!Number.isFinite(total) || total <= 0) return;
     const nextTaskId = `manual-topics-${Date.now()}`;
@@ -2359,7 +2313,7 @@ ${recentTopics.join('\n') || '- ยังไม่มี'}
 
   const startGenerateManualPrompts = () => {
     const topicsForPrompt = editableManualTopics;
-    if (!manualBrain || topicsForPrompt.length === 0 || !getStoredOpenRouterKey()) return;
+    if (!manualBrain || topicsForPrompt.length === 0 || !hasOpenRouterKey) return;
     const nextTaskId = `manual-prompts-${Date.now()}`;
     const taskId = globalTaskStore.enqueueTask({
       id: nextTaskId,
@@ -2977,7 +2931,7 @@ ${NO_AI_PREAMBLE_RULE}
     if (uniqueTopics.length === 0 || clickbaitRunning) return;
     setClickbaitRunning(true);
     const generated: ClickbaitPostItem[] = [];
-    const hasOpenRouter = getStoredOpenRouterKeyCandidates().length > 0;
+    const hasOpenRouter = hasOpenRouterKey;
 
     for (const topic of uniqueTopics) {
       try {
@@ -3139,7 +3093,7 @@ ${NO_AI_PREAMBLE_RULE}
     if (csvCbRows.length === 0 || csvCbRunning) return;
     setCsvCbRunning(true);
     const generated: ClickbaitPostItem[] = [];
-    const hasKey = getStoredOpenRouterKeyCandidates().length > 0;
+    const hasKey = hasOpenRouterKey;
     if (!hasKey) {
       setCsvCbProgress('❌ ไม่พบ OpenRouter API Key');
       setCsvCbRunning(false);
@@ -4751,7 +4705,7 @@ ${NO_AI_PREAMBLE_RULE}
                 <button disabled={clickbaitInput.trim().length === 0} onClick={() => setClickbaitInput('')}>ล้างหัวข้อ</button>
                 <button className="page-stock-danger" disabled={clickbaitPosts.length === 0} onClick={() => setClickbaitPosts([])}>ล้างผลลัพธ์</button>
               </div>
-              {!getStoredOpenRouterKeyCandidates().length && (
+              {!hasOpenRouterKey && (
                 <p>ยังไม่พบ OpenRouter key ระบบจะใช้ template local ให้ก่อน พอใส่ key แล้วกดสร้างใหม่จะได้งานที่หลากหลายขึ้น</p>
               )}
             </div>
@@ -4866,7 +4820,7 @@ ${NO_AI_PREAMBLE_RULE}
                 <button disabled={csvCbRows.length === 0 || csvCbRunning} onClick={() => { setCsvCbFile(''); setCsvCbFileName(''); setCsvCbRows([]); setCsvCbProgress(''); }}>ล้าง CSV</button>
                 <button className="page-stock-danger" disabled={csvCbResults.length === 0} onClick={() => setCsvCbResults([])}>ล้างผลลัพธ์</button>
               </div>
-              {!getStoredOpenRouterKeyCandidates().length && (
+              {!hasOpenRouterKey && (
                 <p>⚠️ ยังไม่พบ OpenRouter key กรุณาใส่ key ในหน้าตั้งค่าระบบก่อน</p>
               )}
             </div>

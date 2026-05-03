@@ -3,6 +3,7 @@ import { useCloneGallery, CloneStyle } from '../../hooks/useCloneGallery';
 import { useHeadlinePacks, HeadlinePack } from '../../hooks/useHeadlinePacks';
 import { useWritingStyles, WritingStyle } from '../../hooks/useWritingStyles';
 import { globalTaskStore } from '../../hooks/useBackgroundTasks';
+import { getActiveOpenRouterKey, getActiveKieKey, getActiveApifyKey as getApifyKeyFromSettings } from '../../hooks/useApiSettings';
 
 interface SavedBrain {
   id: string;
@@ -612,39 +613,11 @@ export function CloneTab() {
   }, [s4SelectedStyleId]);
 
   const getApiKeys = () => {
-    let kieApiKey = '';
-    try {
-      const profiles = JSON.parse(localStorage.getItem('api_key_profiles') || '[]');
-      const targetId = localStorage.getItem('selected_api_key_id');
-      kieApiKey = profiles.find((p: any) => p.id === targetId)?.key || profiles[0]?.key || '';
-    } catch(e) {}
-    let openRouterKey = '';
-    try {
-      const keys = JSON.parse(localStorage.getItem('openrouter_keys') || '[]');
-      openRouterKey = keys.find((k: any) => k.isActive)?.key || keys[0]?.key || localStorage.getItem('openrouter_key') || '';
-    } catch(e) {}
-    return { kieApiKey, openRouterKey };
+    return { kieApiKey: getActiveKieKey(), openRouterKey: getActiveOpenRouterKey() };
   };
 
   const getActiveApifyKey = async (): Promise<string> => {
-    try {
-      const res = await fetch('/api/get-app-data?key=api_profiles');
-      const profiles = await res.json();
-      if (Array.isArray(profiles) && profiles.length > 0) {
-        const activeId = localStorage.getItem('api_global_active_id') || profiles[0].id;
-        const activeProfile = profiles.find((p: any) => p.id === activeId) || profiles[0];
-        return activeProfile.apifyKey || '';
-      }
-    } catch(e) {
-      console.error('Failed to load active Apify key', e);
-    }
-    try {
-      const profiles = JSON.parse(localStorage.getItem('api_global_profiles') || '[]');
-      const activeId = localStorage.getItem('api_global_active_id') || profiles[0]?.id;
-      const activeProfile = profiles.find((p: any) => p.id === activeId) || profiles[0];
-      return activeProfile?.apifyKey || '';
-    } catch(e) {}
-    return '';
+    return getApifyKeyFromSettings();
   };
 
   const saveShortAsset = async (base64Data: string, prefix: string) => {

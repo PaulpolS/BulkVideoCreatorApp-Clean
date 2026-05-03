@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FilmIcon, SparklesIcon, CogIcon, CheckCircleIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
+import { getActiveOpenRouterKey } from '../../hooks/useApiSettings';
 
 interface FileSettings {
     fastCuts: boolean;
@@ -77,20 +78,7 @@ export default function AutoVideoEditorTab() {
     }
   };
 
-  const getOpenRouterKey = () => {
-    const globalKey = localStorage.getItem('api_global_active_id') 
-                      ? JSON.parse(localStorage.getItem('api_global_profiles') || '[]')
-                        .find((p: any) => p.id === localStorage.getItem('api_global_active_id'))?.openRouterKey 
-                      : null;
-    let aiKey = globalKey || localStorage.getItem('openrouter_key');
-    if (!aiKey) {
-        try {
-            const arr = JSON.parse(localStorage.getItem('openrouter_keys') || '[]');
-            if(arr.length > 0) aiKey = arr[0].key;
-        }catch(e) {}
-    }
-    return aiKey;
-  };
+  const getOpenRouterKey = () => getActiveOpenRouterKey();
 
   const runAIGrouping = async () => {
     if (files.length === 0) return alert("ไม่มีไฟล์วิดีโอในโฟลเดอร์ videofootage");
