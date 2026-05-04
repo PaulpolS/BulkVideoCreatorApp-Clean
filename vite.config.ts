@@ -790,16 +790,130 @@ const fileSaverPlugin = (): Plugin => ({
       if (req.method !== 'POST') { res.statusCode = 405; res.end(''); return; }
       res.setHeader('Content-Type', 'application/json');
       const { execSync } = require('child_process');
-      try {
-        const result = execSync(
-          `osascript -e 'POSIX path of (choose folder with prompt "เลือกโฟลเดอร์สำหรับเก็บข้อมูล AIPage")'`,
-          { encoding: 'utf-8', timeout: 60000 }
-        ).trim().replace(/\/$/, '');
-        res.end(JSON.stringify({ success: true, dir: result }));
-      } catch (e: any) {
-        // User cancelled the dialog
-        res.end(JSON.stringify({ success: false, cancelled: true }));
-      }
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', () => {
+        let prompt = 'เลือกโฟลเดอร์';
+        try { const parsed = JSON.parse(body); if (parsed.prompt) prompt = parsed.prompt; } catch {}
+        const safePrompt = prompt.replace(/'/g, '’');
+        try {
+          const result = execSync(
+            `osascript -e 'POSIX path of (choose folder with prompt "${safePrompt}")'`,
+            { encoding: 'utf-8', timeout: 60000 }
+          ).trim().replace(/\/$/, '');
+          res.end(JSON.stringify({ success: true, dir: result }));
+        } catch {
+          res.end(JSON.stringify({ success: false, cancelled: true }));
+        }
+      });
+    });
+
+    // === Pick File via macOS native dialog ===
+    server.middlewares.use('/api/pick-file', (req, res) => {
+      if (req.method !== 'POST') { res.statusCode = 405; res.end(''); return; }
+      res.setHeader('Content-Type', 'application/json');
+      const { execSync } = require('child_process');
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', () => {
+        let prompt = 'เลือกไฟล์';
+        try { const parsed = JSON.parse(body); if (parsed.prompt) prompt = parsed.prompt; } catch {}
+        const safePrompt = prompt.replace(/'/g, '’');
+        try {
+          const result = execSync(
+            `osascript -e 'POSIX path of (choose file with prompt "${safePrompt}")'`,
+            { encoding: 'utf-8', timeout: 60000 }
+          ).trim();
+          res.end(JSON.stringify({ success: true, file: result }));
+        } catch {
+          res.end(JSON.stringify({ success: false, cancelled: true }));
+        }
+      });
+    });
+
+    // === List video files in a folder ===
+    server.middlewares.use('/api/list-folder-videos', (req, res) => {
+      if (req.method !== 'POST') { res.statusCode = 405; res.end(''); return; }
+      res.setHeader('Content-Type', 'application/json');
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', () => {
+        try {
+          const { folder } = JSON.parse(body);
+          if (!folder) { res.end(JSON.stringify({ files: [] })); return; }
+          const VIDEO_EXTS = ['.mp4', '.mov', '.avi', '.mkv', '.m4v', '.webm'];
+          const allFiles = fs.readdirSync(folder);
+          const videoFiles = allFiles.filter(f => {
+            const ext = path.extname(f).toLowerCase();
+            return VIDEO_EXTS.includes(ext);
+          });
+          res.end(JSON.stringify({ files: videoFiles }));
+        } catch (e: any) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: e.message, files: [] }));
+        }
+      });
+    });
+
+    // === Run bash script directly via SSE ===
+    server.middlewares.use('/api/run-bash-script', (req, res) => {
+      if (req.method !== 'POST') { res.statusCode = 405; res.end(''); return; }
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      const { spawn } = require('child_process');
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', () => {
+        let script = '';
+        try { const parsed = JSON.parse(body); script = parsed.script || ''; } catch {}
+        if (!script) {
+          res.write('data: ' + JSON.stringify({ type: 'error', text: 'No script provided' }) + '\n\n');
+          res.end();
+          return;
+        }
+        const tmpFile = `/tmp/singleclip_render_${Date.now()}.sh`;
+        try { fs.writeFileSync(tmpFile, script, { mode: 0o755 }); } catch (e: any) {
+          res.write('data: ' + JSON.stringify({ type: 'error', text: 'Failed to write temp file: ' + e.message }) + '\n\n');
+          res.end();
+          return;
+        }
+        const env = { ...process.env, PATH: `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${process.env.PATH || ''}` };
+        const proc = spawn('bash', [tmpFile], { stdio: ['ignore', 'pipe', 'pipe'], env });
+        const cleanup = () => { try { fs.unlinkSync(tmpFile); } catch {} };
+        let finished = false;
+        const send = (obj: object) => {
+          if (!res.writableEnded) { try { res.write('data: ' + JSON.stringify(obj) + '\n\n'); } catch {} }
+        };
+        proc.stdout.on('data', (data: Buffer) => {
+          const lines = data.toString().split('\n');
+          for (const line of lines) { if (line.trim()) send({ type: 'log', text: line }); }
+        });
+        proc.stderr.on('data', (data: Buffer) => {
+          const lines = data.toString().split('\n');
+          for (const line of lines) { if (line.trim()) send({ type: 'log', text: line }); }
+        });
+        proc.on('close', (code: number | null) => {
+          if (finished) return;
+          finished = true;
+          cleanup();
+          if (code === 0) {
+            send({ type: 'done' });
+          } else {
+            send({ type: 'error', text: code != null ? `ffmpeg exited (code ${code}) — ดู log ด้านบน` : 'Process stopped' });
+          }
+          if (!res.writableEnded) res.end();
+        });
+        proc.on('error', (err: Error) => {
+          if (finished) return;
+          finished = true;
+          cleanup();
+          send({ type: 'error', text: err.message });
+          if (!res.writableEnded) res.end();
+        });
+        // Use res.on('close') — fires only when the client truly disconnects from SSE
+        res.on('close', () => { if (!finished) { proc.kill(); cleanup(); } });
+      });
     });
 
     // === Clear Cache: remove orphaned images not referenced in results ===

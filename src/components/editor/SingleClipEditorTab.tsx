@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { NumInput } from '../ui/NumInput';
 import { Card } from '../ui/Card';
 import { TEMPLATES, buildBashScript, EffectConfig, SingleClipConfig } from '../../utils/ffmpegBuilder';
@@ -52,10 +52,22 @@ export const SingleClipEditorTab: React.FC = () => {
     return ef;
   });
 
+  // Run-directly state
+  const [isRunning, setIsRunning] = useState(false);
+  const [runLog, setRunLog] = useState<string[]>([]);
+  const [runStatus, setRunStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const abortRef = useRef<(() => void) | null>(null);
+  const logEndRef = useRef<HTMLDivElement | null>(null);
+
   // Sync nCuts * cutDur with s2Total
   useEffect(() => {
     setS2Total(parseFloat((nCuts * cutDur).toFixed(2)));
   }, [nCuts, cutDur]);
+
+  // Auto-scroll log to bottom
+  useEffect(() => {
+    if (logEndRef.current) logEndRef.current.scrollIntoView({ behavior: 'smooth' });
+  }, [runLog]);
 
   const handleTemplateChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const key = e.target.value;
@@ -102,9 +114,14 @@ export const SingleClipEditorTab: React.FC = () => {
     return cuts;
   };
 
+  const getCutTimelineDuration = () => {
+    const sceneEnd = Number.isFinite(s1End) && s1End > 0 ? s1End : 30;
+    return Math.max(sceneEnd, cutDur, 0.1);
+  };
+
   const handleGenerateScript = () => {
     if (!clipPath || !outputPath) return alert("Please specify clip path and output path");
-    const cuts = calculateCuts(); // assume 30s source for jump calculation
+    const cuts = calculateCuts(getCutTimelineDuration());
 
     const config: SingleClipConfig = {
       clipPath,
@@ -135,6 +152,138 @@ export const SingleClipEditorTab: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const handleRun = async () => {
+    if (!clipPath || !outputPath) return alert("กรุณาเลือกโฟลเดอร์ต้นฉบับและโฟลเดอร์ Output ก่อน");
+
+    // List video files in source folder
+    let videoFiles: string[] = [];
+    try {
+      const res = await fetch('/api/list-folder-videos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder: clipPath }),
+      });
+      const data = await res.json();
+      videoFiles = data.files || [];
+    } catch (e) {
+      return alert("เกิดข้อผิดพลาดในการอ่านไฟล์ในโฟลเดอร์");
+    }
+
+    if (videoFiles.length === 0) {
+      return alert("ไม่พบไฟล์วิดีโอในโฟลเดอร์ที่เลือก");
+    }
+
+    // Build combined bash script for all files
+    const scriptParts: string[] = [
+      `#!/bin/bash`,
+      `set -euo pipefail`,
+      `export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"`,
+      `mkdir -p "${outputPath}"`,
+      `echo "=== เริ่มประมวลผล ${videoFiles.length} ไฟล์ ==="`,
+    ];
+
+    for (let i = 0; i < videoFiles.length; i++) {
+      const filename = videoFiles[i];
+      const basename = filename.replace(/\.[^/.]+$/, ''); // strip extension
+      const filePath = clipPath + '/' + filename;
+      const outFilePath = outputPath + '/' + basename + '_output.mp4';
+
+      const cuts = calculateCuts(getCutTimelineDuration());
+      const config: SingleClipConfig = {
+        clipPath: filePath,
+        outputPath: outFilePath,
+        scene1Start: s1Start,
+        scene1End: s1End,
+        cutsPreview: cuts,
+        bgmPath,
+        bgmVolStart: bgmVol,
+        bgmRampAt: bgmRamp,
+        scEffects,
+        scEffectsS2,
+        transType,
+        transDur,
+      };
+
+      const individualScript = buildBashScript(config)
+        .replace(/^#!.*\n/, '')         // strip shebang
+        .replace(/^#.*\n/gm, '');       // strip comment lines
+
+      scriptParts.push(individualScript.trim());
+      scriptParts.push(`echo "--- เสร็จไฟล์ที่ ${i + 1}: ${filename} ---"`);
+    }
+
+    scriptParts.push(`echo "=== ทำเสร็จทั้งหมด! ==="`);
+    const combinedScript = scriptParts.join('\n');
+
+    // Start running
+    setIsRunning(true);
+    setRunLog([]);
+    setRunStatus('running');
+
+    let aborted = false;
+    const controller = new AbortController();
+    abortRef.current = () => {
+      aborted = true;
+      controller.abort();
+    };
+
+    try {
+      const response = await fetch('/api/run-bash-script', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ script: combinedScript }),
+        signal: controller.signal,
+      });
+
+      if (!response.body) throw new Error('No response body');
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const payload = JSON.parse(line.slice(6));
+              if (payload.type === 'log') {
+                setRunLog(prev => [...prev.slice(-99), payload.text]);
+              } else if (payload.type === 'done') {
+                setRunStatus('done');
+                setIsRunning(false);
+              } else if (payload.type === 'error') {
+                setRunLog(prev => [...prev.slice(-99), '[ERROR] ' + payload.text]);
+                setRunStatus('error');
+                setIsRunning(false);
+              }
+            } catch {}
+          }
+        }
+      }
+    } catch (e: any) {
+      if (!aborted) {
+        setRunLog(prev => [...prev, '[ERROR] ' + e.message]);
+        setRunStatus('error');
+      } else {
+        setRunLog(prev => [...prev, '[ หยุดการทำงาน ]']);
+        setRunStatus('idle');
+      }
+      setIsRunning(false);
+    }
+  };
+
+  const handleStop = () => {
+    if (abortRef.current) {
+      abortRef.current();
+      abortRef.current = null;
+    }
+  };
+
   const toggleEffect = (scene: 1 | 2, key: string) => {
     if (scene === 1) {
       setScEffects(prev => ({ ...prev, [key]: { ...prev[key], var: !prev[key].var } }));
@@ -149,12 +298,36 @@ export const SingleClipEditorTab: React.FC = () => {
         <h1 className="text-2xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
           🎬 โหมดตัดต่อคลิปเดียว (Single Clip Editor)
         </h1>
-        <button 
-          onClick={handleGenerateScript}
-          className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg shadow transition-colors"
-        >
-          ▶ สร้างสคริปต์ .command
-        </button>
+        <div className="flex gap-2 items-center">
+          <button
+            onClick={handleGenerateScript}
+            className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg shadow transition-colors text-sm"
+          >
+            💾 สร้างสคริปต์ .command
+          </button>
+          {runStatus === 'done' ? (
+            <button
+              onClick={() => { setRunStatus('idle'); setRunLog([]); }}
+              className="bg-green-600 text-white font-bold py-2 px-6 rounded-lg shadow text-sm"
+            >
+              ✅ เสร็จแล้ว — รันอีกครั้ง?
+            </button>
+          ) : isRunning ? (
+            <button
+              onClick={handleStop}
+              className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded-lg shadow transition-colors"
+            >
+              ⛔ หยุด
+            </button>
+          ) : (
+            <button
+              onClick={handleRun}
+              className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg shadow transition-colors"
+            >
+              ▶ ตัดต่อเลย!
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -164,12 +337,40 @@ export const SingleClipEditorTab: React.FC = () => {
             <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700 font-bold text-lg">📂 เลือกไฟล์ต้นฉบับ</div>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm mb-1">Source Video (Path แบบเต็ม)</label>
-                <input type="text" value={clipPath} onChange={e => setClipPath(e.target.value)} className="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700 font-mono text-sm" />
+                <label className="block text-sm mb-2">โฟลเดอร์ไฟล์ต้นฉบับ <span className="text-xs text-gray-500">(จะทำทุกไฟล์วิดีโอในโฟลเดอร์)</span></label>
+                <div className="flex gap-2 items-center">
+                  <button
+                    onClick={async () => {
+                      const res = await fetch('/api/pick-folder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: 'เลือกโฟลเดอร์ไฟล์วิดีโอต้นฉบับ' }) });
+                      const data = await res.json();
+                      if (data.success) setClipPath(data.dir);
+                    }}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-lg transition-all whitespace-nowrap"
+                  >
+                    📁 เลือกโฟลเดอร์
+                  </button>
+                  <span className="font-mono text-xs text-gray-400 truncate flex-1 bg-gray-800/60 rounded px-2 py-2 border border-gray-700">
+                    {clipPath || 'ยังไม่ได้เลือก...'}
+                  </span>
+                </div>
               </div>
               <div>
-                <label className="block text-sm mb-1">Output Video (Path แบบเต็ม)</label>
-                <input type="text" value={outputPath} onChange={e => setOutputPath(e.target.value)} className="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700 font-mono text-sm" />
+                <label className="block text-sm mb-2">โฟลเดอร์ Output</label>
+                <div className="flex gap-2 items-center">
+                  <button
+                    onClick={async () => {
+                      const res = await fetch('/api/pick-folder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: 'เลือกโฟลเดอร์สำหรับบันทึกไฟล์ Output' }) });
+                      const data = await res.json();
+                      if (data.success) setOutputPath(data.dir);
+                    }}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-lg transition-all whitespace-nowrap"
+                  >
+                    📁 เลือกโฟลเดอร์
+                  </button>
+                  <span className="font-mono text-xs text-gray-400 truncate flex-1 bg-gray-800/60 rounded px-2 py-2 border border-gray-700">
+                    {outputPath || 'ยังไม่ได้เลือก...'}
+                  </span>
+                </div>
               </div>
             </div>
           </Card>
@@ -206,34 +407,40 @@ export const SingleClipEditorTab: React.FC = () => {
             <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700 font-bold text-lg">🎵 เสียงเพลง BGM</div>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm mb-1">ไฟล์เพลง</label>
+                <label className="block text-sm mb-2">ไฟล์เพลง BGM</label>
                 <div className="space-y-2">
-                  <select 
-                    value={bgmPath.startsWith(ABSOLUTE_BGM_DIR) ? bgmPath : (bgmPath ? 'custom' : '')} 
+                  <select
+                    value={bgmPath.startsWith(ABSOLUTE_BGM_DIR) ? bgmPath : (bgmPath ? 'custom' : '')}
                     onChange={e => {
-                      if (e.target.value && e.target.value !== 'custom') {
-                        setBgmPath(e.target.value);
-                      } else if (e.target.value === '') {
-                        setBgmPath('');
-                      }
-                    }} 
+                      if (e.target.value && e.target.value !== 'custom') setBgmPath(e.target.value);
+                      else if (e.target.value === '') setBgmPath('');
+                    }}
                     className="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700 font-mono text-sm"
                   >
                     <option value="">[ ไม่ใช้เพลง ]</option>
                     {BG_MUSIC_OPTIONS.map(opt => (
-                      <option key={opt} value={`${ABSOLUTE_BGM_DIR}/${opt}`}>
-                        🎵 {opt}
-                      </option>
+                      <option key={opt} value={`${ABSOLUTE_BGM_DIR}/${opt}`}>🎵 {opt}</option>
                     ))}
-                    <option value="custom">✏️ พิมพ์ Path เอง...</option>
+                    <option value="custom">📂 เลือกไฟล์จากเครื่อง...</option>
                   </select>
-                  <input 
-                    type="text" 
-                    placeholder="ป้อน Path แบบเต็มด้วยตัวเอง..." 
-                    value={bgmPath} 
-                    onChange={e => setBgmPath(e.target.value)} 
-                    className="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700 font-mono text-sm opacity-70" 
-                  />
+                  <div className="flex gap-2 items-center">
+                    <button
+                      onClick={async () => {
+                        const res = await fetch('/api/pick-file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: 'เลือกไฟล์เพลง BGM (mp3, m4a, wav, aac)' }) });
+                        const data = await res.json();
+                        if (data.success) setBgmPath(data.file);
+                      }}
+                      className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-sm font-bold rounded-lg transition-all whitespace-nowrap"
+                    >
+                      🎵 เลือกไฟล์เพลง
+                    </button>
+                    <span className="font-mono text-xs text-gray-400 truncate flex-1 bg-gray-800/60 rounded px-2 py-2 border border-gray-700">
+                      {bgmPath ? bgmPath.split('/').pop() : 'ยังไม่ได้เลือก...'}
+                    </span>
+                    {bgmPath && (
+                      <button onClick={() => setBgmPath('')} className="text-xs px-2 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-all">✕</button>
+                    )}
+                  </div>
                 </div>
               </div>
               <div className="flex gap-4">
@@ -310,11 +517,43 @@ export const SingleClipEditorTab: React.FC = () => {
           <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 text-sm text-yellow-800 dark:text-yellow-200">
             <strong>💡 คำแนะนำ:</strong><br />
             1. ตั้งค่าการตัดคลิป Effect แบบละเอียดยิบในหน้านี้ (ไม่ต้องใช้การ์ดจอแรง)<br />
-            2. พอกดปุ่ม "สร้างสคริปต์ .command" จะได้ไฟล์ไปรันบนเครื่อง Mac โลคัล<br />
-            3. ย้ายไปดับเบิ้ลคลิกไฟล์ .command บน Desktop หรือ Terminal ได้เลย FFmpeg จะจัดการทุกอย่างจนจบ!
+            2. กดปุ่ม "ตัดต่อเลย!" เพื่อรัน ffmpeg โดยตรง หรือ "สร้างสคริปต์ .command" เพื่อดาวน์โหลดไฟล์รันเอง<br />
+            3. ดับเบิ้ลคลิกไฟล์ .command บน Desktop หรือ Terminal ได้เลย FFmpeg จะจัดการทุกอย่างจนจบ!
           </div>
         </div>
       </div>
+
+      {/* Log Panel */}
+      {runLog.length > 0 && (
+        <div className="mt-6">
+          <div className="flex items-center gap-3 mb-2">
+            <span className="font-bold text-sm text-gray-300">📋 Log Output</span>
+            {runStatus === 'running' && (
+              <span className="flex items-center gap-1 text-xs text-amber-400 font-mono animate-pulse">
+                ● กำลังประมวลผล...
+              </span>
+            )}
+            {runStatus === 'done' && (
+              <span className="text-xs text-green-400 font-mono">● เสร็จเรียบร้อย</span>
+            )}
+            {runStatus === 'error' && (
+              <span className="text-xs text-red-400 font-mono">● เกิดข้อผิดพลาด</span>
+            )}
+            <button
+              onClick={() => setRunLog([])}
+              className="ml-auto text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-400 rounded transition-all"
+            >
+              ล้าง
+            </button>
+          </div>
+          <div className="bg-black/80 rounded-lg p-4 font-mono text-xs text-green-300 h-64 overflow-y-auto border border-gray-700">
+            {runLog.map((line, i) => (
+              <div key={i} className="leading-5 whitespace-pre-wrap break-all">{line}</div>
+            ))}
+            <div ref={logEndRef} />
+          </div>
+        </div>
+      )}
     </div>
   );
 };
