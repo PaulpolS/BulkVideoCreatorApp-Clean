@@ -307,11 +307,11 @@ export default function GlobalSettings() {
     setIsCheckingCredits(true);
     setCreditResult('');
     try {
-      const credits = await checkOpenRouterCredits(openRouterKey);
-      if (credits !== null) {
-        setCreditResult(`✅ เครดิตคงเหลือ: $${credits.toFixed(4)}`);
+      const info = await checkOpenRouterCredits(openRouterKey);
+      if (info.valid) {
+        setCreditResult(`✅ เครดิตคงเหลือ: ${info.balanceFormatted} (ใช้ไปแล้ว $${(Number(info.usage) || 0).toFixed(4)})`);
       } else {
-        setCreditResult('❌ ไม่สามารถดึงข้อมูลเครดิตได้ (Key อาจไม่ถูกต้อง)');
+        setCreditResult(`❌ ${info.error || 'ไม่สามารถดึงข้อมูลเครดิตได้ (Key อาจไม่ถูกต้อง)'}`);
       }
     } catch (err: any) {
       setCreditResult(`❌ เกิดข้อผิดพลาด: ${err.message}`);

@@ -4,7 +4,7 @@ import { globalTaskStore } from '../../hooks/useBackgroundTasks';
 import { useHeadlinePacks } from '../../hooks/useHeadlinePacks';
 import { useWritingStyles } from '../../hooks/useWritingStyles';
 import { useImagePromptStyles } from '../../hooks/useImagePromptStyles';
-import { getOpenRouterKeyCandidates, getActiveOpenRouterKeyAsync, getActiveKieKey, getActiveDropboxCreds } from '../../hooks/useApiSettings';
+import { getOpenRouterKeyCandidates, getActiveOpenRouterKeyAsync, getActiveKieKey, getActiveDropboxCreds, checkOpenRouterCredits } from '../../hooks/useApiSettings';
 
 interface AIPageTemplateFolder { name: string; fileCount: number; }
 interface GenerationTask {
@@ -177,6 +177,8 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
 
   // Text Model
   const [textModel, setTextModel] = useState(TEXT_MODEL);
+  const [creditCheckResults, setCreditCheckResults] = useState<{label: string; keyPreview: string; valid: boolean; balance: string; usage: string; isFreeTier?: boolean; keyApiLabel?: string; error?: string}[]>([]);
+  const [isCheckingCredits, setIsCheckingCredits] = useState(false);
 
   // Raw Material
   const [rawArticle, setRawArticle] = useState('');
@@ -549,12 +551,37 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
 
   const imageUrlToVisionDataUrl = async (url: string): Promise<string> => {
     if (!url) return '';
-    if (url.startsWith('data:image')) return url;
-    if (url.startsWith('http')) {
-      const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
-      return await urlToBase64(proxyUrl).catch(() => urlToBase64(url));
+    let base64 = url;
+    if (!url.startsWith('data:image')) {
+      if (url.startsWith('http')) {
+        const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
+        base64 = await urlToBase64(proxyUrl).catch(() => urlToBase64(url));
+      } else {
+        base64 = await urlToBase64(url);
+      }
     }
-    return await urlToBase64(url);
+
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = "Anonymous";
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let { width, height } = img;
+        const maxDim = 512;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) { height = Math.round((height * maxDim) / width); width = maxDim; }
+          else { width = Math.round((width * maxDim) / height); height = maxDim; }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return resolve(base64);
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.6));
+      };
+      img.onerror = () => resolve(base64);
+      img.src = base64;
+    });
   };
 
   const extractJsonObject = (text: string) => {
@@ -580,12 +607,17 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
     const candidates = await getOpenRouterKeyCandidates();
     if (candidates.length === 0) throw new Error('กรุณาตั้งค่า OpenRouter API Key ในหน้าตั้งค่าระบบ');
 
-    // ถ้า paid model ไม่ได้ → ลอง free models อัตโนมัติ
-    const modelsToTry = [model, ...FREE_FALLBACK_MODELS.filter(m => m !== model)];
+    // ── ขั้นตอน: ลอง key แรก + model ที่ผู้ใช้เลือก ก่อนเสมอ ──
+    // ถ้าเจอ error ชั่วคราว (Provider returned error, rate limit, timeout) → retry โมเดลเดิม 3 รอบ
+    // ถ้าเจอ error เรื่องเครดิต (insufficient credits) → ค่อยสลับ key
+    // fallback ไป model ฟรี เฉพาะเมื่อทุก key + model เดิม ไม่ผ่านจริงๆ เท่านั้น
+
+    const MAX_RETRIES = 3;
     let lastError = '';
 
+    // ── Phase 1: ลอง key ทั้งหมดกับ MODEL ที่ผู้ใช้เลือก (retry transient errors) ──
     for (const candidate of candidates) {
-      for (const tryModel of modelsToTry) {
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
           const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
@@ -595,7 +627,7 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
               'HTTP-Referer': window.location.origin,
               'X-Title': 'Bulk Video Creator - AI Page Post',
             },
-            body: JSON.stringify({ model: tryModel, messages })
+            body: JSON.stringify({ model, messages })
           });
           const data = await res.json();
           if (res.ok && !data.error) {
@@ -605,18 +637,28 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
           const message = data.error?.message || `OpenRouter error ${res.status}`;
           lastError = `${candidate.label}: ${message}`;
 
-          if (/insufficient credits|more credits|credits|can only afford/i.test(message)) {
-            if (tryModel !== modelsToTry[modelsToTry.length - 1]) {
-              console.warn(`[AIPage] ${candidate.label} + ${tryModel} credits ไม่พอ → ลอง free model...`);
-              continue; // try next model
-            }
-            console.warn(`[AIPage] ${candidate.label} ใช้ไม่ได้กับทุก model → ลอง key ถัดไป`);
-            break; // try next key
+          // เครดิตหมดจริง → ข้าม key นี้ไปเลย ไม่ต้อง retry
+          if (/insufficient credits|more credits|can only afford/i.test(message)) {
+            console.warn(`[AIPage] ${candidate.label} เครดิตหมด → ลอง key ถัดไป`);
+            break;
           }
 
+          // error ชั่วคราว → รอ 1-2 วิ แล้วลองซ้ำกับ model เดิม
+          if (/Provider returned error|Provider routing failed|rate limit|timeout/i.test(message)) {
+            if (attempt < MAX_RETRIES) {
+              const delay = attempt * 1500; // 1.5s, 3s
+              console.warn(`[AIPage] ${candidate.label} + ${model} (Error: ${message}) → รอ ${delay}ms แล้วลองซ้ำ (รอบ ${attempt}/${MAX_RETRIES})...`);
+              await new Promise(r => setTimeout(r, delay));
+              continue; // retry same model
+            }
+            console.warn(`[AIPage] ${candidate.label} + ${model} ลอง ${MAX_RETRIES} รอบแล้วยังไม่ผ่าน → ลอง key ถัดไป`);
+            break;
+          }
+
+          // model ไม่ถูกต้อง → ข้ามออกเลย
           if (/not a valid model/i.test(message)) {
-            console.warn(`[AIPage] Model ${tryModel} ไม่มีแล้ว → ลอง model ถัดไป`);
-            continue;
+            console.warn(`[AIPage] Model ${model} ไม่มีแล้ว`);
+            break;
           }
 
           throw new Error(lastError);
@@ -625,6 +667,35 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
           lastError = `${candidate.label}: ${fetchErr.message || 'Network error'}`;
           break;
         }
+      }
+    }
+
+    // ── Phase 2 (Last resort): ทุก key ลองกับ model เดิมแล้วไม่ผ่าน → ลอง fallback model ฟรี ──
+    const hasImage = messages.some(m => Array.isArray(m.content) && m.content.some((c: any) => c.type === 'image_url'));
+    const fallbacks = hasImage
+      ? ['google/gemini-2.5-flash:free']
+      : ['google/gemma-3-27b-it:free'];
+
+    for (const candidate of candidates) {
+      for (const fallbackModel of fallbacks) {
+        if (fallbackModel === model) continue;
+        try {
+          console.warn(`[AIPage] ⚠️ Last resort: ${candidate.label} + ${fallbackModel}`);
+          const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${candidate.key}`,
+              'HTTP-Referer': window.location.origin,
+              'X-Title': 'Bulk Video Creator - AI Page Post',
+            },
+            body: JSON.stringify({ model: fallbackModel, messages })
+          });
+          const data = await res.json();
+          if (res.ok && !data.error) {
+            return data.choices[0].message.content;
+          }
+        } catch {}
       }
     }
 
@@ -2829,10 +2900,16 @@ ${candidates.map(c => `- ${c}`).join('\n')}
     return thaiCount >= 6 || (thaiCount >= 3 && ratio >= 0.22);
   };
 
-  const cleanHeadlineLines = (text: string) => text
-    .split('\n')
-    .map((line: string) => line.replace(/^[\s\-•*]*\d+[\).:-]?\s*/, '').replace(/^["“”]+|["“”]+$/g, '').trim())
-    .filter(Boolean);
+  const cleanHeadlineLines = (text: string) => {
+    const stripPrefix = (h: string) => h.replace(/^[\s\-•*]+/, '').replace(/^\d+[\).:-]+\s*/, '').replace(/^["“”]+|["“”]+$/g, '').trim();
+    if (text.includes('---')) {
+      return text.split('---').filter(Boolean).map(stripPrefix).filter(Boolean);
+    }
+    if (text.includes('\n\n')) {
+      return text.split('\n\n').filter(Boolean).map(stripPrefix).filter(Boolean);
+    }
+    return text.split('\n').filter(Boolean).map(stripPrefix).filter(Boolean);
+  };
 
   const scoreHeadlineForThaiAudience = (headline: string) => {
     let score = thaiCharRatio(headline) * 12;
@@ -2893,8 +2970,8 @@ ${candidates.map(c => `- ${c}`).join('\n')}
     onRetry?: (attempt: number) => void,
   ): Promise<{ headlines: string[]; selectedHeadline: string; markedKeywords: string[]; note: string; attempts: number }> => {
     const examples = pack?.headlines?.length
-      ? pack.headlines.map((h: string) => `- ${h}`).join('\n')
-      : '- พาดหัวต้องสั้น คม มี hook แบบเพจไทย\n- ใช้คำอังกฤษเฉพาะศัพท์เทคที่จำเป็น และต้องมีภาษาไทยประกบ';
+      ? pack.headlines.map((h: string) => `[ตัวอย่าง]\n${h}`).join('\n---\n')
+      : 'พาดหัวต้องสั้น คม มี hook แบบเพจไทย\nใช้คำอังกฤษเฉพาะศัพท์เทคที่จำเป็น และต้องมีภาษาไทยประกบ';
     const strictPrompt = (attempt: number, previousBad: string[] = []) => `คุณเป็นนักเขียนพาดหัว Facebook Page สำหรับคนไทย
 อ่านบทความนี้:
 """
@@ -2905,13 +2982,17 @@ ${raw.slice(0, 2400)}
 ${examples}
 
 กติกาบังคับ:
+- ห้ามแปลเปรียบเปรย (Metaphors) คำคม หรือสำนวนฝรั่งเด็ดขาด (เช่น "ความมืดให้แบรนด์", "หัวใจสูญหาย", "จุดตาย")
+- จับประเด็นหลักมาเขียนใหม่เลย ไม่ต้องพยายามแปลล้อตามพาดหัวภาษาอังกฤษเดิม
+- เน้นเขียนแบบบอกผลลัพธ์, วิธีแก้ปัญหา, หรือ How-to ที่คนอ่านได้ประโยชน์ตรงๆ เข้าใจง่ายที่สุด
+- ใช้ภาษาพูดแบบคนไทย เลี่ยงการแปลตรงตัวหรือรูปประโยคแบบภาษาอังกฤษ
 - ทุกพาดหัวต้องมีภาษาไทยเป็นแกนหลัก
-- อนุญาตคำอังกฤษเฉพาะชื่อแบรนด์/ศัพท์เทค เช่น AI, AWS, Claude, ChatGPT, Cloud
+- อนุญาตคำอังกฤษเฉพาะชื่อแบรนด์/ศัพท์เทค เช่น AI, AWS, Claude, ChatGPT, Cloud แต่ต้องมีคำไทยนำบริบทให้เข้าใจ
 - ห้ามตอบเป็นภาษาอังกฤษล้วนเด็ดขาด
-- ถ้าใช้คำอังกฤษ ต้องมีคำไทยนำบริบทให้คนไทยอ่านเข้าใจทันที
-- ตอบเป็นพาดหัวต่อบรรทัดเท่านั้น ไม่ต้องมีเลข ไม่ต้องอธิบาย
-${previousBad.length > 0 ? `\nพาดหัวอังกฤษล้วน/ไม่ผ่านจากรอบก่อน ห้ามใช้ซ้ำ:\n${previousBad.map(h => `- ${h}`).join('\n')}` : ''}
-${attempt >= 3 ? '\nรอบนี้ให้ rewrite เป็นไทยทันที แม้ตัวอย่างจะเป็นอังกฤษ ห้ามเลียนแบบเป็นอังกฤษล้วน' : ''}`;
+- ตอบเป็น 5 พาดหัว โดยแต่ละพาดหัวให้คั่นด้วยเครื่องหมาย --- เท่านั้น (ห้ามใส่เลขข้อ หรือเครื่องหมาย - นำหน้า)
+- บังคับ! พาดหัว 1 อัน ต้องแบ่งจำนวนบรรทัดตามโครงสร้างของตัวอย่างเป๊ะๆ (เช่น ถ้าตัวอย่างเป็น 3 บรรทัดจบ ก็ต้องตอบพาดหัวละ 3 บรรทัด)
+${previousBad.length > 0 ? `\nพาดหัวอังกฤษล้วน/สำนวนแปลกๆ จากรอบก่อน ห้ามใช้ซ้ำ:\n${previousBad.map(h => `- ${h}`).join('\n')}` : ''}
+${attempt >= 3 ? '\nรอบนี้ให้ rewrite เป็นไทยทันที เน้นอ่านรู้เรื่อง ห้ามเลียนแบบสำนวนฝรั่ง' : ''}`;
 
     const collected: string[] = [];
     const rejected: string[] = [];
@@ -3051,7 +3132,8 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
         try {
           const articlePrompt = buildBulkArticlePrompt(merged, style.content);
           const commentPostPrompt = buildCommentPostPrompt(merged.rawArticle, commentStyle.content, merged.sourceUrl);
-          const headlinePrompt = `คุณเป็นนักเขียน Social Media ชาวไทยมืออาชีพ\nอ่านบทความนี้:\n"""\n${merged.rawArticle.slice(0, 2000)}\n"""\nสร้างพาดหัว 5 อัน ให้แมชสไตล์นี้:\n${pack.headlines.map((h: string) => `- ${h}`).join('\n')}\n\nกติกาบังคับ: ทุกพาดหัวต้องมีภาษาไทย ห้ามอังกฤษล้วน แต่ใช้คำอังกฤษอย่าง AI, AWS, Claude, Cloud ได้ถ้ามีบริบทไทยประกบ\nตอบเป็นพาดหัวแต่ละอันต่อบรรทัด ไม่ต้องมีตัวเลขหรือข้อความอื่น`;
+          const examplesStr = pack?.headlines?.length ? pack.headlines.map((h: string) => `[ตัวอย่าง]\n${h}`).join('\n---\n') : '';
+          const headlinePrompt = `คุณเป็นนักเขียน Social Media ชาวไทยมืออาชีพ\nอ่านบทความนี้:\n"""\n${merged.rawArticle.slice(0, 2000)}\n"""\nสร้างพาดหัว 5 อัน ให้แมชสไตล์นี้:\n${examplesStr}\n\nกติกาบังคับ:\n- ห้ามแปลเปรียบเปรย (Metaphors) คำคม หรือสำนวนฝรั่งเด็ดขาด\n- เน้นเขียนแบบบอกผลลัพธ์, วิธีแก้ปัญหา, หรือ How-to ที่คนอ่านได้ประโยชน์ตรงๆ เข้าใจง่ายที่สุด\n- จับประเด็นหลักมาเขียนใหม่เลย ไม่ต้องพยายามแปลล้อตามพาดหัวภาษาอังกฤษเดิม\n- ใช้ภาษาพูดแบบคนไทย เลี่ยงการแปลตรงตัวหรือรูปประโยคแบบภาษาอังกฤษ\n- ทุกพาดหัวต้องมีภาษาไทย ห้ามอังกฤษล้วน\n- ใช้คำอังกฤษอย่าง AI, AWS, Claude ได้ถ้ามีบริบทไทยประกบให้เข้าใจง่าย\n- ตอบเป็น 5 พาดหัว โดยแต่ละพาดหัวให้คั่นด้วยเครื่องหมาย --- เท่านั้น (ห้ามใส่เลขข้อ หรือเครื่องหมาย - นำหน้า)\n- บังคับ! ต้องคงโครงสร้างบรรทัดตามตัวอย่าง (เช่น ตัวอย่างมี 3 บรรทัด ก็ต้องตอบพาดหัวละ 3 บรรทัดเป๊ะๆ)`;
 
           const [articleText, commentPostText, headlineText] = await Promise.all([
             callOpenRouter([{ role: 'user', content: articlePrompt }], model),
@@ -3162,7 +3244,106 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
             <h1 className="text-2xl font-bold flex items-center gap-2">🤖 สร้างContentลงเพจ AI</h1>
             <p className="text-sm opacity-70">สร้างบทความและรูปภาพพร้อมใช้งานแบบ Auto</p>
          </div>
+         <button
+           onClick={async () => {
+             setIsCheckingCredits(true);
+             setCreditCheckResults([]);
+             try {
+               const candidates = await getOpenRouterKeyCandidates();
+               if (candidates.length === 0) { setCreditCheckResults([{label: 'ไม่พบ API Key', keyPreview: '-', valid: false, balance: '$0', usage: '$0', error: 'กรุณาตั้งค่า API Key ในหน้าตั้งค่า'}]); setIsCheckingCredits(false); return; }
+               const results: typeof creditCheckResults = [];
+               for (const c of candidates) {
+                 const info = await checkOpenRouterCredits(c.key);
+                 const keyPreview = c.key.slice(0, 8) + '...' + c.key.slice(-4);
+                 results.push({
+                   label: c.label,
+                   keyPreview,
+                   valid: info.valid,
+                   balance: info.balanceFormatted,
+                   usage: `$${(Number(info.usage) || 0).toFixed(4)}`,
+                   isFreeTier: info.isFreeTier,
+                   keyApiLabel: info.keyLabel,
+                   error: info.error,
+                 });
+               }
+               setCreditCheckResults(results);
+             } catch (e: any) {
+               setCreditCheckResults([{label: 'Error', keyPreview: '-', valid: false, balance: '$0', usage: '$0', error: e.message}]);
+             }
+             setIsCheckingCredits(false);
+           }}
+           disabled={isCheckingCredits}
+           className="px-4 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-bold transition-colors flex items-center gap-2 disabled:opacity-50"
+         >
+           {isCheckingCredits ? '⚙️ กำลังตรวจ...' : '💰 เช็คเครดิต API'}
+         </button>
+         <button
+           onClick={async () => {
+             try {
+               const candidates = await getOpenRouterKeyCandidates();
+               if (candidates.length === 0) { setCreditCheckResults([{label: 'ไม่พบ API Key', keyPreview: '-', valid: false, balance: '-', usage: '-', error: 'ไม่พบ Key'}]); return; }
+               const c = candidates[0];
+               const testModel = textModel || 'google/gemini-2.5-flash';
+               setCreditCheckResults([{label: `🧪 กำลังทดสอบ ${testModel}...`, keyPreview: c.key.slice(0,8)+'...'+c.key.slice(-4), valid: true, balance: 'กำลังทดสอบ...', usage: '-'}]);
+               const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                 method: 'POST',
+                 headers: {
+                   'Content-Type': 'application/json',
+                   'Authorization': `Bearer ${c.key}`,
+                   'HTTP-Referer': window.location.origin,
+                 },
+                 body: JSON.stringify({ model: testModel, messages: [{role:'user',content:'ตอบแค่คำว่า "OK"'}], max_tokens: 5 })
+               });
+               const data = await res.json();
+               if (res.ok && !data.error) {
+                 setCreditCheckResults([{label: `✅ ทดสอบ ${testModel} สำเร็จ!`, keyPreview: c.key.slice(0,8)+'...'+c.key.slice(-4), valid: true, balance: `ตอบกลับ: ${data.choices?.[0]?.message?.content || 'OK'}`, usage: `Model: ${data.model || testModel}`}]);
+               } else {
+                 const errMsg = data.error?.message || JSON.stringify(data.error) || `HTTP ${res.status}`;
+                 setCreditCheckResults([{label: `❌ ทดสอบ ${testModel} ล้มเหลว`, keyPreview: c.key.slice(0,8)+'...'+c.key.slice(-4), valid: false, balance: '-', usage: '-', error: errMsg}]);
+               }
+             } catch (e: any) {
+               setCreditCheckResults([{label: 'Error', keyPreview: '-', valid: false, balance: '-', usage: '-', error: e.message}]);
+             }
+           }}
+           className="px-4 py-2 rounded-lg bg-blue-700 hover:bg-blue-600 text-white text-sm font-bold transition-colors flex items-center gap-2"
+         >
+           🧪 ทดสอบ API
+         </button>
       </div>
+
+      {/* Credit Check Results - inline panel */}
+      {creditCheckResults.length > 0 && (
+        <div className="card p-4 border-l-4 border-l-emerald-400 bg-gradient-to-br from-[var(--bg-card)] to-emerald-900/10">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="text-sm font-bold text-emerald-400">🔑 ผลตรวจ API Keys</h3>
+            <button onClick={() => setCreditCheckResults([])} className="text-xs text-gray-500 hover:text-gray-300">✕ ปิด</button>
+          </div>
+          <div className="space-y-2">
+            {creditCheckResults.map((r, i) => (
+              <div key={i} className={`p-3 rounded-lg border text-sm ${r.valid ? 'bg-emerald-900/20 border-emerald-500/30' : 'bg-red-900/20 border-red-500/30'}`}>
+                <div className="flex items-center gap-2 font-bold">
+                  <span>{r.valid ? '✅' : '❌'}</span>
+                  <span className={r.valid ? 'text-emerald-300' : 'text-red-300'}>{r.label}</span>
+                </div>
+                <div className="text-xs text-gray-400 mt-1 ml-6 space-y-0.5">
+                  <div>Key: <span className="text-gray-300 font-mono">{r.keyPreview}</span></div>
+                  {r.valid ? (
+                    <>
+                      {r.isFreeTier && <div>⚠️ Tier: <span className="text-amber-300 font-bold">Free Tier (ใช้ได้แค่โมเดลฟรีเท่านั้น!)</span></div>}
+                      {!r.isFreeTier && <div>Tier: <span className="text-emerald-300">Paid (ใช้ได้ทุกโมเดล)</span></div>}
+                      <div>ลิมิต Key: <span className="text-emerald-300 font-bold">{r.balance}</span></div>
+                      <div>ใช้ไปแล้ว (Key นี้): <span className="text-yellow-300">{r.usage}</span></div>
+                      <div className="text-[10px] text-gray-500 mt-1">เครดิตจริงของบัญชีดูได้ที่ openrouter.ai/settings/credits</div>
+                    </>
+                  ) : (
+                    <div>Error: <span className="text-red-300">{r.error}</span></div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* === BASIC SETTINGS (Logo) === */}
       <div className="card p-5 border-l-4 border-l-cyan-400 bg-gradient-to-br from-[var(--bg-card)] to-cyan-900/10">
@@ -4243,23 +4424,46 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                             </div>
                             <div className="space-y-1">
                               {item.generatedHeadlines.map((h, i) => (
-                                <label key={i} className={`flex items-start gap-2 p-2 rounded cursor-pointer transition-colors border ${item.selectedHeadline === h ? 'bg-amber-900/30 border-amber-500/50' : 'bg-black/20 border-gray-700/50 hover:border-gray-500'}`}>
-                                  <input
-                                    type="radio"
-                                    name={`headline_${item.id}`}
-                                    checked={item.selectedHeadline === h}
-                                    onChange={() => {
-                                      const markedKeywords = pickImpactfulKeywords(h, 2);
-                                      const smartHeadlineNote = isThaiReadableHeadline(h)
-                                        ? buildThaiHeadlineSelectionNote(h, markedKeywords, 1)
-                                        : 'พาดหัวนี้เป็นอังกฤษล้วน/ไทยน้อยเกินไป ไม่ควรใช้กับเพจไทย กดสร้างใหม่หรือเลือกพาดหัวที่มีภาษาไทย';
-                                      updateBulkItem(item.id, { selectedHeadline: h, markedKeywords, smartHeadlineNote });
-                                      saveArticleCache(item.rawArticle, { selectedHeadline: h });
-                                    }}
-                                    className="mt-0.5 flex-shrink-0 accent-amber-500"
-                                  />
-                                  <span className="text-xs text-gray-200">{h}</span>
-                                </label>
+                                <div key={i} className={`flex flex-col gap-1 p-2 rounded transition-colors border ${item.selectedHeadline === h ? 'bg-amber-900/30 border-amber-500/50' : 'bg-black/20 border-gray-700/50 hover:border-gray-500'}`}>
+                                  <label className="flex items-start gap-2 cursor-pointer">
+                                    <input
+                                      type="radio"
+                                      name={`headline_${item.id}`}
+                                      checked={item.selectedHeadline === h}
+                                      onChange={() => {
+                                        const markedKeywords = pickImpactfulKeywords(h, 2);
+                                        const smartHeadlineNote = isThaiReadableHeadline(h)
+                                          ? buildThaiHeadlineSelectionNote(h, markedKeywords, 1)
+                                          : 'พาดหัวนี้เป็นอังกฤษล้วน/ไทยน้อยเกินไป ไม่ควรใช้กับเพจไทย กดสร้างใหม่หรือเลือกพาดหัวที่มีภาษาไทย';
+                                        updateBulkItem(item.id, { selectedHeadline: h, markedKeywords, smartHeadlineNote });
+                                        saveArticleCache(item.rawArticle, { selectedHeadline: h });
+                                      }}
+                                      className="mt-0.5 flex-shrink-0 accent-amber-500"
+                                    />
+                                    {item.selectedHeadline !== h && (
+                                      <span className="text-xs text-gray-200 whitespace-pre-line leading-relaxed">{h}</span>
+                                    )}
+                                  </label>
+                                  {item.selectedHeadline === h && (
+                                    <textarea
+                                      className="w-full text-xs bg-black/40 text-amber-100 p-2 rounded border border-amber-500/30 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 min-h-[60px] ml-6 resize-none"
+                                      style={{ width: 'calc(100% - 1.5rem)' }}
+                                      value={h}
+                                      onChange={(e) => {
+                                        const newText = e.target.value;
+                                        const newHeadlines = [...item.generatedHeadlines];
+                                        newHeadlines[i] = newText;
+                                        const markedKeywords = pickImpactfulKeywords(newText, 2);
+                                        updateBulkItem(item.id, { 
+                                          generatedHeadlines: newHeadlines, 
+                                          selectedHeadline: newText,
+                                          markedKeywords 
+                                        });
+                                      }}
+                                      placeholder="พิมพ์แก้ไขพาดหัวตรงนี้ได้เลย..."
+                                    />
+                                  )}
+                                </div>
                               ))}
                             </div>
                           </div>

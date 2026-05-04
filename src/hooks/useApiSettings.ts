@@ -219,6 +219,9 @@ export interface OpenRouterCreditInfo {
   balanceFormatted: string;
   usage: number;
   limit: number | null;
+  isFreeTier?: boolean;
+  keyLabel?: string;
+  rawData?: any;
   error?: string;
 }
 
@@ -250,16 +253,28 @@ export async function checkOpenRouterCredits(apiKey: string): Promise<OpenRouter
     }
 
     const data = await res.json();
-    const usage = data.data?.usage ?? 0;
-    const limit = data.data?.limit ?? null;
-    const balance = limit !== null ? Math.max(0, limit - usage) : -1; // -1 = unlimited
+    const usage = Number(data.data?.usage) || 0;
+    const limit = data.data?.limit != null ? Number(data.data.limit) : null;
+    const isFreeTier = data.data?.is_free_tier === true;
+    const keyLabel = data.data?.label || '';
+    const balance = limit !== null ? Math.max(0, limit - usage) : -1;
+
+    let balanceFormatted: string;
+    if (limit !== null) {
+      balanceFormatted = `$${Number(balance).toFixed(4)}`;
+    } else {
+      balanceFormatted = 'ไม่ได้ตั้งลิมิตบน Key นี้';
+    }
 
     return {
       valid: true,
       balance,
-      balanceFormatted: balance < 0 ? '∞ (ไม่จำกัด)' : `$${balance.toFixed(4)}`,
+      balanceFormatted,
       usage,
       limit,
+      isFreeTier,
+      keyLabel,
+      rawData: data.data,
     };
   } catch (e: any) {
     return {

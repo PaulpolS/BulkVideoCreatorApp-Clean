@@ -9,6 +9,16 @@ export interface HeadlinePack {
 const LS_KEY = 'aipage_headline_packs';
 const API_KEY = 'headline_packs';
 
+export const DEFAULT_3_LINE_PACK: HeadlinePack = {
+  id: 'default-3-line-hook',
+  name: '🔥 พาดหัว 3 บรรทัด (Hook-Method-Result)',
+  headlines: [
+    'ถอดบทเรียนความพังของสื่อใหญ่ BuzzFeed\nเมื่อการใช้ AI เขียนบทความแทนคน\nกลายเป็นจุดจบที่ทำลายความเชื่อใจคนอ่าน',
+    'กรณีศึกษา: เมื่อสื่อใหญ่เลือกทางลัดใช้ AI\nแต่กลับทำให้คุณภาพคอนเทนต์พังพินาศ\nนี่คือบทเรียนสำคัญที่คนทำคอนเทนต์ต้องรู้',
+    'ทำไมการนำ AI มาใช้ถึงพังไม่เป็นท่า?\nสรุปเคส BuzzFeed ที่ใช้ AI ปั่นบทความ\nจนสุดท้ายสูญเสียทั้งรายได้และฐานคนดู'
+  ]
+};
+
 export function useHeadlinePacks() {
   const [packs, setPacks] = useState<HeadlinePack[]>([]);
 
@@ -20,19 +30,25 @@ export function useHeadlinePacks() {
         let localData: HeadlinePack[] = [];
         try { if (localSaved) localData = JSON.parse(localSaved); } catch(e) {}
 
+        let finalData = data || [];
         // MIGRATION: backend empty, localStorage has data
         if ((!data || data.length === 0) && localData.length > 0) {
           console.log('Migrating headline_packs from localStorage to backend...');
-          setPacks(localData);
+          finalData = localData;
+        }
+        
+        // Inject Default 3-Line Pack if missing
+        if (!finalData.some(p => p.id === DEFAULT_3_LINE_PACK.id)) {
+          finalData = [DEFAULT_3_LINE_PACK, ...finalData];
           fetch('/api/save-app-data', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ key: API_KEY, data: localData })
-          });
-        } else if (data && data.length > 0) {
-          setPacks(data);
-          localStorage.setItem(LS_KEY, JSON.stringify(data));
+            body: JSON.stringify({ key: API_KEY, data: finalData })
+          }).catch(() => {});
         }
+
+        setPacks(finalData);
+        localStorage.setItem(LS_KEY, JSON.stringify(finalData));
       })
       .catch(err => {
         console.error('Failed to load headline_packs from backend', err);

@@ -570,6 +570,7 @@ function synthesizeManualBrainPayloadFromDeepAnalyses(params: {
     summary: `สมอง Deep Training จากการอ่าน CSV เป็นก้อน ${params.promptAnalyses.length} ชุด และเทรนด์ ${params.trendAnalyses.length} ชุด รวม tool/concept, pattern, prompt rules และ pain point แยกหมวดแล้ว`,
     keywords: compactBrainItems([...trendTools, ...promptKeywords], 36),
     contentAngles: contentAngles.length ? contentAngles : [
+      '🔥 พาดหัว 3 บรรทัด (Hook -> Method -> Result) ดึงดูดและเห็นผลลัพธ์ชัดเจน',
       'How-to: สอนใช้งานเครื่องมือหรือ workflow แบบทำตามได้',
       'Tool Introduction: แนะนำเครื่องมือหรือคอนเซปต์ใหม่ที่กำลังเป็นกระแส',
       'Use Case: ย่อยเป็นตัวอย่างการใช้งานจริงในงาน/ธุรกิจ/คอนเทนต์',
@@ -1828,7 +1829,7 @@ export function PageStockTab() {
         }
         lastError = `${apiKeyInfo.label}: ${data.error?.message || `OpenRouter error ${res.status}`}`;
         const rawError = data.error?.message || `OpenRouter error ${res.status}`;
-        const canRetryLowerTokens = /more credits|fewer max_tokens|can only afford|credits/i.test(rawError);
+        const canRetryLowerTokens = /more credits|fewer max_tokens|can only afford|เครดิตไม่พอ/i.test(rawError);
         const affordableTokens = getAffordableMaxTokens(rawError);
         if (canRetryLowerTokens && affordableTokens > 0 && !attemptsForKey.includes(affordableTokens)) {
           attemptsForKey.splice(index + 1, 0, affordableTokens);
@@ -2265,7 +2266,7 @@ ${recentTopics.join('\n') || '- ยังไม่มี'}
               } else if (/prompt tokens limit exceeded|prompt ยาวเกิน/i.test(message)) {
                 ctx.log('Prompt ยังยาวเกิน: retry ด้วยก้อนสมองฉุกเฉินที่สั้นลงอีก');
                 answer = await askOpenRouter(buildTopicPrompt(Math.min(3, amount), true), ctx.signal, 300, manualTopicModel);
-              } else if (/more credits|fewer max_tokens|can only afford|credits|เครดิตไม่พอ/i.test(message)) {
+              } else if (/more credits|fewer max_tokens|can only afford|เครดิตไม่พอ/i.test(message)) {
                 ctx.log('OpenRouter ให้ token ต่อ request ต่ำมาก: retry แบบจิ๋วทีละ 1-3 หัวข้อ');
                 const tinyAmount = Math.min(3, amount);
                 try {
