@@ -342,6 +342,7 @@ export function YoutubeChannelFinder() {
         thumbnail: v.thumbnail,
         images: v.thumbnail ? [v.thumbnail] : [],
         fbViews: v.views ?? 0,
+        ytExtracted: true,
       }));
 
       const res = await fetch('/api/article-stock', {

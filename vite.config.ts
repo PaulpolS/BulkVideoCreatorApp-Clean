@@ -1253,6 +1253,12 @@ const fileSaverPlugin = (): Plugin => ({
               fs.writeFileSync(stockFile, JSON.stringify(articles, null, 2));
               res.setHeader('Content-Type', 'application/json');
               res.end(JSON.stringify({ success: true, updated: ids.length }));
+            } else if (action === 'mark-yt-extracted' && Array.isArray(ids)) {
+              const idSet = new Set(ids);
+              articles = articles.map((a: any) => idSet.has(a.id) ? { ...a, ytExtracted: true } : a);
+              fs.writeFileSync(stockFile, JSON.stringify(articles, null, 2));
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ success: true, updated: ids.length }));
             } else if (action === 'delete-batch' && Array.isArray(ids)) {
               const idSet = new Set(ids);
               const before = articles.length;

@@ -325,14 +325,34 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
     setSelectedIds(new Set());
   };
 
+  // Bulk-fix: mark all YouTube articles as ytExtracted=true
+  const [isFixingYt, setIsFixingYt] = useState(false);
+  const youtubeNotExtractedCount = useMemo(() => youtubeArticles.filter(a => !a.ytExtracted).length, [youtubeArticles]);
+  const handleFixYoutubeExtracted = async () => {
+    const ytIds = youtubeArticles.filter(a => !a.ytExtracted).map(a => a.id);
+    if (ytIds.length === 0) { alert('✅ คลิป YouTube ทั้งหมด tag ไว้แล้ว'); return; }
+    setIsFixingYt(true);
+    try {
+      const res = await fetch('/api/article-stock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'mark-yt-extracted', ids: ytIds }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Update failed');
+      setArticles(prev => prev.map(a => ytIds.includes(a.id) ? { ...a, ytExtracted: true } : a));
+      alert(`✅ อัปเดตสำเร็จ ${ytIds.length} คลิป พร้อมส่งไปทำโพสต์ได้แล้ว!`);
+    } catch (e: any) {
+      alert(`❌ อัปเดตไม่สำเร็จ: ${e.message}`);
+    } finally {
+      setIsFixingYt(false);
+    }
+  };
+
   const handleSendSelected = async () => {
     if (selectedIds.size === 0) return;
 
-    if (selectedYoutubeNotExtracted.length > 0 && onNavigateToYoutubeExtract) {
-      onNavigateToYoutubeExtract(selectedYoutubeNotExtracted.map(a => a.sourceUrl));
-      return;
-    }
-
+    // Send all selected articles to AI Page directly (including YouTube clips)
     if (!onSendToAIPage) return;
     onSendToAIPage(selectedArticles.map(a => ({
       rawArticle: a.rawArticle,
@@ -345,7 +365,7 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
       channelLogoUrl: a.channelLogoUrl,
       channelAvatar: a.channelAvatar,
       subscriberCount: a.subscriberCount,
-      ytExtracted: a.ytExtracted,
+      ytExtracted: true,
     })));
 
     const sentAt = new Date().toISOString();
@@ -479,14 +499,30 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
               <span className="text-xs bg-purple-500/10 text-purple-300 border border-purple-500/30 px-2 py-1 rounded">
                 ทำโพสต์แล้ว {youtubeArticles.filter(a => a.sentToAIPageAt).length} คลิป
               </span>
+              {youtubeNotExtractedCount > 0 && (
+                <span className="text-xs bg-amber-500/10 text-amber-300 border border-amber-500/30 px-2 py-1 rounded">
+                  ⚠️ ยังไม่ tag ว่าดึง Script แล้ว: {youtubeNotExtractedCount} คลิป
+                </span>
+              )}
             </div>
           </div>
-          <button
-            onClick={toggleYoutubeZone}
-            className={`px-5 py-3 text-white text-sm font-bold rounded-lg shadow-lg transition-all ${showYoutubeOnly ? 'bg-gray-700 hover:bg-gray-600' : 'bg-cyan-700 hover:bg-cyan-600 shadow-cyan-500/20'}`}
-          >
-            {showYoutubeOnly ? 'ดูบทความทั้งหมด' : 'ดูเฉพาะ YouTube'}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {youtubeNotExtractedCount > 0 && (
+              <button
+                onClick={handleFixYoutubeExtracted}
+                disabled={isFixingYt}
+                className="px-4 py-2.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-bold rounded-lg shadow-lg shadow-amber-500/20 transition-all"
+              >
+                {isFixingYt ? '⏳ กำลังแก้ไข...' : `🔧 แก้ Tag ${youtubeNotExtractedCount} คลิป`}
+              </button>
+            )}
+            <button
+              onClick={toggleYoutubeZone}
+              className={`px-5 py-3 text-white text-sm font-bold rounded-lg shadow-lg transition-all ${showYoutubeOnly ? 'bg-gray-700 hover:bg-gray-600' : 'bg-cyan-700 hover:bg-cyan-600 shadow-cyan-500/20'}`}
+            >
+              {showYoutubeOnly ? 'ดูบทความทั้งหมด' : 'ดูเฉพาะ YouTube'}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -709,14 +745,12 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
               กำลังแสดงเฉพาะบทความที่ทำเสร็จทุกอย่างแล้ว (อยู่ในผลลัพธ์)
             </span>
           )}
-          {selectedIds.size > 0 && (onSendToAIPage || onNavigateToYoutubeExtract) && (
+          {selectedIds.size > 0 && onSendToAIPage && (
             <button
               onClick={handleSendSelected}
               className="ml-auto px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white text-sm font-bold rounded-lg shadow-lg shadow-purple-500/20 transition-all flex items-center gap-2"
             >
-              {selectedYoutubeNotExtracted.length > 0
-                ? `🎬 ดึง Script ${selectedYoutubeNotExtracted.length} คลิปจาก YouTube`
-                : `🚀 ส่ง ${selectedIds.size} บทความไปทำโพสต์`}
+              🚀 ส่ง {selectedIds.size} บทความไปทำโพสต์
             </button>
           )}
           {selectedIds.size > 0 && (
