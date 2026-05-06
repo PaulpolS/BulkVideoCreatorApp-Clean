@@ -3071,54 +3071,98 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
         commentStyleId: item.commentStyleId || selectedCommentStyleId,
         headlinePackId: item.headlinePackId || selectedPackId,
         cardTextModel: item.cardTextModel || textModel,
-        fontPaletteId: 'cyan-white-navy',
+        fontPaletteId: (item.ytExtracted || item.sourceType === 'youtube') ? 'white-yellow-blue' : 'cyan-white-navy',
       };
 
-      // ── Step 2: วิเคราะห์รูปทุกรูปพร้อมกันใน 1 Vision call ─────────────────
-      const allImages = item.images || [];
-      if (allImages.length > 0 && item.ytExtracted) {
-        setSmartConfigLog(`🔍 ${label} วิเคราะห์รูป ${allImages.length} รูป...`);
-        try {
-          const { bestIndex, hasPerson, reason, candidates } = await analyzeImageGallery(allImages);
-          const bestUrl = allImages[bestIndex] || allImages[0];
+      // ── Detect source type ─────────────────────────────────────────────────
+      const isYoutube = !!item.ytExtracted || item.sourceType === 'youtube';
+      const isNews = !isYoutube && (item.sourceType === 'news' || !!item.sourceUrl);
 
-          if (hasPerson) {
-            patch.decorateOriginalPhoto = true;
-            patch.useAttachedImage = true;
-            patch.cardImagePromptStyleId = YOUTUBE_IMAGE_STYLE_ID;
-            patch.selectedImageUrl = bestUrl;
-            patch.smartConfigNote = `Smart Setup เลือกรูป #${bestIndex + 1} เพราะ${reason ? ` ${reason}` : 'เห็นหน้าคนชัดสุด'} ใช้เป็น img2img + คงรูปเดิม`;
-          } else {
-            patch.decorateOriginalPhoto = false;
-            patch.useAttachedImage = false;
-            patch.selectedImageUrl = '';
-            patch.smartConfigNote = 'Smart Setup ไม่เจอรูปที่มีหน้าคนชัดพอ เลยปิด img2img เพื่อไม่เอารูปสไลด์/จอ/โลโก้ไปใช้ผิดทาง';
+      // ── Auto-fetch images if none yet (news articles) ─────────────────────
+      let allImages = item.images || [];
+      if (allImages.length === 0 && isNews && item.sourceUrl) {
+        setSmartConfigLog(`📡 ${label} ดูดรูปข่าว ${item.sourceUrl.slice(0, 40)}...`);
+        try {
+          const res = await fetch('/api/website-extract', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: item.sourceUrl }),
+          });
+          const data = await res.json();
+          if (res.ok && data.success && data.images?.length > 0) {
+            allImages = Array.from(new Set([...(data.images || []), ...(item.images || [])]))
+              .filter((img): img is string => typeof img === 'string' && img.startsWith('http'));
+            patch.images = allImages;
+            setSmartConfigLog(`📡 ${label} ดูดรูปข่าวเจอ ${allImages.length} รูป`);
           }
-          patch.smartSelectedImageIndex = bestIndex;
-          patch.smartSelectedImageReason = reason || (hasPerson ? 'รูปนี้มีหน้าคนชัดสุด' : 'ไม่พบหน้าคนชัด');
-          patch.smartImageHasPerson = hasPerson;
-          patch.smartImageScores = candidates;
-        } catch (e: any) {
-          // Vision ล้มเหลว → คงรูปที่เลือกเดิมไว้ และบอกสาเหตุให้ผู้ใช้เห็น
-          const fallbackUrl = item.selectedImageUrl || '';
-          patch.decorateOriginalPhoto = !!fallbackUrl;
-          patch.useAttachedImage = !!fallbackUrl;
-          patch.cardImagePromptStyleId = fallbackUrl ? YOUTUBE_IMAGE_STYLE_ID : item.cardImagePromptStyleId;
-          patch.selectedImageUrl = fallbackUrl;
-          patch.smartSelectedImageIndex = fallbackUrl ? Math.max(0, allImages.indexOf(fallbackUrl)) : undefined;
-          patch.smartSelectedImageReason = `Vision วิเคราะห์รูปไม่สำเร็จ: ${e?.message || 'ไม่ทราบสาเหตุ'}`;
-          patch.smartImageHasPerson = undefined;
-          patch.smartImageScores = [];
-          patch.smartConfigNote = fallbackUrl
-            ? 'Smart Setup วิเคราะห์รูปไม่สำเร็จ เลยคงรูปที่เลือกเดิมไว้ ตรวจด้วยตาอีกทีก่อนสร้างภาพ'
-            : 'Smart Setup วิเคราะห์รูปไม่สำเร็จ และยังไม่มีรูปเดิมที่เลือกไว้ เลยยังไม่เปิด img2img';
+        } catch {}
+      }
+
+      // ── Set image style + Vision analyze ──────────────────────────────────
+      if (allImages.length > 0) {
+        patch.useAttachedImage = true;
+
+        if (isYoutube) {
+          setSmartConfigLog(`🔍 ${label} วิเคราะห์รูป YouTube ${allImages.length} รูป...`);
+          try {
+            const { bestIndex, hasPerson, reason, candidates } = await analyzeImageGallery(allImages);
+            const bestUrl = allImages[bestIndex] || allImages[0];
+
+            if (hasPerson) {
+              patch.decorateOriginalPhoto = true;
+              patch.cardImagePromptStyleId = YOUTUBE_IMAGE_STYLE_ID;
+              patch.selectedImageUrl = bestUrl;
+              patch.smartConfigNote = `Smart Setup (YouTube) เลือกรูป #${bestIndex + 1}${reason ? ` เพราะ${reason}` : ''} → ใช้ img2img คงรูปเดิมตกแต่งเพิ่ม`;
+            } else {
+              patch.decorateOriginalPhoto = false;
+              patch.cardImagePromptStyleId = YOUTUBE_IMAGE_STYLE_ID;
+              patch.selectedImageUrl = '';
+              patch.smartConfigNote = 'Smart Setup (YouTube) ไม่เจอหน้าคนในรูป → ใช้สไตล์รูป YouTube แต่ไม่คงรูปเดิม';
+            }
+            patch.smartSelectedImageIndex = bestIndex;
+            patch.smartSelectedImageReason = reason || (hasPerson ? 'รูปนี้มีหน้าคนชัดสุด' : 'ไม่พบหน้าคนชัด');
+            patch.smartImageHasPerson = hasPerson;
+            patch.smartImageScores = candidates;
+          } catch (e: any) {
+            const fallbackUrl = item.selectedImageUrl || allImages[0] || '';
+            patch.decorateOriginalPhoto = !!fallbackUrl;
+            patch.cardImagePromptStyleId = YOUTUBE_IMAGE_STYLE_ID;
+            patch.selectedImageUrl = fallbackUrl;
+            patch.smartSelectedImageIndex = fallbackUrl ? Math.max(0, allImages.indexOf(fallbackUrl)) : undefined;
+            patch.smartSelectedImageReason = `Vision วิเคราะห์รูปไม่สำเร็จ: ${e?.message || 'ไม่ทราบสาเหตุ'}`;
+            patch.smartConfigNote = fallbackUrl
+              ? 'Smart Setup วิเคราะห์รูปไม่สำเร็จ → คงรูปเดิมไว้ ให้เช็คอีกทีก่อนสร้าง'
+              : 'Smart Setup วิเคราะห์รูปไม่สำเร็จ และไม่มีรูปเดิม';
+          }
+        } else {
+          // News → ข่าวAI style + คงรูปเดิมตกแต่งเพิ่ม
+          patch.decorateOriginalPhoto = true;
+          patch.cardImagePromptStyleId = AI_NEWS_IMAGE_STYLE_ID;
+          patch.selectedImageUrl = allImages[0];
+          patch.smartSelectedImageIndex = 0;
+          patch.smartSelectedImageReason = 'เลือกรูปแรกจากข่าว ใช้ img2img คงรูปเดิมตกแต่งเพิ่ม';
+          patch.smartConfigNote = `Smart Setup (ข่าว) ดูดรูปจากเว็บเจอ ${allImages.length} รูป → ใช้ img2img คงรูปเดิมตกแต่งเพิ่ม`;
         }
-      } else if (allImages.length > 0) {
-        patch.smartConfigNote = 'มีรูปแนบมา แต่ยังไม่ใช่รายการที่ดึงจาก YouTube เลยไม่ให้ Vision เลือกรูปอัตโนมัติ';
+      } else {
+        // No images → AI สร้างภาพประกอบเอง
+        patch.useAttachedImage = false;
+        patch.decorateOriginalPhoto = false;
+        patch.selectedImageUrl = '';
+        patch.cardImagePromptStyleId = imagePromptStyles.length > 0 ? imagePromptStyles[0].id : '';
+        patch.smartConfigNote = 'Smart Setup ไม่มีรูปแนบ → ใช้ AI สร้างภาพประกอบเอง';
       }
 
       updateBulkItem(item.id, patch);
       const merged = { ...item, ...patch };
+
+      // ── เลือก keyword จากพาดหัว (ถ้ามี, เพื่อเน้นคำสำคัญ) ─────────────
+      if (merged.selectedHeadline && merged.decorateOriginalPhoto) {
+        const markedKeywords = pickImpactfulKeywords(merged.selectedHeadline, 2);
+        if (markedKeywords.length > 0) {
+          updateBulkItem(item.id, { markedKeywords });
+          setSmartConfigLog(`✍️ ${label} เน้นคำสำคัญในพาดหัว: ${markedKeywords.join(', ')}`);
+        }
+      }
 
       // ── Step 3: สร้างบทความ + พาดหัว (ถ้ายังไม่มี) ──────────────────────────
       const style = writingStyles.find(s => s.id === merged.writingStyleId);
@@ -3148,11 +3192,14 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
             headlineText,
             attempt => setSmartConfigLog(`🔄 ${label} หาพาดหัวภาษาไทย รอบ ${attempt}...`),
           );
+          const newMarkedKeywords = headlineResult.markedKeywords?.length
+            ? headlineResult.markedKeywords
+            : pickImpactfulKeywords(headlineResult.selectedHeadline, 2);
           updateBulkItem(item.id, {
             generatedArticle: articleText, generatedCommentPost: commentPostText,
             generatedHeadlines: headlineResult.headlines,
             selectedHeadline: headlineResult.selectedHeadline,
-            markedKeywords: headlineResult.markedKeywords,
+            markedKeywords: newMarkedKeywords,
             smartHeadlineNote: headlineResult.note,
             status: 'article-done',
           });
@@ -3798,14 +3845,19 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                 <span className="text-xs text-gray-500 self-center shrink-0">⚡ Action ทุกอัน:</span>
 
                 {/* ── Smart Auto-Config ── */}
-                <button
-                  onClick={handleSmartAutoConfig}
-                  disabled={isSmartConfigRunning || isBulkProcessing}
-                  className="text-xs bg-violet-700/70 hover:bg-violet-600 disabled:opacity-50 text-violet-100 px-3 py-1.5 rounded-lg font-bold transition-all border border-violet-500/50 flex items-center gap-1.5"
-                  title="วิเคราะห์รูปด้วย AI Vision แล้วตั้งค่าทุกอย่างให้อัตโนมัติ (รูป+บทความ+พาดหัวไทย+คำสำคัญ)"
-                >
-                  {isSmartConfigRunning ? '⏳ กำลัง Smart Setup...' : `🧠 Smart Setup (${selectedBulkCount} อัน)`}
-                </button>
+                <div className="flex flex-col w-full sm:w-auto">
+                  <button
+                    onClick={handleSmartAutoConfig}
+                    disabled={isSmartConfigRunning || isBulkProcessing}
+                    className="text-xs bg-violet-700/70 hover:bg-violet-600 disabled:opacity-50 text-violet-100 px-3 py-1.5 rounded-lg font-bold transition-all border border-violet-500/50 flex items-center gap-1.5"
+                    title="ตั้งค่าทุกอย่างอัตโนมัติ: ตรวจจับ YouTube/ข่าว, ดูดรูป, เลือกสไตล์ภาพ, วิเคราะห์รูป, เลือกคำสำคัญ, สร้างบทความ+พาดหัว"
+                  >
+                    {isSmartConfigRunning ? '⏳ กำลัง Smart Setup...' : `🧠 Smart Setup (${selectedBulkCount} อัน)`}
+                  </button>
+                  <span className="text-[10px] text-violet-400/60 mt-1 max-w-[280px] leading-tight">
+                    🔍 ดูดรูปข่าว (ถ้ายังไม่มี) → ตั้งสไตล์ภาพตามประเภท YouTube/ข่าว → เปิด img2img คงรูปเดิมตกแต่งเพิ่ม → เน้นคำสำคัญในพาดหัว → สร้างบทความ+พาดหัวไทย
+                  </span>
+                </div>
 
                 {/* Restore cache for all selected */}
                 <button
