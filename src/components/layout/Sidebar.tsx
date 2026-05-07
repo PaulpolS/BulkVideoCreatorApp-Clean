@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type TabId = 'home' | 'singleclip' | 'bulk' | 'financial' | 'news' | 'articlestock' | 'pagestock' | 'assets' | 'avatar' | 'clone' | 'automator' | 'lazada' | 'horoscope' | 'tracking' | 'radar' | 'cleaner' | 'scanner' | 'prompt' | 'autoeditor' | 'course' | 'canvas' | 'aipage';
+export type TabId = 'home' | 'singleclip' | 'bulk' | 'financial' | 'stockclip' | 'news' | 'articlestock' | 'pagestock' | 'assets' | 'avatar' | 'clone' | 'automator' | 'lazada' | 'horoscope' | 'tracking' | 'radar' | 'cleaner' | 'scanner' | 'prompt' | 'autoeditor' | 'course' | 'canvas' | 'aipage';
 
 interface NavGroup {
   label: string;
@@ -23,6 +23,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'singleclip', icon: '✂️', label: 'คัตชนคลิป', color: '#6366f1' },
       { id: 'bulk', icon: '📹', label: 'Bulk Creator', color: '#3b82f6' },
       { id: 'financial', icon: '🎙️', label: 'คลิปเล่าเรื่อง', color: '#f97316' },
+      { id: 'stockclip', icon: '🎞️', label: 'ทำคลิปStock', color: '#14b8a6' },
     ],
   },
   {

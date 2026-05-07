@@ -28,9 +28,10 @@ import { AIPagePostGeneratorTab } from './components/prompt/AIPagePostGeneratorT
 import { CanvasEditorTab } from './components/canvas/CanvasEditorTab';
 import { ArticleStockTab } from './components/stock/ArticleStockTab';
 import { PageStockTab } from './components/stock/PageStockTab';
+import { StockClipTab } from './components/stock/StockClipTab';
 
 const VALID_TAB_IDS: TabId[] = [
-  'home', 'singleclip', 'bulk', 'financial', 'news', 'articlestock', 'assets',
+  'home', 'singleclip', 'bulk', 'financial', 'stockclip', 'news', 'articlestock', 'assets',
   'avatar', 'clone', 'automator', 'lazada', 'horoscope', 'tracking', 'radar',
   'cleaner', 'scanner', 'prompt', 'autoeditor', 'course', 'canvas', 'aipage', 'pagestock',
 ];
@@ -129,6 +130,7 @@ function App() {
     singleclip: '✂️ คัตชนคลิป',
     bulk: '📹 Bulk Video Creator',
     financial: '🎙️ สตูดิโอเล่าเรื่อง',
+    stockclip: '🎞️ ทำคลิปStock',
     news: '🔍 ค้นหาContent น่าสนใจ',
     assets: '📂 คลังแสง',
     avatar: '👨‍🎨 อวาตาร์ PNGTuber',
@@ -237,6 +239,11 @@ function App() {
           {visitedTabs.has('financial') && (
             <div className={activeTab !== 'financial' ? 'hidden' : ''}>
               <FinancialDocumentaryTab />
+            </div>
+          )}
+          {visitedTabs.has('stockclip') && (
+            <div className={activeTab !== 'stockclip' ? 'hidden' : ''}>
+              <StockClipTab />
             </div>
           )}
           {visitedTabs.has('assets') && (

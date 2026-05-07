@@ -3127,6 +3127,335 @@ const fileSaverPlugin = (): Plugin => ({
       });
     });
 
+    // ── Stock Clip (สุ่มตัดต่อคลิปStock ด้วยไฟล์เสียง) ──────────────────────
+    // Shared control state for pause/resume/stop
+    let stockClipProcess: any = null;
+    let stockClipPaused = false;
+    let stockClipStopped = false;
+    let stockClipStream = null as any;
+
+    server.middlewares.use('/api/list-audio-files', (req, res) => {
+      if (req.method !== 'POST') { res.statusCode = 405; res.end(''); return; }
+      res.setHeader('Content-Type', 'application/json');
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', () => {
+        try {
+          const { folder } = JSON.parse(body);
+          if (!folder) { res.end(JSON.stringify({ files: [] })); return; }
+          const AUDIO_EXTS = ['.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac'];
+          const allFiles = fs.readdirSync(folder);
+          const audioFiles = allFiles.filter((f: string) => {
+            const ext = path.extname(f).toLowerCase();
+            return AUDIO_EXTS.includes(ext);
+          });
+          res.end(JSON.stringify({ files: audioFiles }));
+        } catch (e: any) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: e.message, files: [] }));
+        }
+      });
+    });
+
+    server.middlewares.use('/api/stockclip-pause', (req, res) => {
+      if (req.method !== 'POST') { res.statusCode = 405; res.end(''); return; }
+      res.setHeader('Content-Type', 'application/json');
+      stockClipPaused = true;
+      if (stockClipProcess) {
+        try { stockClipProcess.kill('SIGSTOP'); } catch(e) {}
+      }
+      if (stockClipStream) {
+        try { stockClipStream.write(`data: ${JSON.stringify({ paused: true })}\n\n`); } catch(e) {}
+      }
+      res.end(JSON.stringify({ success: true }));
+    });
+
+    server.middlewares.use('/api/stockclip-resume', (req, res) => {
+      if (req.method !== 'POST') { res.statusCode = 405; res.end(''); return; }
+      res.setHeader('Content-Type', 'application/json');
+      stockClipPaused = false;
+      if (stockClipProcess) {
+        try { stockClipProcess.kill('SIGCONT'); } catch(e) {}
+      }
+      if (stockClipStream) {
+        try { stockClipStream.write(`data: ${JSON.stringify({ resumed: true })}\n\n`); } catch(e) {}
+      }
+      res.end(JSON.stringify({ success: true }));
+    });
+
+    server.middlewares.use('/api/stockclip-stop', (req, res) => {
+      if (req.method !== 'POST') { res.statusCode = 405; res.end(''); return; }
+      res.setHeader('Content-Type', 'application/json');
+      stockClipStopped = true;
+      stockClipPaused = false;
+      if (stockClipProcess) {
+        try { stockClipProcess.kill('SIGKILL'); } catch(e) {}
+        stockClipProcess = null;
+      }
+      if (stockClipStream) {
+        try {
+          stockClipStream.write(`data: ${JSON.stringify({ error: 'ถูกหยุดโดยผู้ใช้' })}\n\n`);
+          stockClipStream.end();
+        } catch(e) {}
+        stockClipStream = null;
+      }
+      res.end(JSON.stringify({ success: true }));
+    });
+
+    server.middlewares.use('/api/render-stockclip-audio', (req, res) => {
+      if (req.method !== 'POST') return;
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', () => {
+        try {
+          const { sourceFolder, audioFolder, outputFolder, audioFile } = JSON.parse(body);
+
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
+
+          stockClipStream = res;
+          stockClipStopped = false;
+          stockClipPaused = false;
+
+          const ffmpegPath = require('ffmpeg-static');
+          const { execSync, spawn } = require('child_process');
+
+          // 1. Recursively find all video files
+          const VIDEO_EXTS = ['.mp4', '.mov', '.avi', '.mkv', '.m4v', '.webm'];
+          const allVideos: string[] = [];
+
+          function scanDir(dir: string) {
+            if (!fs.existsSync(dir)) return;
+            const entries = fs.readdirSync(dir);
+            for (const entry of entries) {
+              const fullPath = path.join(dir, entry);
+              const stat = fs.statSync(fullPath);
+              if (stat.isDirectory()) {
+                scanDir(fullPath);
+              } else if (stat.isFile()) {
+                const ext = path.extname(entry).toLowerCase();
+                if (VIDEO_EXTS.includes(ext)) {
+                  allVideos.push(fullPath);
+                }
+              }
+            }
+          }
+
+          scanDir(sourceFolder);
+
+          if (allVideos.length === 0) {
+            res.write(`data: ${JSON.stringify({ error: 'ไม่พบไฟล์วิดีโอในโฟลเดอร์ต้นทาง' })}\n\n`);
+            res.end();
+            stockClipStream = null;
+            return;
+          }
+
+          // 2. Get audio duration via ffprobe
+          const audioPath = path.join(audioFolder, audioFile);
+          if (!fs.existsSync(audioPath)) {
+            res.write(`data: ${JSON.stringify({ error: 'ไม่พบไฟล์เสียง' })}\n\n`);
+            res.end();
+            stockClipStream = null;
+            return;
+          }
+
+          let audioDuration = 0;
+          try {
+            const probeOut = execSync(
+              `ffprobe -v error -show_entries format=duration -of csv=p=0 "${audioPath}"`,
+              { encoding: 'utf-8', timeout: 15000 }
+            );
+            audioDuration = parseFloat(probeOut.trim());
+            if (isNaN(audioDuration) || audioDuration <= 0) throw new Error('Invalid duration');
+          } catch(e) {
+            // Fallback: try ffmpeg to read duration
+            try {
+              const probeOut = execSync(
+                `"${ffmpegPath}" -i "${audioPath}" 2>&1 | grep "Duration" | head -1`,
+                { encoding: 'utf-8', timeout: 15000 }
+              );
+              const match = probeOut.match(/Duration: (\d{2}):(\d{2}):(\d{2}\.\d{2})/);
+              if (match) {
+                audioDuration = parseInt(match[1]) * 3600 + parseInt(match[2]) * 60 + parseFloat(match[3]);
+              }
+            } catch(e2) {
+              res.write(`data: ${JSON.stringify({ error: 'ไม่สามารถอ่านความยาวไฟล์เสียงได้' })}\n\n`);
+              res.end();
+              stockClipStream = null;
+              return;
+            }
+          }
+
+          res.write(`data: ${JSON.stringify({ log: `ไฟล์เสียงยาว ${audioDuration.toFixed(1)} วินาที | พบ ${allVideos.length} คลิป` })}\n\n`);
+
+          // 3. Get durations of each video clip for smart selection
+          const clipDurations: { path: string; duration: number }[] = [];
+          for (const vPath of allVideos) {
+            if (stockClipStopped) { res.end(); stockClipStream = null; return; }
+            try {
+              const dOut = execSync(
+                `ffprobe -v error -show_entries format=duration -of csv=p=0 "${vPath}"`,
+                { encoding: 'utf-8', timeout: 10000 }
+              );
+              const dur = parseFloat(dOut.trim());
+              if (!isNaN(dur) && dur > 0.5) {
+                clipDurations.push({ path: vPath, duration: dur });
+              }
+            } catch(e) {}
+          }
+
+          if (clipDurations.length === 0) {
+            res.write(`data: ${JSON.stringify({ error: 'ไม่สามารถอ่านความยาวคลิปวิดีโอได้' })}\n\n`);
+            res.end();
+            stockClipStream = null;
+            return;
+          }
+
+          // 4. Randomly select clips to fill the audio duration
+          let remainingTime = audioDuration;
+          const selectedClips: string[] = [];
+          // Shuffle the clip pool for randomness
+          const pool = [...clipDurations].sort(() => Math.random() - 0.5);
+
+          // Use a greedy approach: keep picking random clips until we fill the duration
+          let attempts = 0;
+          const maxAttempts = 10000;
+          while (remainingTime > 0 && attempts < maxAttempts) {
+            attempts++;
+            // Pick a random clip from the pool
+            const clip = pool[Math.floor(Math.random() * pool.length)];
+            if (clip.duration <= remainingTime) {
+              selectedClips.push(clip.path);
+              remainingTime -= clip.duration;
+            } else {
+              // If this clip is too long, still use it but trim it with a very short segment
+              // Actually, let's just skip if too long and try another
+              continue;
+            }
+          }
+
+          // If we couldn't fill the duration, add one more clip (will be trimmed)
+          if (remainingTime > 0 && clipDurations.length > 0) {
+            selectedClips.push(pool[Math.floor(Math.random() * pool.length)].path);
+          }
+
+          if (selectedClips.length === 0) {
+            res.write(`data: ${JSON.stringify({ error: 'ไม่สามารถเลือกคลิปได้เพียงพอ' })}\n\n`);
+            res.end();
+            stockClipStream = null;
+            return;
+          }
+
+          res.write(`data: ${JSON.stringify({ log: `สุ่มเลือก ${selectedClips.length} คลิป มาเรียงต่อกัน` })}\n\n`);
+
+          // 5. Detect resolution from first clip for 16:9 consistency
+          let targetW = 1920, targetH = 1080;
+          try {
+            const probeOut = execSync(`"${ffmpegPath}" -i "${selectedClips[0]}" 2>&1 || true`, { encoding: 'utf-8' });
+            const match = probeOut.match(/Video: .*, (\d+)x(\d+)/);
+            if (match) {
+              targetW = parseInt(match[1]);
+              targetH = parseInt(match[2]);
+              if (targetW % 2 !== 0) targetW += 1;
+              if (targetH % 2 !== 0) targetH += 1;
+            }
+          } catch (e) {}
+
+          // 6. Build output path (same name as audio file + _output)
+          const audioBaseName = path.parse(audioFile).name;
+          const safeName = audioBaseName.replace(/[^ก-๙a-zA-Z0-9_-]/g, '_');
+          const outputFileName = `${safeName}_output.mp4`;
+          const outputPath = path.join(outputFolder, outputFileName);
+
+          // 7. Build concat list
+          const listPath = path.join(outputFolder, `stockclip_concat_${Date.now()}.txt`);
+          let listContent = '';
+          for (const videoPath of selectedClips) {
+            const escaped = videoPath.replace(/'/g, "'\\''");
+            listContent += `file '${escaped}'\n`;
+          }
+          fs.writeFileSync(listPath, listContent);
+
+          // 8. Run FFmpeg: concat video only from footage + audio from the audio file
+          // -map 0:v:0  = video streams from concatenated clips (no audio from footage)
+          // -map 1:a:0  = audio from the audio file only
+          const ffmpegCommand = `"${ffmpegPath}" -y -f concat -safe 0 -i "${listPath}" -i "${audioPath}" -map 0:v:0 -map 1:a:0 -vf "scale=${targetW}:${targetH}:force_original_aspect_ratio=increase,crop=${targetW}:${targetH},setsar=1" -c:v libx264 -preset fast -crf 22 -r 24 -pix_fmt yuv420p -c:a aac -b:a 128k -shortest "${outputPath}"`;
+
+          res.write(`data: ${JSON.stringify({ log: 'กำลังเรนเดอร์...' })}\n\n`);
+
+          stockClipProcess = spawn(ffmpegCommand, { shell: true });
+
+          stockClipProcess.stderr.on('data', (data: any) => {
+            if (stockClipStopped) return;
+            const lines = data.toString().split('\n');
+            for (const l of lines) {
+              if (l.trim().length > 0) {
+                const timeMatch = l.trim().match(/time=(\d{2}:\d{2}:\d{2}\.\d{2})/);
+                if (timeMatch) {
+                  try {
+                    if (!res.writableEnded) {
+                      res.write(`data: ${JSON.stringify({ log: `เรนเดอร์... ${timeMatch[1]}` })}\n\n`);
+                    }
+                  } catch(e) {}
+                }
+              }
+            }
+          });
+
+          stockClipProcess.on('close', (code: number) => {
+            try { fs.unlinkSync(listPath); } catch(e) {}
+            stockClipProcess = null;
+            if (stockClipStopped) {
+              // Already handled by stop
+              return;
+            }
+            if (code !== 0 && code !== null) {
+              if (!res.writableEnded) {
+                res.write(`data: ${JSON.stringify({ error: `FFmpeg error (code ${code})` })}\n\n`);
+                res.end();
+              }
+            } else {
+              if (!res.writableEnded) {
+                res.write(`data: ${JSON.stringify({
+                  success: true,
+                  filePath: outputPath,
+                  duration: audioDuration,
+                  clipsUsed: selectedClips.length,
+                })}\n\n`);
+                res.end();
+              }
+            }
+            stockClipStream = null;
+          });
+
+          stockClipProcess.on('error', (err: any) => {
+            try { fs.unlinkSync(listPath); } catch(e) {}
+            stockClipProcess = null;
+            if (!res.writableEnded) {
+              res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+              res.end();
+            }
+            stockClipStream = null;
+          });
+
+          // Clean up stream on client disconnect
+          res.on('close', () => {
+            if (stockClipProcess && !stockClipStopped) {
+              stockClipProcess.kill('SIGKILL');
+              stockClipProcess = null;
+            }
+            stockClipStream = null;
+          });
+        } catch(e: any) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: e.message }));
+          stockClipStream = null;
+          stockClipProcess = null;
+        }
+      });
+    });
+
     // ── Disk Cleaner APIs ──────────────────────────────────────────────
     server.middlewares.use('/api/scan-disk', (req, res) => {
       if (req.method !== 'POST') return;
