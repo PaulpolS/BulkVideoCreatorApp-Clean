@@ -980,6 +980,126 @@ const fileSaverPlugin = (): Plugin => ({
       });
     });
 
+    // === List image files in a folder (png, jpg, jpeg, gif, webp) ===
+    server.middlewares.use('/api/list-folder-images', (req, res) => {
+      if (req.method !== 'POST') { res.statusCode = 405; res.end(''); return; }
+      res.setHeader('Content-Type', 'application/json');
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', () => {
+        try {
+          const { folder } = JSON.parse(body);
+          if (!folder) { res.end(JSON.stringify({ files: [] })); return; }
+          if (!fs.existsSync(folder)) { res.end(JSON.stringify({ files: [] })); return; }
+          const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
+          const allFiles = fs.readdirSync(folder);
+          const imageFiles = allFiles.filter(f => {
+            const ext = path.extname(f).toLowerCase();
+            return IMAGE_EXTS.includes(ext);
+          });
+          res.end(JSON.stringify({ files: imageFiles }));
+        } catch (e: any) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: e.message, files: [] }));
+        }
+      });
+    });
+
+    // === Random stock image from a folder (returns base64 data URL) ===
+    server.middlewares.use('/api/random-stock-image', (req, res) => {
+      if (req.method !== 'POST') { res.statusCode = 405; res.end(''); return; }
+      res.setHeader('Content-Type', 'application/json');
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', () => {
+        try {
+          const { folder } = JSON.parse(body);
+          if (!folder || !fs.existsSync(folder)) {
+            res.end(JSON.stringify({ success: false, error: 'Folder not found' }));
+            return;
+          }
+          const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
+          const files = fs.readdirSync(folder).filter(f => IMAGE_EXTS.includes(path.extname(f).toLowerCase()));
+          if (files.length === 0) {
+            res.end(JSON.stringify({ success: false, error: 'No images in folder' }));
+            return;
+          }
+          const randomFile = files[Math.floor(Math.random() * files.length)];
+          const filePath = path.join(folder, randomFile);
+          const ext = path.extname(randomFile).toLowerCase().replace('.', '');
+          const mime = ext === 'jpg' ? 'jpeg' : ext;
+          const data = fs.readFileSync(filePath).toString('base64');
+          res.end(JSON.stringify({ success: true, dataUrl: `data:image/${mime};base64,${data}`, fileName: randomFile }));
+        } catch (e: any) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ success: false, error: e.message }));
+        }
+      });
+    });
+
+    // === List subfolders with image counts (for footage management) ===
+    server.middlewares.use('/api/list-footage-folders', (req, res) => {
+      if (req.method !== 'POST') { res.statusCode = 405; res.end(''); return; }
+      res.setHeader('Content-Type', 'application/json');
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', () => {
+        try {
+          const { parentFolder } = JSON.parse(body);
+          if (!parentFolder || !fs.existsSync(parentFolder)) {
+            res.end(JSON.stringify({ folders: [] }));
+            return;
+          }
+          const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
+          const entries = fs.readdirSync(parentFolder, { withFileTypes: true });
+          const folders = entries
+            .filter(e => e.isDirectory())
+            .map(e => {
+              const dirPath = path.join(parentFolder, e.name);
+              let imageCount = 0;
+              try {
+                const files = fs.readdirSync(dirPath);
+                imageCount = files.filter(f => IMAGE_EXTS.includes(path.extname(f).toLowerCase())).length;
+              } catch {}
+              return { name: e.name, path: dirPath, imageCount };
+            })
+            .sort((a, b) => a.name.localeCompare(b.name));
+          res.end(JSON.stringify({ folders }));
+        } catch (e: any) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: e.message, folders: [] }));
+        }
+      });
+    });
+
+    // === Create subfolders inside a parent folder ===
+    server.middlewares.use('/api/create-subfolders', (req, res) => {
+      if (req.method !== 'POST') { res.statusCode = 405; res.end(''); return; }
+      res.setHeader('Content-Type', 'application/json');
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', () => {
+        try {
+          const { parentFolder, subfolders } = JSON.parse(body);
+          if (!parentFolder || !Array.isArray(subfolders)) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ success: false, error: 'Missing parentFolder or subfolders array' }));
+            return;
+          }
+          for (const name of subfolders) {
+            const dirPath = path.join(parentFolder, name);
+            if (!fs.existsSync(dirPath)) {
+              fs.mkdirSync(dirPath, { recursive: true });
+            }
+          }
+          res.end(JSON.stringify({ success: true }));
+        } catch (e: any) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ success: false, error: e.message }));
+        }
+      });
+    });
+
     // === Run bash script directly via SSE ===
     server.middlewares.use('/api/run-bash-script', (req, res) => {
       if (req.method !== 'POST') { res.statusCode = 405; res.end(''); return; }

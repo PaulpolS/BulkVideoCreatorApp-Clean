@@ -1345,7 +1345,7 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
       {/* GitHub Finder Mode */}
       {activeMode === 'github' && (
         <div className="space-y-4">
-          <GithubFinderTab />
+          <GithubFinderTab onSendToAIPage={onSendToAIPage} />
         </div>
       )}
 

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Card } from '../ui/Card';
 import { getOpenRouterKeyCandidates } from '../../hooks/useApiSettings';
 
@@ -34,6 +34,10 @@ const KEYWORDS = [
   { label: 'Browser AI / Web Scraping', query: 'topic:web-scraping ai', emoji: '🌐' },
   { label: 'OpenAI / GPT Tools', query: 'topic:openai', emoji: '💬' },
 ];
+
+interface GithubFinderProps {
+  onSendToAIPage?: (items: { rawArticle: string; sourceUrl: string; title: string; tags?: string[]; images?: string[]; sourceType?: string; domain?: string }[]) => void;
+}
 
 interface GithubRepo {
   id: number;
@@ -104,8 +108,9 @@ const GH_MODEL_OPTIONS = [
   { id: 'google/gemma-3-27b-it:free', name: 'Gemma 3 27B (ฟรี!)' },
 ];
 
-export function GithubFinderTab() {
+export function GithubFinderTab({ onSendToAIPage }: GithubFinderProps) {
   const [selectedQuery, setSelectedQuery] = useState(KEYWORDS[0].query);
+  const selectedKw = KEYWORDS.find(k => k.query === selectedQuery);
   const [count, setCount] = useState('10');
   const [isLoading, setIsLoading] = useState(false);
   const [repos, setRepos] = useState<GithubRepo[]>([]);
@@ -118,6 +123,176 @@ export function GithubFinderTab() {
   const [genLog, setGenLog] = useState('');
   const stopRef = useRef(false);
   const [ghModel, setGhModel] = useState<string>(() => localStorage.getItem('gh_finder_model') || GH_MODEL_OPTIONS[0].id);
+
+  // ─── Footage folder management ────────────────────────────────────
+  const [footageFolder, setFootageFolder] = useState(() => localStorage.getItem('gh_footage_folder') || '');
+  const [subfolders, setSubfolders] = useState<{ name: string; path: string; imageCount: number }[]>([]);
+  const [stockCount, setStockCount] = useState('5');
+  const [generatedPrompt, setGeneratedPrompt] = useState('');
+  const [isCreatingFolders, setIsCreatingFolders] = useState(false);
+  const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
+  const [footageMessage, setFootageMessage] = useState('');
+  const [footageFolderName, setFootageFolderName] = useState(() => {
+    const saved = localStorage.getItem('gh_footage_folder');
+    if (saved) {
+      const parts = saved.split('/').filter(Boolean);
+      return parts[parts.length - 1] || saved;
+    }
+    return '';
+  });
+  const [showFootageSection, setShowFootageSection] = useState(() => localStorage.getItem('gh_footage_folder') ? true : false);
+
+  // Load subfolders on mount if folder was saved
+  useEffect(() => {
+    const saved = localStorage.getItem('gh_footage_folder');
+    if (saved) {
+      const parts = saved.split('/').filter(Boolean);
+      setFootageFolderName(parts[parts.length - 1] || saved);
+      loadSubfolders(saved);
+    }
+  }, []);
+
+  const pickFootageFolder = async () => {
+    try {
+      setFootageMessage('⏳ กำลังเปิดเลือก Folder...');
+      const res = await fetch('/api/pick-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: 'เลือก Folder สำหรับเก็บรูป Footage (ภาพประกอบโพส)' }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        if (data.cancelled) {
+          setFootageMessage('');
+        } else {
+          setFootageMessage('❌ ไม่สามารถเลือก Folder ได้');
+        }
+        return;
+      }
+      setFootageFolder(data.dir);
+      localStorage.setItem('gh_footage_folder', data.dir);
+      const parts = data.dir.split('/').filter(Boolean);
+      setFootageFolderName(parts[parts.length - 1] || data.dir);
+      setFootageMessage('');
+      setGeneratedPrompt('');
+      // Load existing subfolders
+      loadSubfolders(data.dir);
+    } catch (e: any) {
+      setFootageMessage(`❌ ${e.message || 'เกิดข้อผิดพลาด'}`);
+    }
+  };
+
+  const loadSubfolders = async (parentFolder: string) => {
+    try {
+      const res = await fetch('/api/list-footage-folders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentFolder }),
+      });
+      const data = await res.json();
+      setSubfolders(data.folders || []);
+    } catch {
+      setSubfolders([]);
+    }
+  };
+
+  const createKeywordSubfolders = async () => {
+    const folder = footageFolder;
+    if (!folder) return;
+    setIsCreatingFolders(true);
+    setFootageMessage('');
+    try {
+      const subfolderNames = KEYWORDS.map(k => k.label);
+      const res = await fetch('/api/create-subfolders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentFolder: folder, subfolders: subfolderNames }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFootageMessage(`✅ สร้าง ${subfolderNames.length} subfolder เรียบร้อย!`);
+        await loadSubfolders(folder);
+      } else {
+        setFootageMessage(`❌ ${data.error || 'เกิดข้อผิดพลาด'}`);
+      }
+    } catch (e: any) {
+      setFootageMessage(`❌ ${e.message || 'เกิดข้อผิดพลาด'}`);
+    } finally {
+      setIsCreatingFolders(false);
+    }
+  };
+
+  const handleGenerateStockPrompt = async () => {
+    if (!selectedKw) {
+      setFootageMessage('❌ กรุณาเลือกหัวข้อที่ต้องการ');
+      return;
+    }
+    const kw = selectedKw;
+    const numCount = Math.max(1, Math.min(50, parseInt(stockCount || '5') || 5));
+    setIsGeneratingPrompt(true);
+    setFootageMessage('');
+    setGeneratedPrompt('');
+    try {
+      const promptText = `คุณคือผู้เชี่ยวชาญด้านการสร้าง Prompt สำหรับ AI Image Generation (เช่น Midjourney, DALL-E, Stable Diffusion)
+
+ฉันต้องการสร้างรูปภาพ "Footage / ภาพประกอบ" สำหรับใช้ในบทความและโพส Facebook เกี่ยวกับ "${kw.label}" (หัวข้อ GitHub: ${kw.query})
+
+สร้าง Prompt ภาษาอังกฤษจำนวน ${numCount} แบบ สำหรับใช้สร้างรูปภาพประกอบเนื้อหา โดยแต่ละ Prompt:
+1. อธิบายภาพที่ต้องการอย่างละเอียด ในสไตล์ professional stock photo / modern technology
+2. ระบุ mood & lighting: bright, professional, modern, clean background
+3. Aspect ratio: 16:9 (suitable for cover images)
+4. ไม่มีตัวหนังสือในภาพ
+5. ไม่มีคน (หรือมีก็ได้ แต่เป็นมุมมองมือ/ภาพไกลๆ)
+6. เน้น visual ที่ดูทันสมัย เป็นสากล
+7. ให้เหมาะกับใช้เป็น "ภาพประกอบบทความ" ในโซเชียลมีเดีย
+
+ตอบเป็น JSON array เท่านั้น:
+["prompt 1", "prompt 2", ...]`;
+
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${(await getOpenRouterKeyCandidates())[0]?.key || ''}`,
+          'HTTP-Referer': window.location.origin,
+          'X-Title': 'Bulk Video Creator - Footage Prompt',
+        },
+        body: JSON.stringify({
+          model: 'google/gemini-2.5-flash',
+          messages: [{ role: 'user', content: promptText }],
+          temperature: 0.8,
+        }),
+      });
+
+      if (!res.ok) throw new Error(`API error ${res.status}`);
+      const data = await res.json();
+      const raw = data.choices?.[0]?.message?.content || '';
+
+      // Parse JSON array from response
+      const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/\s*```$/, '').trim();
+      let prompts: string[] = [];
+      try {
+        prompts = JSON.parse(cleaned);
+      } catch {
+        const arrMatch = cleaned.match(/\[[\s\S]*\]/);
+        if (arrMatch) {
+          try { prompts = JSON.parse(arrMatch[0]); } catch {}
+        }
+      }
+
+      if (Array.isArray(prompts) && prompts.length > 0) {
+        setGeneratedPrompt(prompts.join('\n\n'));
+        setFootageMessage(`✅ สร้าง ${prompts.length} Prompt เรียบร้อย!`);
+      } else {
+        setGeneratedPrompt(raw);
+        setFootageMessage('⚠️ ได้ผลลัพธ์มาแล้ว กรุณาตรวจสอบ');
+      }
+    } catch (e: any) {
+      setFootageMessage(`❌ ${e.message || 'เกิดข้อผิดพลาด'}`);
+    } finally {
+      setIsGeneratingPrompt(false);
+    }
+  };
 
   // ─── OpenRouter helpers (ดึง key จาก shared utility) ───────────
 
@@ -474,9 +649,50 @@ ${repo.html_url}"
     downloadCSV(rows, `github_clickbait_posts_${Date.now()}.csv`);
   };
 
-  const selectedKw = KEYWORDS.find(k => k.query === selectedQuery);
   const selectedCount = selectedIds.size;
   const doneCount = generatedPosts.filter(p => p.status === 'done').length;
+
+  const [sendLog, setSendLog] = useState('');
+
+  const handleSendSelectedToAIPage = async () => {
+    if (!onSendToAIPage) return;
+    const selected = repos.filter(r => selectedIds.has(r.id));
+    if (!selected.length) return alert('กรุณาเลือก repo ก่อน');
+    const kw = KEYWORDS.find(k => k.query === selectedQuery);
+    const topicLabel = kw?.label || 'GitHub';
+
+    setSendLog('⏳ กำลังดึง README ของ repo ที่เลือก...');
+    const items = [];
+    for (let i = 0; i < selected.length; i++) {
+      const r = selected[i];
+      setSendLog(`⏳ [${i + 1}/${selected.length}] ดึง README: ${r.full_name}`);
+      let readmeContent = '';
+      let gifImages: string[] = [];
+      try {
+        const result = await fetchReadme(r.full_name);
+        readmeContent = result.content;
+        gifImages = result.images.filter(Boolean);
+      } catch {}
+      items.push({
+        rawArticle: `[GitHub - ${r.full_name}]
+${r.description || ''}
+⭐ ${r.stargazers_count.toLocaleString()} | 🍴 ${r.forks_count.toLocaleString()} | 🔵 ${r.language || 'N/A'}
+Topics: ${r.topics.join(', ') || 'N/A'}
+URL: ${r.html_url}
+
+${readmeContent ? `📖 README (บางส่วน):
+${readmeContent}` : ''}`,
+        sourceUrl: r.html_url,
+        title: r.full_name,
+        tags: ['github', topicLabel],
+        images: gifImages,
+        sourceType: 'github',
+        domain: 'github.com',
+      });
+    }
+    setSendLog('');
+    onSendToAIPage(items);
+  };
 
   return (
     <Card>
@@ -595,6 +811,157 @@ ${repo.html_url}"
         </div>
       )}
 
+      {/* ── Footage / Stock Image Management ── */}
+      <div className="mb-4 border border-gray-700/50 rounded-xl overflow-hidden" style={{ backgroundColor: 'var(--bg-card, #1a1a2e)' }}>
+        <button
+          onClick={() => setShowFootageSection(!showFootageSection)}
+          className="w-full flex items-center justify-between p-4 hover:opacity-80 transition-all"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-lg">🖼️</span>
+            <span className="font-bold text-sm">รูป Footage ประกอบโพส</span>
+          </div>
+          <span className={`text-xs text-gray-500 transition-transform ${showFootageSection ? 'rotate-180' : ''}`}>▼</span>
+        </button>
+
+        {showFootageSection && (
+          <div className="px-4 pb-4 space-y-3">
+            <p className="text-xs text-gray-400">เลือก folder ที่มีรูปภาพ หรือสร้าง subfolder ตามหัวข้อ Dropbox</p>
+
+            {/* Folder picker */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={pickFootageFolder}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-lg transition-all flex items-center gap-2"
+              >
+                📁 เลือก Folder
+              </button>
+              {footageFolder && (
+                <span className="text-xs text-gray-400 truncate flex-1">
+                  📂 {footageFolderName}
+                </span>
+              )}
+            </div>
+
+            {footageFolder && subfolders.length === 0 && (
+              <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                <p className="text-xs text-amber-300 mb-2">
+                  ⚡ Folder นี้ยังไม่มี subfolder — กดสร้าง subfolder ตามหัวข้อทั้งหมด ({KEYWORDS.length} หัวข้อ) เลย!
+                </p>
+                <button
+                  onClick={createKeywordSubfolders}
+                  disabled={isCreatingFolders}
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-bold rounded-lg transition-all"
+                >
+                  {isCreatingFolders ? '⏳ กำลังสร้าง...' : '📂 สร้าง Subfolder ทั้งหมด'}
+                </button>
+              </div>
+            )}
+
+            {subfolders.length > 0 && (
+              <>
+                {/* Subfolder dropdown — synced with selectedQuery */}
+                <div className="flex items-center gap-2">
+                  <select
+                    value={selectedQuery}
+                    onChange={e => setSelectedQuery(e.target.value)}
+                    className="input-field flex-1 text-sm"
+                  >
+                    {subfolders.length > 0
+                      ? KEYWORDS.filter(k => subfolders.some(sf => sf.name === k.label)).map(k => {
+                          const sf = subfolders.find(s => s.name === k.label);
+                          return (
+                            <option key={k.query} value={k.query}>
+                              {k.emoji} {k.label} ({sf?.imageCount ?? 0} รูป)
+                            </option>
+                          );
+                        })
+                      : KEYWORDS.map(k => (
+                          <option key={k.query} value={k.query}>
+                            {k.emoji} {k.label}
+                          </option>
+                        ))
+                    }
+                  </select>
+                  {(subfolders.length < KEYWORDS.length) && (
+                    <button
+                      onClick={createKeywordSubfolders}
+                      disabled={isCreatingFolders}
+                      className="text-xs px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-gray-300 rounded-lg transition-all whitespace-nowrap"
+                      title="สร้าง subfolder ที่ยังไม่มีเพิ่ม"
+                    >
+                      {isCreatingFolders ? '⏳...' : '+ เพิ่ม'}
+                    </button>
+                  )}
+                </div>
+
+                {/* Stock count + generate prompt */}
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 bg-gray-800/60 border border-gray-700 rounded-lg px-3 py-2">
+                    <label className="text-xs text-gray-400 whitespace-nowrap">จำนวน Prompt</label>
+                    <input
+                      type="text"
+                      value={stockCount}
+                      onChange={e => {
+                        const v = e.target.value;
+                        if (v === '' || /^\d+$/.test(v)) setStockCount(v);
+                      }}
+                      onBlur={e => {
+                        if (e.target.value === '' || parseInt(e.target.value) < 1) setStockCount('5');
+                      }}
+                      className="w-14 bg-transparent text-sm font-bold text-white text-center outline-none"
+                    />
+                  </div>
+                  <button
+                    onClick={handleGenerateStockPrompt}
+                    disabled={isGeneratingPrompt}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-bold rounded-lg transition-all flex items-center gap-2 whitespace-nowrap"
+                  >
+                    {isGeneratingPrompt ? '⏳ กำลังสร้าง...' : '✨ สร้าง Prompt'}
+                  </button>
+                </div>
+
+                {/* Generated prompt result */}
+                {generatedPrompt && (
+                  <div className="p-3 bg-black/30 rounded-lg border border-gray-700/50">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-gray-400 font-medium">📝 Prompt ที่สร้างได้</span>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(generatedPrompt);
+                          setFootageMessage('📋 คัดลอก Prompt แล้ว!');
+                          setTimeout(() => setFootageMessage(''), 2000);
+                        }}
+                        className="text-xs px-2 py-0.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-all"
+                      >
+                        📋 copy ทั้งหมด
+                      </button>
+                    </div>
+                    <textarea
+                      readOnly
+                      value={generatedPrompt}
+                      className="w-full bg-gray-900/50 text-gray-200 text-xs font-mono p-2 rounded border border-gray-700/50 outline-none resize-none"
+                      rows={Math.min(generatedPrompt.split('\n').length, 12)}
+                    />
+                  </div>
+                )}
+              </>
+            )}
+
+            {footageMessage && (
+              <div className={`text-xs px-3 py-2 rounded-lg ${footageMessage.startsWith('✅') || footageMessage.startsWith('📋')
+                ? 'bg-green-500/10 border border-green-500/20 text-green-300'
+                : footageMessage.startsWith('❌')
+                  ? 'bg-red-500/10 border border-red-500/20 text-red-300'
+                  : 'bg-blue-500/10 border border-blue-500/20 text-blue-300'
+              }`}>
+                {footageMessage}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {error && (
         <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm mb-4">
           ⚠️ {error}
@@ -646,6 +1013,17 @@ ${repo.html_url}"
                 >
                   {isGenerating ? '⛔ หยุด' : '✍️ สร้างโพส Clickbait'}
                 </button>
+                {onSendToAIPage && (
+                  <button
+                    onClick={handleSendSelectedToAIPage}
+                    className="text-xs px-3 py-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded font-medium transition-all flex items-center gap-1"
+                  >
+                    📤 ส่งไปสร้างโพสต์ AI
+                  </button>
+                )}
+                {sendLog && (
+                  <span className="text-xs text-cyan-300 animate-pulse ml-1">{sendLog}</span>
+                )}
               </div>
             )}
           </div>

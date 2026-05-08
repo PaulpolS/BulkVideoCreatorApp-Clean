@@ -26,7 +26,7 @@ interface GenerationTask {
   bulkPromptJson?: string;
   bulkSourceUrl?: string;
   localYoutubeOverlay?: {
-    overlayKind?: 'youtube' | 'ai-news';
+    overlayKind?: 'youtube' | 'ai-news' | 'github';
     channelName?: string;
     channelLogoUrl?: string;
     subscriberText?: string;
@@ -107,6 +107,7 @@ const VISION_MODEL = "google/gemini-2.5-pro"; // Excellent for OCR and analysis
 const TEXT_MODEL = "google/gemini-2.5-flash"; // Fast for text generation
 const YOUTUBE_IMAGE_STYLE_ID = '__youtube_image_style__';
 const AI_NEWS_IMAGE_STYLE_ID = '__ai_news_image_style__';
+const GITHUB_IMAGE_STYLE_ID = '__github_image_style__';
 const ARTICLE_LENGTH_OPTIONS = [
   { id: 'short', label: 'สั้น', hint: 'ประมาณ 500-800 ตัวอักษร', range: '500-800' },
   { id: 'medium', label: 'กลาง', hint: 'ประมาณ 900-1,300 ตัวอักษร', range: '900-1300' },
@@ -130,6 +131,12 @@ const AI_NEWS_BADGE_STYLES = [
   { id: 'cyber-blue', name: 'น้ำเงิน Cyber', bg: '#0f172a', fg: '#e0f2fe', accent: '#38bdf8', border: '#2563eb' },
   { id: 'neon-purple', name: 'ม่วง Neon', bg: '#581c87', fg: '#ffffff', accent: '#f0abfc', border: '#a855f7' },
   { id: 'glass-dark', name: 'ดำ Glass', bg: 'rgba(0,0,0,0.78)', fg: '#ffffff', accent: '#22c55e', border: '#ffffff' },
+];
+const GITHUB_BADGE_STYLES = [
+  { id: 'github-dark', name: 'GitHub ดำ', bg: '#0d1117', fg: '#ffffff', accent: '#58a6ff', border: '#30363d' },
+  { id: 'neon-green', name: 'เขียว Neon', bg: '#0a2f1f', fg: '#ffffff', accent: '#39d353', border: '#1b5e3a' },
+  { id: 'purple-haze', name: 'ม่วง Haze', bg: '#1c0a2e', fg: '#ffffff', accent: '#c084fc', border: '#3b1f6e' },
+  { id: 'gold-rush', name: 'ทอง Oscar', bg: '#1f1400', fg: '#ffffff', accent: '#fbbf24', border: '#5c3d00' },
 ];
 
 interface AIPagePostGeneratorProps {
@@ -1887,8 +1894,8 @@ Return ONLY valid JSON format.`;
     return source === 'news' || source === 'rss' || tags.includes('ข่าว');
   };
 
-  const isSpecialImageStyle = (id: string) => id === YOUTUBE_IMAGE_STYLE_ID || id === AI_NEWS_IMAGE_STYLE_ID;
-  const isOverlayImageStyle = (id: string) => id === YOUTUBE_IMAGE_STYLE_ID || id === AI_NEWS_IMAGE_STYLE_ID;
+  const isSpecialImageStyle = (id: string) => id === YOUTUBE_IMAGE_STYLE_ID || id === AI_NEWS_IMAGE_STYLE_ID || id === GITHUB_IMAGE_STYLE_ID;
+  const isOverlayImageStyle = (id: string) => id === YOUTUBE_IMAGE_STYLE_ID || id === AI_NEWS_IMAGE_STYLE_ID || id === GITHUB_IMAGE_STYLE_ID;
   const getDisplayImageUrl = (url: string) => url.startsWith('http') ? `/api/proxy-image?url=${encodeURIComponent(url)}` : url;
 
   const fetchNewsImages = async (id: string) => {
@@ -2418,6 +2425,33 @@ Return only the final Thai text in the required format.`;
     if (overlayKind === 'ai-news') {
       drawAiNewsBadge(ctx, w, h, task.localYoutubeOverlay?.newsBadgeStyleId);
     }
+    if (overlayKind === 'github') {
+      const ghStyle = GITHUB_BADGE_STYLES.find(s => s.id === task.localYoutubeOverlay?.newsBadgeStyleId) || GITHUB_BADGE_STYLES[0];
+      const badgeH = Math.max(50, Math.min(80, h * 0.075));
+      const badgeW = Math.max(220, Math.min(350, w * 0.32));
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,0,0,0.5)';
+      ctx.shadowBlur = 20;
+      drawRoundRect(ctx, pad, pad + 10, badgeW, badgeH, 14);
+      ctx.fillStyle = ghStyle.bg;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = ghStyle.border;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = ghStyle.accent;
+      ctx.beginPath();
+      ctx.arc(pad + badgeH * 0.38, pad + 10 + badgeH * 0.5, badgeH * 0.18, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = ghStyle.fg;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      const titleFont = Math.floor(badgeH * 0.37);
+      ctx.font = `900 ${titleFont}px Kanit, Prompt, Arial, sans-serif`;
+      ctx.fillText('\u0e02\u0e2d\u0e07\u0e14\u0e35\u0e08\u0e32\u0e01 GitHub', pad + badgeH * 0.72, pad + 10 + badgeH * 0.5);
+      ctx.restore();
+    }
+
 
     const meta = task.localYoutubeOverlay;
     if (overlayKind === 'youtube' && meta && (meta.channelName || meta.subscriberText || meta.channelLogoUrl)) {
@@ -2592,6 +2626,7 @@ Return only the final Thai text in the required format.`;
     if (!item || !item.selectedHeadline) return alert('⚠️ กรุณาเลือกพาดหัวก่อน');
     const isYoutubeImageStyle = item.cardImagePromptStyleId === YOUTUBE_IMAGE_STYLE_ID;
     const isAiNewsImageStyle = item.cardImagePromptStyleId === AI_NEWS_IMAGE_STYLE_ID;
+    const isGithubImageStyle = item.cardImagePromptStyleId === GITHUB_IMAGE_STYLE_ID;
     const isOverlayStyle = isOverlayImageStyle(item.cardImagePromptStyleId);
     const isLocalCanvasOnly = isOverlayStyle && item.decorateOriginalPhoto;
 
@@ -2640,7 +2675,26 @@ Return only the final Thai text in the required format.`;
       const taskId = Date.now().toString() + Math.random().toString(36).slice(2, 6);
       globalTaskStore.addTask({ id: `aipage_${taskId}`, title: `AI: ${item.selectedHeadline.substring(0, 25)}...`, progress: 'เข้าคิวงานเรียบร้อย...', status: 'running' });
 
-      const useImg = isOverlayStyle ? true : item.useAttachedImage && !!item.selectedImageUrl;
+      let useImg = isOverlayStyle ? true : item.useAttachedImage && !!item.selectedImageUrl;
+      let refUrl = useImg ? item.selectedImageUrl : referenceImageUrl;
+      if (isGithubImageStyle) {
+        const tagLabel = (item.tags || []).find(t => t !== 'github');
+        const ghFootageFolder = localStorage.getItem('gh_footage_folder');
+        if (ghFootageFolder && tagLabel) {
+          try {
+            const ghRes = await fetch('/api/random-stock-image', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ folder: ghFootageFolder + '/' + tagLabel }),
+            });
+            const ghData = await ghRes.json();
+            if (ghData.success) {
+              refUrl = ghData.dataUrl;
+              useImg = true;
+            }
+          } catch {}
+        }
+      }
       const newTask: GenerationTask = {
         id: taskId, status: 'pending', log: ['เข้าคิวจากกล่องบทความ...'],
         rawArticle: item.generatedArticle,
@@ -2648,7 +2702,7 @@ Return only the final Thai text in the required format.`;
         headlinePackId: item.headlinePackId,
         imagePromptStyleId: item.cardImagePromptStyleId,
         attachImage: useImg,
-        referenceImageUrl: useImg ? item.selectedImageUrl : referenceImageUrl,
+        referenceImageUrl: useImg ? refUrl : referenceImageUrl,
         imageRatio: item.cardImageRatio || imageRatio,
         finalText: item.generatedArticle,
         commentPostText: item.generatedCommentPost,
@@ -2656,7 +2710,7 @@ Return only the final Thai text in the required format.`;
         bulkPromptJson: cleanJson,
         bulkSourceUrl: item.sourceUrl,
         localYoutubeOverlay: isOverlayStyle && item.decorateOriginalPhoto ? {
-          overlayKind: isAiNewsImageStyle ? 'ai-news' : 'youtube',
+          overlayKind: isGithubImageStyle ? 'github' : isAiNewsImageStyle ? 'ai-news' : 'youtube',
           channelName: item.channelName?.trim() || '',
           channelLogoUrl: item.channelLogoUrl || '',
           subscriberText: formatSubscriberCount(item.subscriberCount),
@@ -3068,16 +3122,19 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
       // ── Step 1: global defaults ──────────────────────────────────────────────
       const THREE_LINE_PACK_ID = 'default-3-line-hook';
       const patch: Partial<BulkArticleItem> = {
-        writingStyleId: item.writingStyleId || selectedStyleId,
-        commentStyleId: item.commentStyleId || selectedCommentStyleId,
+        writingStyleId: item.writingStyleId || (isGithub ? (writingStyles.find(s => s.name.trim() === 'AI Trendtech')?.id || '') : selectedStyleId),
+        commentStyleId: item.commentStyleId || (isGithub ? (writingStyles.find(s => s.name.trim() === 'AI Trendtech')?.id || '') : selectedCommentStyleId),
         headlinePackId: THREE_LINE_PACK_ID,
-        cardTextModel: item.cardTextModel || textModel,
-        fontPaletteId: (item.ytExtracted || item.sourceType === 'youtube') ? 'white-yellow-blue' : 'cyan-white-navy',
+        cardTextModel: isGithub ? 'google/gemini-2.5-flash' : (item.cardTextModel || textModel),
+        cardImageRatio: isGithub ? '1:1' : (item.cardImageRatio || ''),
+        articleLength: isGithub ? 'short' : (item.articleLength || ''),
+        fontPaletteId: isGithub ? 'black-yellow-white' : (item.ytExtracted || item.sourceType === 'youtube') ? 'white-yellow-blue' : 'cyan-white-navy',
       };
 
       // ── Detect source type ─────────────────────────────────────────────────
       const isYoutube = !!item.ytExtracted || item.sourceType === 'youtube';
       const isNews = !isYoutube && (item.sourceType === 'news' || !!item.sourceUrl);
+      const isGithub = !isYoutube && !isNews && ((item.tags || []).includes('github') || item.sourceType === 'github');
 
       // ── Auto-fetch images if none yet (news articles) ─────────────────────
       let allImages = item.images || [];
@@ -3135,6 +3192,11 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
               ? 'Smart Setup วิเคราะห์รูปไม่สำเร็จ → คงรูปเดิมไว้ ให้เช็คอีกทีก่อนสร้าง'
               : 'Smart Setup วิเคราะห์รูปไม่สำเร็จ และไม่มีรูปเดิม';
           }
+        } else if (isGithub) {
+          patch.decorateOriginalPhoto = true;
+          patch.cardImagePromptStyleId = GITHUB_IMAGE_STYLE_ID;
+          patch.selectedImageUrl = item.selectedImageUrl || (allImages[0] || '');
+          patch.smartConfigNote = `Smart Setup (GitHub) → ใช้สไตล์ Github สุ่มรูปจากคลัง`;
         } else {
           // News → ข่าวAI style + คงรูปเดิมตกแต่งเพิ่ม
           patch.decorateOriginalPhoto = true;
@@ -3267,6 +3329,7 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
   const getImagePromptStyleName = (id: string) => {
     if (id === YOUTUBE_IMAGE_STYLE_ID) return 'รูปจากyoutube';
     if (id === AI_NEWS_IMAGE_STYLE_ID) return 'ข่าวAI';
+    if (id === GITHUB_IMAGE_STYLE_ID) return 'Github';
     return imagePromptStyles.find(p => p.id === id)?.name || 'ยังไม่เลือก';
   };
   const getArticleLengthLabel = (id: string) => {
@@ -3544,6 +3607,7 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                 <select className="input-field w-full text-sm" value={textModel} onChange={e => setTextModel(e.target.value)}>
                   <option value="google/gemini-2.5-flash">Gemini 2.5 Flash</option>
                   <option value="google/gemini-2.5-pro">Gemini 2.5 Pro</option>
+                  <option value="deepseek/deepseek-chat">DeepSeek V4 (ใหม่ล่าสุด+เทพ)</option>
                   <option value="openai/gpt-4o">GPT-4o</option>
                   <option value="openai/gpt-oss-20b:free">🆓 GPT OSS 20B (ฟรี!)</option>
                   <option value="google/gemma-3-27b-it:free">🆓 Gemma 3 27B (ฟรี!)</option>
@@ -3767,6 +3831,7 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                           <option value="">-- ไม่เปลี่ยน --</option>
                           <option value="google/gemini-2.5-flash">Gemini 2.5 Flash</option>
                           <option value="google/gemini-2.5-pro">Gemini 2.5 Pro</option>
+                          <option value="deepseek/deepseek-chat">DeepSeek V4 (ใหม่ล่าสุด+เทพ)</option>
                           <option value="openai/gpt-4o">GPT-4o</option>
                           <option value="openai/gpt-oss-20b:free">🆓 GPT OSS 20B (ฟรี!)</option>
                           <option value="google/gemma-3-27b-it:free">🆓 Gemma 3 27B (ฟรี!)</option>
@@ -3806,6 +3871,7 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                           <option value="">-- ไม่เปลี่ยน --</option>
                           <option value={YOUTUBE_IMAGE_STYLE_ID}>รูปจากยูทูป</option>
                           <option value={AI_NEWS_IMAGE_STYLE_ID}>ข่าวAI</option>
+<option value={GITHUB_IMAGE_STYLE_ID}>Github (สุ่มรูปจากคลัง)</option>
                           {imagePromptStyles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                         </select>
                       </div>
@@ -4113,6 +4179,7 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                               <option value="">-- เลือกสไตล์ภาพ --</option>
                               <option value={YOUTUBE_IMAGE_STYLE_ID}>รูปจากyoutube</option>
                               <option value={AI_NEWS_IMAGE_STYLE_ID}>ข่าวAI</option>
+<option value={GITHUB_IMAGE_STYLE_ID}>Github (สุ่มรูปจากคลัง)</option>
                               {imagePromptStyles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                             </select>
                           </div>
