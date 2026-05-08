@@ -167,8 +167,133 @@ const dataStaticPlugin = (): Plugin => ({
   },
 });
 
+const registerFacebookTokenApis = (server: any) => {
+  let _fbCreds: { appId: string; appSecret: string } | null = null;
+
+  server.middlewares.use('/api/fb-save-creds', (req: any, res: any) => {
+    if (req.method !== 'POST') { res.statusCode = 405; res.end(); return; }
+    res.setHeader('Content-Type', 'application/json');
+    let body = '';
+    req.on('data', (c: Buffer) => { body += c.toString(); });
+    req.on('end', () => {
+      try {
+        const { appId, appSecret } = JSON.parse(body);
+        _fbCreds = { appId: String(appId), appSecret: String(appSecret) };
+        res.end(JSON.stringify({ ok: true }));
+      } catch {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+      }
+    });
+  });
+
+  server.middlewares.use('/api/fb-oauth-callback', (req: any, res: any) => {
+    const urlObj = new URL(req.url!, 'http://localhost');
+    const code = urlObj.searchParams.get('code');
+    const fbError = urlObj.searchParams.get('error');
+
+    const sendHtml = (msg: object) => {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.end(`<html><body style="font-family:sans-serif;background:#111;color:#eee;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;"><p id="m">กำลังปิดหน้าต่าง...</p><script>try{window.opener&&window.opener.postMessage(${JSON.stringify(msg)},'*');}catch(e){}setTimeout(()=>window.close(),800);</script></body></html>`);
+    };
+
+    if (fbError || !code) {
+      return sendHtml({ type: 'fb-oauth-error', error: fbError || 'no_code' });
+    }
+    if (!_fbCreds) {
+      return sendHtml({ type: 'fb-oauth-error', error: 'Credentials not saved on server — กด Login ใหม่อีกครั้ง' });
+    }
+
+    const { appId, appSecret } = _fbCreds;
+    const host = req.headers.host || 'localhost:5173';
+    const forwardedProto = Array.isArray(req.headers['x-forwarded-proto'])
+      ? req.headers['x-forwarded-proto'][0]
+      : req.headers['x-forwarded-proto'];
+    const proto = forwardedProto || (host.includes('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https');
+    const redirectUri = `${proto}://${host}/api/fb-oauth-callback`;
+
+    const fetchJson = (url: string, cb: (err: string | null, data: any) => void) => {
+      https.get(url, (r) => {
+        let buf = '';
+        r.on('data', (c: Buffer) => { buf += c.toString(); });
+        r.on('end', () => { try { cb(null, JSON.parse(buf)); } catch { cb('parse_error', null); } });
+      }).on('error', (e: Error) => cb(e.message, null));
+    };
+
+    const shortUrl = `https://graph.facebook.com/v21.0/oauth/access_token?client_id=${encodeURIComponent(appId)}&redirect_uri=${encodeURIComponent(redirectUri)}&client_secret=${encodeURIComponent(appSecret)}&code=${encodeURIComponent(code)}`;
+    fetchJson(shortUrl, (err, short) => {
+      if (err || !short?.access_token) {
+        return sendHtml({ type: 'fb-oauth-error', error: err || (short?.error?.message || 'token_exchange_failed') });
+      }
+      const longUrl = `https://graph.facebook.com/v21.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${encodeURIComponent(appId)}&client_secret=${encodeURIComponent(appSecret)}&fb_exchange_token=${encodeURIComponent(short.access_token)}`;
+      fetchJson(longUrl, (_err2, long) => {
+        const finalToken = long?.access_token || short.access_token;
+        const expiresIn = long?.expires_in || 5184000;
+        sendHtml({ type: 'fb-oauth-success', token: finalToken, expiresIn });
+      });
+    });
+  });
+
+  server.middlewares.use('/api/fb-extend-token', (req: any, res: any) => {
+    if (req.method !== 'POST') { res.statusCode = 405; res.end(); return; }
+    res.setHeader('Content-Type', 'application/json');
+    let body = '';
+    req.on('data', (c: Buffer) => { body += c.toString(); });
+    req.on('end', () => {
+      try {
+        const { appId, appSecret, userToken } = JSON.parse(body);
+        if (!appId || !appSecret || !userToken) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: 'Missing appId, appSecret, or userToken' }));
+          return;
+        }
+        const longUrl = `https://graph.facebook.com/v21.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${encodeURIComponent(String(appId))}&client_secret=${encodeURIComponent(String(appSecret))}&fb_exchange_token=${encodeURIComponent(String(userToken))}`;
+        https.get(longUrl, (r) => {
+          let buf = '';
+          r.on('data', (c: Buffer) => { buf += c.toString(); });
+          r.on('end', () => { res.end(buf); });
+        }).on('error', (e: Error) => {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: e.message }));
+        });
+      } catch (e: any) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+  });
+
+  server.middlewares.use('/api/fb-get-pages', (req: any, res: any) => {
+    if (req.method !== 'POST') { res.statusCode = 405; res.end(); return; }
+    res.setHeader('Content-Type', 'application/json');
+    let body = '';
+    req.on('data', (c: Buffer) => { body += c.toString(); });
+    req.on('end', () => {
+      try {
+        const { userToken } = JSON.parse(body);
+        const fields = 'id,name,access_token,instagram_business_account';
+        const pagesUrl = `https://graph.facebook.com/v21.0/me/accounts?fields=${fields}&limit=100&access_token=${encodeURIComponent(userToken)}`;
+        https.get(pagesUrl, (r) => {
+          let buf = '';
+          r.on('data', (c: Buffer) => { buf += c.toString(); });
+          r.on('end', () => { res.end(buf); });
+        }).on('error', (e: Error) => {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: e.message }));
+        });
+      } catch (e: any) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+  });
+};
+
 const fileSaverPlugin = (): Plugin => ({
   name: 'local-file-saver',
+  configurePreviewServer(server) {
+    registerFacebookTokenApis(server);
+  },
   configureServer(server) {
     server.middlewares.use('/api/mac-tts', (req, res) => {
       // Must be GET request
@@ -3964,6 +4089,135 @@ const fileSaverPlugin = (): Plugin => ({
     });
     // ── End Logo APIs ──────────────────────────────────────────────────
 
+    // ── Facebook Token APIs ────────────────────────────────────────────
+    // Server-side store for App credentials (never exposed to client after save)
+    let _fbCreds: { appId: string; appSecret: string } | null = null;
+
+    // Save credentials from frontend (App Secret stays server-side)
+    server.middlewares.use('/api/fb-save-creds', (req, res) => {
+      if (req.method !== 'POST') { res.statusCode = 405; res.end(); return; }
+      res.setHeader('Content-Type', 'application/json');
+      let body = '';
+      req.on('data', (c: Buffer) => { body += c.toString(); });
+      req.on('end', () => {
+        try {
+          const { appId, appSecret } = JSON.parse(body);
+          _fbCreds = { appId: String(appId), appSecret: String(appSecret) };
+          res.end(JSON.stringify({ ok: true }));
+        } catch {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: 'Invalid JSON' }));
+        }
+      });
+    });
+
+    // OAuth callback — Facebook redirects here with ?code=...
+    server.middlewares.use('/api/fb-oauth-callback', (req, res) => {
+      const urlObj = new URL(req.url!, 'http://localhost');
+      const code = urlObj.searchParams.get('code');
+      const fbError = urlObj.searchParams.get('error');
+
+      const sendHtml = (msg: object) => {
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.end(`<html><body style="font-family:sans-serif;background:#111;color:#eee;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;"><p id="m">กำลังปิดหน้าต่าง...</p><script>try{window.opener&&window.opener.postMessage(${JSON.stringify(msg)},'*');}catch(e){}setTimeout(()=>window.close(),800);</script></body></html>`);
+      };
+
+      if (fbError || !code) {
+        return sendHtml({ type: 'fb-oauth-error', error: fbError || 'no_code' });
+      }
+      if (!_fbCreds) {
+        return sendHtml({ type: 'fb-oauth-error', error: 'Credentials not saved on server — กด "บันทึก Credentials" ก่อน Login' });
+      }
+
+      const { appId, appSecret } = _fbCreds;
+      // Must exactly match the redirect_uri used in the popup.
+      const host = req.headers.host || 'localhost:5173';
+      const forwardedProto = Array.isArray(req.headers['x-forwarded-proto'])
+        ? req.headers['x-forwarded-proto'][0]
+        : req.headers['x-forwarded-proto'];
+      const proto = forwardedProto || (host.includes('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https');
+      const redirectUri = `${proto}://${host}/api/fb-oauth-callback`;
+
+      // Step 1: exchange code → short-lived user token
+      const shortUrl = `https://graph.facebook.com/v21.0/oauth/access_token?client_id=${encodeURIComponent(appId)}&redirect_uri=${encodeURIComponent(redirectUri)}&client_secret=${encodeURIComponent(appSecret)}&code=${encodeURIComponent(code)}`;
+      const fetchJson = (url: string, cb: (err: string | null, data: any) => void) => {
+        https.get(url, (r) => {
+          let buf = '';
+          r.on('data', (c: Buffer) => { buf += c.toString(); });
+          r.on('end', () => { try { cb(null, JSON.parse(buf)); } catch { cb('parse_error', null); } });
+        }).on('error', (e: Error) => cb(e.message, null));
+      };
+
+      fetchJson(shortUrl, (err, short) => {
+        if (err || !short?.access_token) {
+          return sendHtml({ type: 'fb-oauth-error', error: err || (short?.error?.message || 'token_exchange_failed') });
+        }
+        // Step 2: exchange short-lived → long-lived user token (60 days)
+        const longUrl = `https://graph.facebook.com/v21.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${encodeURIComponent(appId)}&client_secret=${encodeURIComponent(appSecret)}&fb_exchange_token=${encodeURIComponent(short.access_token)}`;
+        fetchJson(longUrl, (err2, long) => {
+          const finalToken = long?.access_token || short.access_token;
+          const expiresIn = long?.expires_in || 5184000;
+          sendHtml({ type: 'fb-oauth-success', token: finalToken, expiresIn });
+        });
+      });
+    });
+
+    server.middlewares.use('/api/fb-extend-token', (req, res) => {
+      if (req.method !== 'POST') { res.statusCode = 405; res.end(); return; }
+      res.setHeader('Content-Type', 'application/json');
+      let body = '';
+      req.on('data', (c: Buffer) => { body += c.toString(); });
+      req.on('end', () => {
+        try {
+          const { appId, appSecret, userToken } = JSON.parse(body);
+          if (!appId || !appSecret || !userToken) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'Missing appId, appSecret, or userToken' }));
+            return;
+          }
+          const longUrl = `https://graph.facebook.com/v21.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${encodeURIComponent(String(appId))}&client_secret=${encodeURIComponent(String(appSecret))}&fb_exchange_token=${encodeURIComponent(String(userToken))}`;
+          https.get(longUrl, (r) => {
+            let buf = '';
+            r.on('data', (c: Buffer) => { buf += c.toString(); });
+            r.on('end', () => { res.end(buf); });
+          }).on('error', (e: Error) => {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: e.message }));
+          });
+        } catch (e: any) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: e.message }));
+        }
+      });
+    });
+
+    // Get all managed pages + IG accounts
+    server.middlewares.use('/api/fb-get-pages', (req, res) => {
+      if (req.method !== 'POST') { res.statusCode = 405; res.end(); return; }
+      res.setHeader('Content-Type', 'application/json');
+      let body = '';
+      req.on('data', (c: Buffer) => { body += c.toString(); });
+      req.on('end', () => {
+        try {
+          const { userToken } = JSON.parse(body);
+          const fields = 'id,name,access_token,instagram_business_account';
+          const pagesUrl = `https://graph.facebook.com/v21.0/me/accounts?fields=${fields}&limit=100&access_token=${encodeURIComponent(userToken)}`;
+          https.get(pagesUrl, (r) => {
+            let buf = '';
+            r.on('data', (c: Buffer) => { buf += c.toString(); });
+            r.on('end', () => { res.end(buf); });
+          }).on('error', (e: Error) => {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: e.message }));
+          });
+        } catch (e: any) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: e.message }));
+        }
+      });
+    });
+    // ── End Facebook Token APIs ────────────────────────────────────────
+
     // ── End Disk Cleaner APIs ──────────────────────────────────────────
   }
 });
@@ -3976,6 +4230,8 @@ export default defineConfig({
   },
   server: {
     open: true,
+    allowedHosts: true,
+    hmr: false,
     headers: {
       'Cross-Origin-Opener-Policy': 'same-origin',
       'Cross-Origin-Embedder-Policy': 'credentialless',

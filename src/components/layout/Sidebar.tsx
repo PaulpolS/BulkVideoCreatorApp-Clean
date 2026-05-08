@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type TabId = 'home' | 'singleclip' | 'bulk' | 'financial' | 'stockclip' | 'news' | 'articlestock' | 'pagestock' | 'assets' | 'avatar' | 'clone' | 'automator' | 'lazada' | 'horoscope' | 'tracking' | 'radar' | 'cleaner' | 'scanner' | 'prompt' | 'autoeditor' | 'course' | 'canvas' | 'aipage';
+export type TabId = 'home' | 'singleclip' | 'bulk' | 'financial' | 'stockclip' | 'news' | 'articlestock' | 'pagestock' | 'assets' | 'avatar' | 'clone' | 'automator' | 'lazada' | 'horoscope' | 'tracking' | 'radar' | 'cleaner' | 'scanner' | 'prompt' | 'autoeditor' | 'course' | 'canvas' | 'aipage' | 'fbtoken';
 
 interface NavGroup {
   label: string;
@@ -64,6 +64,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'assets', icon: '📂', label: 'คลังแสง Assets', color: '#8b5cf6' },
       { id: 'tracking', icon: '📊', label: 'ติดตามงาน', color: '#0ea5e9' },
+      { id: 'fbtoken', icon: '🔑', label: 'เฟสบุ๊ค Token', color: '#1877f2', featured: true },
     ],
   },
   {

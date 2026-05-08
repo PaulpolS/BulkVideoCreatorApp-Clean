@@ -29,11 +29,12 @@ import { CanvasEditorTab } from './components/canvas/CanvasEditorTab';
 import { ArticleStockTab } from './components/stock/ArticleStockTab';
 import { PageStockTab } from './components/stock/PageStockTab';
 import { StockClipTab } from './components/stock/StockClipTab';
+import { FbTokenTab } from './components/fbtoken/FbTokenTab';
 
 const VALID_TAB_IDS: TabId[] = [
   'home', 'singleclip', 'bulk', 'financial', 'stockclip', 'news', 'articlestock', 'assets',
   'avatar', 'clone', 'automator', 'lazada', 'horoscope', 'tracking', 'radar',
-  'cleaner', 'scanner', 'prompt', 'autoeditor', 'course', 'canvas', 'aipage', 'pagestock',
+  'cleaner', 'scanner', 'prompt', 'autoeditor', 'course', 'canvas', 'aipage', 'pagestock', 'fbtoken',
 ];
 
 function App() {
@@ -149,6 +150,7 @@ function App() {
     aipage: '🤖 สร้างContentลงเพจ',
     articlestock: '📦 คลังบทความ',
     pagestock: '📮 ทำStockลงเพจ',
+    fbtoken: '🔑 เฟสบุ๊ค Token Manager',
   };
 
   return (
@@ -317,6 +319,11 @@ function App() {
           {visitedTabs.has('pagestock') && (
             <div className={activeTab !== 'pagestock' ? 'hidden' : ''}>
               <PageStockTab />
+            </div>
+          )}
+          {visitedTabs.has('fbtoken') && (
+            <div className={activeTab !== 'fbtoken' ? 'hidden' : ''}>
+              <FbTokenTab />
             </div>
           )}
         </main>
