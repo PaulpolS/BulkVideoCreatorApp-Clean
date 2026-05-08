@@ -3066,10 +3066,11 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
       setSmartConfigLog(`🤖 ${label} ตั้งค่า: ${(item.title || item.rawArticle).slice(0, 30)}...`);
 
       // ── Step 1: global defaults ──────────────────────────────────────────────
+      const THREE_LINE_PACK_ID = 'default-3-line-hook';
       const patch: Partial<BulkArticleItem> = {
         writingStyleId: item.writingStyleId || selectedStyleId,
         commentStyleId: item.commentStyleId || selectedCommentStyleId,
-        headlinePackId: item.headlinePackId || selectedPackId,
+        headlinePackId: THREE_LINE_PACK_ID,
         cardTextModel: item.cardTextModel || textModel,
         fontPaletteId: (item.ytExtracted || item.sourceType === 'youtube') ? 'white-yellow-blue' : 'cyan-white-navy',
       };
@@ -3155,15 +3156,6 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
       updateBulkItem(item.id, patch);
       const merged = { ...item, ...patch };
 
-      // ── เลือก keyword จากพาดหัว (ถ้ามี, เพื่อเน้นคำสำคัญ) ─────────────
-      if (merged.selectedHeadline && merged.decorateOriginalPhoto) {
-        const markedKeywords = pickImpactfulKeywords(merged.selectedHeadline, 2);
-        if (markedKeywords.length > 0) {
-          updateBulkItem(item.id, { markedKeywords });
-          setSmartConfigLog(`✍️ ${label} เน้นคำสำคัญในพาดหัว: ${markedKeywords.join(', ')}`);
-        }
-      }
-
       // ── Step 3: สร้างบทความ + พาดหัว (ถ้ายังไม่มี) ──────────────────────────
       const style = writingStyles.find(s => s.id === merged.writingStyleId);
       const commentStyle = writingStyles.find(s => s.id === merged.commentStyleId);
@@ -3192,15 +3184,23 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
             headlineText,
             attempt => setSmartConfigLog(`🔄 ${label} หาพาดหัวภาษาไทย รอบ ${attempt}...`),
           );
-          const newMarkedKeywords = headlineResult.markedKeywords?.length
-            ? headlineResult.markedKeywords
-            : pickImpactfulKeywords(headlineResult.selectedHeadline, 2);
+          setSmartConfigLog(`🎯 ${label} ฟังก์ชัน AI เลือกคำเน้นในพาดหัว...`);
+          let smartKeywords: string[] = [];
+          try {
+            const aiKeywordResult = await pickKeywordsWithAI(headlineResult.selectedHeadline, merged.rawArticle, model);
+            smartKeywords = aiKeywordResult.keywords;
+            if (smartKeywords.length > 0) {
+              updateBulkItem(item.id, { smartHeadlineNote: aiKeywordResult.note });
+            }
+          } catch {}
+          if (smartKeywords.length === 0) {
+            smartKeywords = pickImpactfulKeywords(headlineResult.selectedHeadline, 2);
+          }
           updateBulkItem(item.id, {
             generatedArticle: articleText, generatedCommentPost: commentPostText,
             generatedHeadlines: headlineResult.headlines,
             selectedHeadline: headlineResult.selectedHeadline,
-            markedKeywords: newMarkedKeywords,
-            smartHeadlineNote: headlineResult.note,
+            markedKeywords: smartKeywords,
             status: 'article-done',
           });
           saveArticleCache(merged.rawArticle, {
@@ -3236,13 +3236,23 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
             note = headlineResult.note;
           } catch {}
         }
-        const markedKeywords = pickImpactfulKeywords(selectedHeadline, 2);
-        updateBulkItem(item.id, {
-          generatedHeadlines: headlines.length > 0 ? headlines : merged.generatedHeadlines,
-          selectedHeadline,
-          markedKeywords,
-          smartHeadlineNote: note || buildThaiHeadlineSelectionNote(selectedHeadline, markedKeywords, 1),
-        });
+	        setSmartConfigLog('🎯 ' + label + ' ฟังก์ชัน AI เลือกคำเน้นในพาดหัว...');
+	        let smartKeywords = [];
+	        try {
+	          const aiKeywordResult = await pickKeywordsWithAI(selectedHeadline, merged.rawArticle, model);
+	          smartKeywords = aiKeywordResult.keywords;
+	          if (smartKeywords.length > 0) { note = aiKeywordResult.note; }
+	        } catch {}
+	        if (smartKeywords.length === 0) {
+	          smartKeywords = pickImpactfulKeywords(selectedHeadline, 2);
+	        }
+	        updateBulkItem(item.id, {
+	          generatedHeadlines: headlines.length > 0 ? headlines : merged.generatedHeadlines,
+	          selectedHeadline,
+	          markedKeywords: smartKeywords,
+	          smartHeadlineNote: note || buildThaiHeadlineSelectionNote(selectedHeadline, smartKeywords, 1),
+	        });
+
       }
 
       if (i < selectedItems.length - 1) await new Promise(r => setTimeout(r, 300));
@@ -3855,7 +3865,7 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                     {isSmartConfigRunning ? '⏳ กำลัง Smart Setup...' : `🧠 Smart Setup (${selectedBulkCount} อัน)`}
                   </button>
                   <span className="text-[10px] text-violet-400/60 mt-1 max-w-[280px] leading-tight">
-                    🔍 ดูดรูปข่าว (ถ้ายังไม่มี) → ตั้งสไตล์ภาพตามประเภท YouTube/ข่าว → เปิด img2img คงรูปเดิมตกแต่งเพิ่ม → เน้นคำสำคัญในพาดหัว → สร้างบทความ+พาดหัวไทย
+                    🔍 ดูดรูปข่าว (ถ้ายังไม่มี) → ตั้งสไตล์ภาพตามประเภท YouTube/ข่าว → ตั้งพาดหัว3บรรทัด → สร้างบทความ+พาดหัวไทย → เน้นคำสำคัญในพาดหัว → เปิด img2img คงรูปเดิมตกแต่งเพิ่ม
                   </span>
                 </div>
 
