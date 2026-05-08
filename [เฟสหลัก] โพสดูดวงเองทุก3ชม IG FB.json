@@ -1,0 +1,1124 @@
+{
+  "name": "[เฟสหลัก] โพสดูดวงเองทุก3ชม IG FB",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1yamIh1Uvb3hlPp3earQglGyUMtsNqPPLLe65lR53rNY",
+          "mode": "list",
+          "cachedResultName": "ต้น ทุกเพจ",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yamIh1Uvb3hlPp3earQglGyUMtsNqPPLLe65lR53rNY/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 2131183216,
+          "mode": "list",
+          "cachedResultName": "ดูดวง",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yamIh1Uvb3hlPp3earQglGyUMtsNqPPLLe65lR53rNY/edit#gid=2131183216"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "row_number": "={{ $json.row_number }}",
+            "Status": "Processing"
+          },
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [
+            {
+              "id": "ID",
+              "displayName": "ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "โพส",
+              "displayName": "โพส",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "อัพเดทวันไหน",
+              "displayName": "อัพเดทวันไหน",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Link dropbox download url",
+              "displayName": "Link dropbox download url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "สินค้า1",
+              "displayName": "สินค้า1",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "สินค้า2",
+              "displayName": "สินค้า2",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "รูปรีวิวดูดวง",
+              "displayName": "รูปรีวิวดูดวง",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "รีวิวดูดวงข้อความ",
+              "displayName": "รีวิวดูดวงข้อความ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "stock",
+              "displayName": "stock",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1104,
+        1392
+      ],
+      "id": "f74ba7eb-5dfa-40a9-800a-4703e6fb3cc0",
+      "name": "Mark Processing",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "lcrKmhuWm7ExdVBa",
+          "name": "GoogleSheet 28/1/69"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpRequestMethod": "POST",
+        "graphApiVersion": "v23.0",
+        "node": "17841403245220909",
+        "edge": "media",
+        "options": {
+          "queryParameters": {
+            "parameter": [
+              {
+                "name": "image_url",
+                "value": "={{ $('Limit1').item.json['Link dropbox download url'].replace('www.dropbox.com', 'dl.dropboxusercontent.com').replace(/&st=[^&]*/g, '').replace(/[?&]dl=[01]/g, '') }}"
+              },
+              {
+                "name": "is_carousel_item",
+                "value": "true"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.facebookGraphApi",
+      "typeVersion": 1,
+      "position": [
+        2224,
+        1312
+      ],
+      "id": "17d58f31-0b64-4d80-a8b6-f2eb7bffab09",
+      "name": "ฝากรูป1_Carousel",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "2SPg3eQQJS6EMmqp",
+          "name": "IG ดูดวง"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "httpRequestMethod": "POST",
+        "graphApiVersion": "v23.0",
+        "node": "17841403245220909",
+        "edge": "media",
+        "options": {
+          "queryParameters": {
+            "parameter": [
+              {
+                "name": "image_url",
+                "value": "={{ $('Limit1').item.json['รูปรีวิวดูดวง'].replace('www.dropbox.com', 'dl.dropboxusercontent.com').replace(/&st=[^&]*/g, '').replace(/[?&]dl=[01]/g, '') }}"
+              },
+              {
+                "name": "is_carousel_item",
+                "value": "true"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.facebookGraphApi",
+      "typeVersion": 1,
+      "position": [
+        2448,
+        1248
+      ],
+      "id": "3244f099-1919-4b2e-a319-bab1f62f7906",
+      "name": "ฝากรูป2_Carousel",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "2SPg3eQQJS6EMmqp",
+          "name": "IG ดูดวง"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "httpRequestMethod": "POST",
+        "graphApiVersion": "v23.0",
+        "node": "17841403245220909",
+        "edge": "media",
+        "options": {
+          "queryParameters": {
+            "parameter": [
+              {
+                "name": "image_url",
+                "value": "=https://dl.dropboxusercontent.com/scl/fi/i439erqcj7sh72iyvhem4/Pro.png?rlkey=md8fmg2rsko7exg9gjewjwi2u"
+              },
+              {
+                "name": "is_carousel_item",
+                "value": "true"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.facebookGraphApi",
+      "typeVersion": 1,
+      "position": [
+        2672,
+        1168
+      ],
+      "id": "ed89aa34-39f6-4526-844d-639ac6261035",
+      "name": "ฝากรูป3_Carousel",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "2SPg3eQQJS6EMmqp",
+          "name": "IG ดูดวง"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const id1 = $('ฝากรูป1_Carousel').item.json.id;\nconst id2 = $('ฝากรูป2_Carousel').item.json.id;\nconst id3 = $('ฝากรูป3_Carousel').item.json.id;\nreturn [{ json: { children: `${id1},${id2},${id3}` } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2896,
+        1104
+      ],
+      "id": "65bc24ca-e68f-470a-9625-e9506468044b",
+      "name": "รวม ID Carousel"
+    },
+    {
+      "parameters": {
+        "httpRequestMethod": "POST",
+        "graphApiVersion": "v23.0",
+        "node": "17841403245220909",
+        "edge": "media",
+        "options": {
+          "queryParameters": {
+            "parameter": [
+              {
+                "name": "media_type",
+                "value": "CAROUSEL"
+              },
+              {
+                "name": "children",
+                "value": "={{ $json.children }}"
+              },
+              {
+                "name": "caption",
+                "value": "={{ $('Limit1').item.json['โพส'] }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.facebookGraphApi",
+      "typeVersion": 1,
+      "position": [
+        3120,
+        1104
+      ],
+      "id": "ce208e75-4633-4bca-8aca-68e95e3de7e8",
+      "name": "สร้าง Carousel IG",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "2SPg3eQQJS6EMmqp",
+          "name": "IG ดูดวง"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1yamIh1Uvb3hlPp3earQglGyUMtsNqPPLLe65lR53rNY",
+          "mode": "list",
+          "cachedResultName": "ต้น ทุกเพจ",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yamIh1Uvb3hlPp3earQglGyUMtsNqPPLLe65lR53rNY/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 2131183216,
+          "mode": "list",
+          "cachedResultName": "ดูดวง",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yamIh1Uvb3hlPp3earQglGyUMtsNqPPLLe65lR53rNY/edit#gid=2131183216"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "row_number": "={{ $('Limit1').item.json.row_number }}",
+            "Status": "Error"
+          },
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [
+            {
+              "id": "ID",
+              "displayName": "ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "โพส",
+              "displayName": "โพส",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "อัพเดทวันไหน",
+              "displayName": "อัพเดทวันไหน",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Link dropbox download url",
+              "displayName": "Link dropbox download url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "สินค้า1",
+              "displayName": "สินค้า1",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "สินค้า2",
+              "displayName": "สินค้า2",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "รูปรีวิวดูดวง",
+              "displayName": "รูปรีวิวดูดวง",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "รีวิวดูดวงข้อความ",
+              "displayName": "รีวิวดูดวงข้อความ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "stock",
+              "displayName": "stock",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        3568,
+        1392
+      ],
+      "id": "22a915e2-06ae-4cb7-b64b-2631fc8cadb4",
+      "name": "Mark Error",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "lcrKmhuWm7ExdVBa",
+          "name": "GoogleSheet 28/1/69"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1yamIh1Uvb3hlPp3earQglGyUMtsNqPPLLe65lR53rNY",
+          "mode": "list",
+          "cachedResultName": "ต้น ทุกเพจ",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yamIh1Uvb3hlPp3earQglGyUMtsNqPPLLe65lR53rNY/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 2131183216,
+          "mode": "list",
+          "cachedResultName": "ดูดวง",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yamIh1Uvb3hlPp3earQglGyUMtsNqPPLLe65lR53rNY/edit#gid=2131183216"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Status",
+              "lookupValue": "N"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        656,
+        1392
+      ],
+      "id": "b9dfc6d7-6d28-4e0e-a880-ad73ce3456bf",
+      "name": "Get row(s) in sheet1",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "lcrKmhuWm7ExdVBa",
+          "name": "GoogleSheet 28/1/69"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        880,
+        1392
+      ],
+      "id": "d39e24fc-6efd-4949-a107-59fdb413fa87",
+      "name": "Limit1"
+    },
+    {
+      "parameters": {
+        "httpRequestMethod": "POST",
+        "graphApiVersion": "v23.0",
+        "node": "285778035148420",
+        "edge": "=photos",
+        "options": {
+          "queryParameters": {
+            "parameter": [
+              {
+                "name": "url",
+                "value": "={{ $('Limit1').item.json['Link dropbox download url'] }}"
+              },
+              {
+                "name": "caption",
+                "value": "={{ $('Limit1').item.json['โพส'] }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.facebookGraphApi",
+      "typeVersion": 1,
+      "position": [
+        1328,
+        1392
+      ],
+      "id": "a57b7015-143b-4893-8605-652745f2a907",
+      "name": "โพสเฟส1",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "dC4vh6q3BcBTpHdW",
+          "name": "หมอต้น # tik.iqoption@gmail.com"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "httpRequestMethod": "POST",
+        "graphApiVersion": "v23.0",
+        "node": "={{ $json.post_id }}",
+        "edge": "comments",
+        "options": {
+          "queryParameters": {
+            "parameter": [
+              {
+                "name": "message",
+                "value": "={{ $('Limit1').item.json['รีวิวดูดวงข้อความ'] }}"
+              },
+              {
+                "name": "attachment_url",
+                "value": "={{ $('Limit1').item.json['รูปรีวิวดูดวง'] }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.facebookGraphApi",
+      "typeVersion": 1,
+      "position": [
+        1552,
+        1312
+      ],
+      "id": "5d3e6067-db81-47d4-8056-be810ae354ab",
+      "name": "เม้นรีวิวดูดวง1",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "dC4vh6q3BcBTpHdW",
+          "name": "หมอต้น # tik.iqoption@gmail.com"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpRequestMethod": "POST",
+        "graphApiVersion": "v23.0",
+        "node": "={{ $('โพสเฟส1').item.json.id }}",
+        "edge": "comments",
+        "options": {
+          "queryParameters": {
+            "parameter": [
+              {
+                "name": "message",
+                "value": "={{ $('Limit1').item.json['สินค้า1'] }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.facebookGraphApi",
+      "typeVersion": 1,
+      "position": [
+        1776,
+        1312
+      ],
+      "id": "5fb91eea-f653-4172-b52b-e714696f0bf1",
+      "name": "ชอปปี้ ",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "dC4vh6q3BcBTpHdW",
+          "name": "หมอต้น # tik.iqoption@gmail.com"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpRequestMethod": "POST",
+        "graphApiVersion": "v23.0",
+        "node": "={{ $('โพสเฟส1').item.json.id }}",
+        "edge": "comments",
+        "options": {
+          "queryParameters": {
+            "parameter": [
+              {
+                "name": "message",
+                "value": "={{ $('Limit1').item.json['สินค้า2'] }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.facebookGraphApi",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        1312
+      ],
+      "id": "b619d32e-aa5b-426a-a79b-c69594554b6b",
+      "name": "แปะlink shoppee",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "dC4vh6q3BcBTpHdW",
+          "name": "หมอต้น # tik.iqoption@gmail.com"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpRequestMethod": "POST",
+        "graphApiVersion": "v23.0",
+        "node": "17841403245220909",
+        "edge": "media_publish",
+        "options": {
+          "queryParameters": {
+            "parameter": [
+              {
+                "name": "creation_id",
+                "value": "={{ $json.id }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.facebookGraphApi",
+      "typeVersion": 1,
+      "position": [
+        3344,
+        1024
+      ],
+      "id": "7e895f5c-3abc-4195-b530-3aa4cd822fee",
+      "name": "โพสIG1",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "2SPg3eQQJS6EMmqp",
+          "name": "IG ดูดวง"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1yamIh1Uvb3hlPp3earQglGyUMtsNqPPLLe65lR53rNY",
+          "mode": "list",
+          "cachedResultName": "ต้น ทุกเพจ",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yamIh1Uvb3hlPp3earQglGyUMtsNqPPLLe65lR53rNY/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 2131183216,
+          "mode": "list",
+          "cachedResultName": "ดูดวง",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yamIh1Uvb3hlPp3earQglGyUMtsNqPPLLe65lR53rNY/edit#gid=2131183216"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Status": "Done",
+            "row_number": "={{ $('Limit1').item.json.row_number }}"
+          },
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [
+            {
+              "id": "ID",
+              "displayName": "ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "โพส",
+              "displayName": "โพส",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "อัพเดทวันไหน",
+              "displayName": "อัพเดทวันไหน",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Link dropbox download url",
+              "displayName": "Link dropbox download url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "สินค้า1",
+              "displayName": "สินค้า1",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "สินค้า2",
+              "displayName": "สินค้า2",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "รูปรีวิวดูดวง",
+              "displayName": "รูปรีวิวดูดวง",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "รีวิวดูดวงข้อความ",
+              "displayName": "รีวิวดูดวงข้อความ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "stock",
+              "displayName": "stock",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        3568,
+        976
+      ],
+      "id": "ccf8917f-bac3-4541-8fdd-b4ec3943f86c",
+      "name": "Update row in sheet1",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "lcrKmhuWm7ExdVBa",
+          "name": "GoogleSheet 28/1/69"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        432,
+        1392
+      ],
+      "id": "ec51c512-819c-407c-aa36-7ee4b631aa62",
+      "name": "Schedule Trigger1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Mark Processing": {
+      "main": [
+        [
+          {
+            "node": "โพสเฟส1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ฝากรูป1_Carousel": {
+      "main": [
+        [
+          {
+            "node": "ฝากรูป2_Carousel",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ฝากรูป2_Carousel": {
+      "main": [
+        [
+          {
+            "node": "ฝากรูป3_Carousel",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ฝากรูป3_Carousel": {
+      "main": [
+        [
+          {
+            "node": "รวม ID Carousel",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "รวม ID Carousel": {
+      "main": [
+        [
+          {
+            "node": "สร้าง Carousel IG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "สร้าง Carousel IG": {
+      "main": [
+        [
+          {
+            "node": "โพสIG1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet1": {
+      "main": [
+        [
+          {
+            "node": "Limit1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit1": {
+      "main": [
+        [
+          {
+            "node": "Mark Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "โพสเฟส1": {
+      "main": [
+        [
+          {
+            "node": "เม้นรีวิวดูดวง1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "เม้นรีวิวดูดวง1": {
+      "main": [
+        [
+          {
+            "node": "ชอปปี้ ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ชอปปี้ ": {
+      "main": [
+        [
+          {
+            "node": "แปะlink shoppee",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "แปะlink shoppee": {
+      "main": [
+        [
+          {
+            "node": "ฝากรูป1_Carousel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "โพสIG1": {
+      "main": [
+        [
+          {
+            "node": "Update row in sheet1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger1": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "8bd5a73b-0c65-46e8-b9d0-8443001969cb",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "85e19124c3abdbdf237141ad745073553bc16572116e727a573661e5c1f4b7a9"
+  },
+  "id": "GeCyvTTaFS29V_Wv7aZYY",
+  "tags": [
+    {
+      "updatedAt": "2026-01-24T08:36:20.983Z",
+      "createdAt": "2026-01-24T08:36:20.983Z",
+      "id": "9K9KcfX3baSPRXam",
+      "name": "โพสรูปเฟส IG"
+    }
+  ]
+}
