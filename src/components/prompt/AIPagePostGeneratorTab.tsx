@@ -105,6 +105,10 @@ interface BulkArticleItem {
 
 const VISION_MODEL = "google/gemini-2.5-pro"; // Excellent for OCR and analysis
 const TEXT_MODEL = "google/gemini-2.5-flash"; // Fast for text generation
+const OPENROUTER_TIMEOUT_MS = 60_000;
+const LOCAL_API_TIMEOUT_MS = 30_000;
+const IMAGE_FETCH_TIMEOUT_MS = 20_000;
+const GH_FOOTAGE_FOLDER_KEY = 'gh_footage_folder';
 const YOUTUBE_IMAGE_STYLE_ID = '__youtube_image_style__';
 const AI_NEWS_IMAGE_STYLE_ID = '__ai_news_image_style__';
 const GITHUB_IMAGE_STYLE_ID = '__github_image_style__';
@@ -133,10 +137,11 @@ const AI_NEWS_BADGE_STYLES = [
   { id: 'glass-dark', name: 'ดำ Glass', bg: 'rgba(0,0,0,0.78)', fg: '#ffffff', accent: '#22c55e', border: '#ffffff' },
 ];
 const GITHUB_BADGE_STYLES = [
-  { id: 'github-dark', name: 'GitHub ดำ', bg: '#0d1117', fg: '#ffffff', accent: '#58a6ff', border: '#30363d' },
-  { id: 'neon-green', name: 'เขียว Neon', bg: '#0a2f1f', fg: '#ffffff', accent: '#39d353', border: '#1b5e3a' },
-  { id: 'purple-haze', name: 'ม่วง Haze', bg: '#1c0a2e', fg: '#ffffff', accent: '#c084fc', border: '#3b1f6e' },
-  { id: 'gold-rush', name: 'ทอง Oscar', bg: '#1f1400', fg: '#ffffff', accent: '#fbbf24', border: '#5c3d00' },
+  { id: 'dev-pick', name: 'สายแนะนำ', label: 'ของดีจาก GitHub', subLabel: 'DEV PICK', bg: '#0d1117', fg: '#ffffff', accent: '#58a6ff', border: '#30363d' },
+  { id: 'ai-radar', name: 'สายข่าวไว', label: 'AI DEV RADAR', subLabel: 'repo น่าจับตา', bg: '#111827', fg: '#f8fafc', accent: '#22d3ee', border: '#0891b2' },
+  { id: 'tool-drop', name: 'สายแจกเครื่องมือ', label: 'เครื่องมือ DEV น่าใช้', subLabel: 'ลองแล้วเวิร์ก', bg: '#052e16', fg: '#f0fdf4', accent: '#39d353', border: '#16a34a' },
+  { id: 'hidden-gem', name: 'สายขุดของลับ', label: 'REPO ลับน่าขุด', subLabel: 'hidden gem', bg: '#1e1b4b', fg: '#ffffff', accent: '#c084fc', border: '#7c3aed' },
+  { id: 'code-alert', name: 'สายเตือนให้เซฟ', label: 'โค้ดดีควรเซฟ', subLabel: 'GitHub alert', bg: '#1f1400', fg: '#ffffff', accent: '#fbbf24', border: '#d97706' },
 ];
 
 interface AIPagePostGeneratorProps {
@@ -297,6 +302,13 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
   const [isSmartConfigRunning, setIsSmartConfigRunning] = useState(false);
   const [isPickingKeywords, setIsPickingKeywords] = useState(false);
   const [smartConfigLog, setSmartConfigLog] = useState('');
+  const [githubStockFolder, setGithubStockFolder] = useState(() => localStorage.getItem(GH_FOOTAGE_FOLDER_KEY) || '');
+  const [githubStockFolderName, setGithubStockFolderName] = useState(() => {
+    const saved = localStorage.getItem(GH_FOOTAGE_FOLDER_KEY) || '';
+    const parts = saved.split('/').filter(Boolean);
+    return parts[parts.length - 1] || saved;
+  });
+  const [githubStockFolderLog, setGithubStockFolderLog] = useState('');
   const [showGlobalApply, setShowGlobalApply] = useState(false);
   const [globalApplySettings, setGlobalApplySettings] = useState<{
     writingStyleId?: string;
@@ -541,8 +553,89 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
     } catch (e) { console.error(e); }
   };
 
+  const fetchWithTimeout = async (input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = OPENROUTER_TIMEOUT_MS) => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(input, { ...init, signal: controller.signal });
+    } catch (e: any) {
+      if (e?.name === 'AbortError') throw new Error(`Request timeout after ${Math.round(timeoutMs / 1000)}s`);
+      throw e;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  };
+
+  const normalizeGithubStockKey = (value: string) =>
+    String(value || '').toLowerCase().replace(/[^a-z0-9ก-๙]+/g, '');
+
+  const getGithubTopicLabel = (item: BulkArticleItem) => {
+    const tags = item.tags || [];
+    const topicTag = tags.find(tag => normalizeGithubStockKey(tag) !== 'github');
+    if (topicTag) return topicTag;
+
+    const raw = `${item.title || ''} ${item.sourceUrl || ''} ${item.rawArticle || ''}`.toLowerCase();
+    if (/claude[-_\s]?code|everything[-_\s]?claude[-_\s]?code/.test(raw)) return 'Claude Code';
+    if (/mcp|model context protocol/.test(raw)) return 'MCP Server';
+    if (/langchain|langgraph/.test(raw)) return 'LangChain / LangGraph';
+    if (/ollama|local llm|local[-_\s]?llm/.test(raw)) return 'Local LLM (รันในเครื่อง)';
+    if (/stable diffusion|image generation/.test(raw)) return 'AI Image Generation';
+    if (/voice|tts|text to speech/.test(raw)) return 'Voice AI / Voice Cloning';
+    if (/rag|retrieval/.test(raw)) return 'RAG (Retrieval Augmented)';
+    if (/openai|gpt/.test(raw)) return 'OpenAI / GPT Tools';
+    return 'GitHub';
+  };
+
+  const resolveGithubStockFolder = async (rootFolder: string, topicLabel: string) => {
+    if (!rootFolder) return '';
+    const wanted = normalizeGithubStockKey(topicLabel);
+    if (!wanted || wanted === 'github') return rootFolder;
+
+    try {
+      const res = await fetchWithTimeout('/api/list-footage-folders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentFolder: rootFolder }),
+      }, LOCAL_API_TIMEOUT_MS);
+      const data = await res.json();
+      const folders = Array.isArray(data.folders) ? data.folders : [];
+      const exact = folders.find((f: any) => normalizeGithubStockKey(f.name) === wanted);
+      if (exact?.path) return exact.path;
+      const partial = folders.find((f: any) => {
+        const key = normalizeGithubStockKey(f.name);
+        return key.includes(wanted) || wanted.includes(key);
+      });
+      if (partial?.path) return partial.path;
+    } catch {}
+
+    return `${rootFolder}/${topicLabel}`;
+  };
+
+  const pickRandomGithubStockImage = async (item: BulkArticleItem) => {
+    const rootFolder = githubStockFolder || localStorage.getItem(GH_FOOTAGE_FOLDER_KEY) || '';
+    if (!rootFolder) {
+      return { dataUrl: '', topicLabel: getGithubTopicLabel(item), folder: '', fileName: '', error: 'ยังไม่ได้เลือก Folder คลังรูป GitHub' };
+    }
+    const topicLabel = getGithubTopicLabel(item);
+    const folder = await resolveGithubStockFolder(rootFolder, topicLabel);
+    try {
+      const res = await fetchWithTimeout('/api/random-stock-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder }),
+      }, LOCAL_API_TIMEOUT_MS);
+      const data = await res.json();
+      if (data.success && data.dataUrl) {
+        return { dataUrl: data.dataUrl as string, topicLabel, folder, fileName: String(data.fileName || ''), error: '' };
+      }
+      return { dataUrl: '', topicLabel, folder, fileName: '', error: data.error || 'ไม่พบรูปในโฟลเดอร์หัวข้อนี้' };
+    } catch (e: any) {
+      return { dataUrl: '', topicLabel, folder, fileName: '', error: e?.message || 'สุ่มรูป GitHub ไม่สำเร็จ' };
+    }
+  };
+
   const urlToBase64 = async (url: string): Promise<string> => {
-    const response = await fetch(url);
+    const response = await fetchWithTimeout(url, {}, IMAGE_FETCH_TIMEOUT_MS);
     if (!response.ok) throw new Error(`โหลดรูปไม่สำเร็จ (${response.status})`);
     const blob = await response.blob();
     return new Promise((resolve, reject) => {
@@ -626,7 +719,7 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
     for (const candidate of candidates) {
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
-          const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          const res = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -635,7 +728,7 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
               'X-Title': 'Bulk Video Creator - AI Page Post',
             },
             body: JSON.stringify({ model, messages })
-          });
+          }, OPENROUTER_TIMEOUT_MS);
           const data = await res.json();
           if (res.ok && !data.error) {
             return data.choices[0].message.content;
@@ -688,7 +781,7 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
         if (fallbackModel === model) continue;
         try {
           console.warn(`[AIPage] ⚠️ Last resort: ${candidate.label} + ${fallbackModel}`);
-          const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          const res = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -697,7 +790,7 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
               'X-Title': 'Bulk Video Creator - AI Page Post',
             },
             body: JSON.stringify({ model: fallbackModel, messages })
-          });
+          }, OPENROUTER_TIMEOUT_MS);
           const data = await res.json();
           if (res.ok && !data.error) {
             return data.choices[0].message.content;
@@ -1787,6 +1880,30 @@ Return ONLY valid JSON format.`;
     } catch (e: any) { alert('เกิดข้อผิดพลาด: ' + e.message); }
   };
 
+  const handlePickGithubStockFolder = async () => {
+    setGithubStockFolderLog('กำลังเปิดเลือก Folder...');
+    try {
+      const res = await fetchWithTimeout('/api/pick-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: 'เลือก Folder คลังรูป GitHub ที่มี subfolder ตามหัวข้อ เช่น Claude Code' }),
+      }, 65_000);
+      const data = await res.json();
+      if (!data.success || data.cancelled) {
+        setGithubStockFolderLog('');
+        return;
+      }
+      localStorage.setItem(GH_FOOTAGE_FOLDER_KEY, data.dir);
+      setGithubStockFolder(data.dir);
+      const parts = String(data.dir).split('/').filter(Boolean);
+      setGithubStockFolderName(parts[parts.length - 1] || data.dir);
+      setGithubStockFolderLog('เลือกคลังรูป GitHub แล้ว');
+      setTimeout(() => setGithubStockFolderLog(''), 2500);
+    } catch (e: any) {
+      setGithubStockFolderLog(e?.message || 'เลือก Folder ไม่สำเร็จ');
+    }
+  };
+
   const handleClearCache = async () => {
     if (!confirm('ลบไฟล์รูปที่ไม่ได้ใช้งาน (orphaned images) + CSV export?\n\nรูปที่ผูกกับผลลัพท์จะไม่ถูกลบ')) return;
     try {
@@ -2154,6 +2271,27 @@ Return only the final Thai text in the required format.`;
     }, null, 2);
   };
 
+  const createGithubImagePromptJson = (item: BulkArticleItem) => {
+    const badge = GITHUB_BADGE_STYLES.find(s => s.id === item.aiNewsBadgeStyleId) || GITHUB_BADGE_STYLES[0];
+    return JSON.stringify({
+      core_prompt: [
+        'Create a Thai GitHub recommendation social poster using the selected stock image as the base.',
+        `Main Thai headline text must be exactly: "${item.selectedHeadline}".`,
+        `Add a top-left editorial GitHub strap label "${badge.label}" with secondary label "${badge.subLabel}".`,
+        'Keep the image clean, high contrast, mobile readable, and suitable for recommending useful developer tools from GitHub.',
+      ].join(' '),
+      negative_prompt: 'unreadable Thai text, misspelled Thai, fake watermark, cluttered layout, low quality, blurry',
+      style_name: 'Github',
+      edit_mode: 'decorate_github_stock_photo_on_canvas',
+      github_badge: {
+        style_id: badge.id,
+        label: badge.label,
+        sub_label: badge.subLabel,
+        colors: { bg: badge.bg, fg: badge.fg, accent: badge.accent, border: badge.border },
+      },
+    }, null, 2);
+  };
+
   const loadCanvasImage = (src: string) => new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -2427,28 +2565,50 @@ Return only the final Thai text in the required format.`;
     }
     if (overlayKind === 'github') {
       const ghStyle = GITHUB_BADGE_STYLES.find(s => s.id === task.localYoutubeOverlay?.newsBadgeStyleId) || GITHUB_BADGE_STYLES[0];
-      const badgeH = Math.max(50, Math.min(80, h * 0.075));
-      const badgeW = Math.max(220, Math.min(350, w * 0.32));
+      const badgeH = Math.max(64, Math.min(102, h * 0.096));
+      const badgeW = Math.max(300, Math.min(470, w * 0.43));
+      const badgeX = pad;
+      const badgeY = pad + 10;
+      const notch = badgeH * 0.28;
       ctx.save();
       ctx.shadowColor = 'rgba(0,0,0,0.5)';
       ctx.shadowBlur = 20;
-      drawRoundRect(ctx, pad, pad + 10, badgeW, badgeH, 14);
+      ctx.beginPath();
+      ctx.moveTo(badgeX + 12, badgeY);
+      ctx.lineTo(badgeX + badgeW, badgeY);
+      ctx.lineTo(badgeX + badgeW + notch, badgeY + badgeH / 2);
+      ctx.lineTo(badgeX + badgeW, badgeY + badgeH);
+      ctx.lineTo(badgeX + 12, badgeY + badgeH);
+      ctx.quadraticCurveTo(badgeX, badgeY + badgeH, badgeX, badgeY + badgeH - 12);
+      ctx.lineTo(badgeX, badgeY + 12);
+      ctx.quadraticCurveTo(badgeX, badgeY, badgeX + 12, badgeY);
+      ctx.closePath();
       ctx.fillStyle = ghStyle.bg;
       ctx.fill();
       ctx.shadowBlur = 0;
       ctx.strokeStyle = ghStyle.border;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = Math.max(2, w * 0.0025);
       ctx.stroke();
       ctx.fillStyle = ghStyle.accent;
-      ctx.beginPath();
-      ctx.arc(pad + badgeH * 0.38, pad + 10 + badgeH * 0.5, badgeH * 0.18, 0, Math.PI * 2);
+      ctx.fillRect(badgeX, badgeY + badgeH - Math.max(7, badgeH * 0.09), badgeW * 0.78, Math.max(7, badgeH * 0.09));
+      drawRoundRect(ctx, badgeX + badgeH * 0.20, badgeY + badgeH * 0.24, badgeH * 0.52, badgeH * 0.52, badgeH * 0.12);
+      ctx.fillStyle = ghStyle.accent;
       ctx.fill();
+      ctx.fillStyle = ghStyle.bg;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `900 ${Math.floor(badgeH * 0.28)}px Kanit, Prompt, Arial, sans-serif`;
+      ctx.fillText('</>', badgeX + badgeH * 0.46, badgeY + badgeH * 0.50);
       ctx.fillStyle = ghStyle.fg;
       ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      const titleFont = Math.floor(badgeH * 0.37);
+      ctx.textBaseline = 'alphabetic';
+      const titleFont = Math.floor(badgeH * 0.32);
+      const subFont = Math.floor(badgeH * 0.17);
       ctx.font = `900 ${titleFont}px Kanit, Prompt, Arial, sans-serif`;
-      ctx.fillText('\u0e02\u0e2d\u0e07\u0e14\u0e35\u0e08\u0e32\u0e01 GitHub', pad + badgeH * 0.72, pad + 10 + badgeH * 0.5);
+      ctx.fillText(ghStyle.label, badgeX + badgeH * 0.88, badgeY + badgeH * 0.49);
+      ctx.fillStyle = ghStyle.accent;
+      ctx.font = `800 ${subFont}px Kanit, Prompt, Arial, sans-serif`;
+      ctx.fillText(ghStyle.subLabel, badgeX + badgeH * 0.90, badgeY + badgeH * 0.76);
       ctx.restore();
     }
 
@@ -2657,6 +2817,8 @@ Return only the final Thai text in the required format.`;
       basePromptJson = createYoutubeImagePromptJson(item);
     } else if (isAiNewsImageStyle) {
       basePromptJson = createAiNewsImagePromptJson(item);
+    } else if (isGithubImageStyle) {
+      basePromptJson = createGithubImagePromptJson(item);
     } else if (item.cardImagePromptStyleId) {
       const saved = imagePromptStyles.find(p => p.id === item.cardImagePromptStyleId);
       if (saved) basePromptJson = saved.content;
@@ -2678,21 +2840,18 @@ Return only the final Thai text in the required format.`;
       let useImg = isOverlayStyle ? true : item.useAttachedImage && !!item.selectedImageUrl;
       let refUrl = useImg ? item.selectedImageUrl : referenceImageUrl;
       if (isGithubImageStyle) {
-        const tagLabel = (item.tags || []).find(t => t !== 'github');
-        const ghFootageFolder = localStorage.getItem('gh_footage_folder');
-        if (ghFootageFolder && tagLabel) {
-          try {
-            const ghRes = await fetch('/api/random-stock-image', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ folder: ghFootageFolder + '/' + tagLabel }),
-            });
-            const ghData = await ghRes.json();
-            if (ghData.success) {
-              refUrl = ghData.dataUrl;
-              useImg = true;
-            }
-          } catch {}
+        const picked = await pickRandomGithubStockImage(item);
+        if (picked.dataUrl) {
+          refUrl = picked.dataUrl;
+          useImg = true;
+          updateBulkItem(itemId, {
+            selectedImageUrl: picked.dataUrl,
+            images: [picked.dataUrl, ...(item.images || []).filter(img => img !== picked.dataUrl)],
+            smartSelectedImageReason: `สุ่มจากคลัง GitHub หัวข้อ ${picked.topicLabel}${picked.fileName ? `: ${picked.fileName}` : ''}`,
+            smartConfigNote: `Github (สุ่มรูปจากคลัง) → ${picked.topicLabel}`,
+          });
+        } else if (picked.error) {
+          console.warn(`[AIPage] GitHub stock image not found: ${picked.error}`);
         }
       }
       const newTask: GenerationTask = {
@@ -3114,38 +3273,41 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
 
     setIsSmartConfigRunning(true);
 
-    for (let i = 0; i < selectedItems.length; i++) {
-      const item = selectedItems[i];
-      const label = `(${i + 1}/${selectedItems.length})`;
-      setSmartConfigLog(`🤖 ${label} ตั้งค่า: ${(item.title || item.rawArticle).slice(0, 30)}...`);
+    try {
+      for (let i = 0; i < selectedItems.length; i++) {
+        const item = selectedItems[i];
+        const label = `(${i + 1}/${selectedItems.length})`;
+        setSmartConfigLog(`🤖 ${label} ตั้งค่า: ${(item.title || item.rawArticle).slice(0, 30)}...`);
 
-      // ── Step 1: global defaults ──────────────────────────────────────────────
-      const THREE_LINE_PACK_ID = 'default-3-line-hook';
-      const patch: Partial<BulkArticleItem> = {
-        writingStyleId: item.writingStyleId || (isGithub ? (writingStyles.find(s => s.name.trim() === 'AI Trendtech')?.id || '') : selectedStyleId),
-        commentStyleId: item.commentStyleId || (isGithub ? (writingStyles.find(s => s.name.trim() === 'AI Trendtech')?.id || '') : selectedCommentStyleId),
-        headlinePackId: THREE_LINE_PACK_ID,
-        cardTextModel: isGithub ? 'google/gemini-2.5-flash' : (item.cardTextModel || textModel),
-        cardImageRatio: isGithub ? '1:1' : (item.cardImageRatio || ''),
-        articleLength: isGithub ? 'short' : (item.articleLength || ''),
-        fontPaletteId: isGithub ? 'black-yellow-white' : (item.ytExtracted || item.sourceType === 'youtube') ? 'white-yellow-blue' : 'cyan-white-navy',
-      };
+        // ── Detect source type ─────────────────────────────────────────────────
+        const isGithub = item.sourceType === 'github'
+          || (item.tags || []).some(tag => String(tag).toLowerCase() === 'github')
+          || /github\.com/i.test(item.sourceUrl || '');
+        const isYoutube = !!item.ytExtracted || item.sourceType === 'youtube';
+        const isNews = !isYoutube && !isGithub && (item.sourceType === 'news' || !!item.sourceUrl);
 
-      // ── Detect source type ─────────────────────────────────────────────────
-      const isYoutube = !!item.ytExtracted || item.sourceType === 'youtube';
-      const isNews = !isYoutube && (item.sourceType === 'news' || !!item.sourceUrl);
-      const isGithub = !isYoutube && !isNews && ((item.tags || []).includes('github') || item.sourceType === 'github');
+        // ── Step 1: global defaults ──────────────────────────────────────────────
+        const THREE_LINE_PACK_ID = 'default-3-line-hook';
+        const patch: Partial<BulkArticleItem> = {
+          writingStyleId: item.writingStyleId || (isGithub ? (writingStyles.find(s => s.name.trim() === 'AI Trendtech')?.id || '') : selectedStyleId),
+          commentStyleId: item.commentStyleId || (isGithub ? (writingStyles.find(s => s.name.trim() === 'AI Trendtech')?.id || '') : selectedCommentStyleId),
+          headlinePackId: THREE_LINE_PACK_ID,
+          cardTextModel: isGithub ? 'google/gemini-2.5-flash' : (item.cardTextModel || textModel),
+          cardImageRatio: isGithub ? '1:1' : (item.cardImageRatio || ''),
+          articleLength: isGithub ? 'short' : (item.articleLength || ''),
+          fontPaletteId: isGithub ? 'black-yellow-white' : isYoutube ? 'white-yellow-blue' : 'cyan-white-navy',
+        };
 
       // ── Auto-fetch images if none yet (news articles) ─────────────────────
       let allImages = item.images || [];
       if (allImages.length === 0 && isNews && item.sourceUrl) {
         setSmartConfigLog(`📡 ${label} ดูดรูปข่าว ${item.sourceUrl.slice(0, 40)}...`);
         try {
-          const res = await fetch('/api/website-extract', {
+          const res = await fetchWithTimeout('/api/website-extract', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url: item.sourceUrl }),
-          });
+          }, LOCAL_API_TIMEOUT_MS);
           const data = await res.json();
           if (res.ok && data.success && data.images?.length > 0) {
             allImages = Array.from(new Set([...(data.images || []), ...(item.images || [])]))
@@ -3157,7 +3319,25 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
       }
 
       // ── Set image style + Vision analyze ──────────────────────────────────
-      if (allImages.length > 0) {
+      if (isGithub) {
+        const picked = await pickRandomGithubStockImage(item);
+          patch.useAttachedImage = true;
+          patch.decorateOriginalPhoto = true;
+          patch.cardImagePromptStyleId = GITHUB_IMAGE_STYLE_ID;
+          patch.aiNewsBadgeStyleId = GITHUB_BADGE_STYLES[0].id;
+        if (picked.dataUrl) {
+          allImages = [picked.dataUrl, ...allImages.filter(img => img !== picked.dataUrl)];
+          patch.images = allImages;
+          patch.selectedImageUrl = picked.dataUrl;
+          patch.smartSelectedImageIndex = 0;
+          patch.smartSelectedImageReason = `สุ่มจากคลัง GitHub หัวข้อ ${picked.topicLabel}${picked.fileName ? `: ${picked.fileName}` : ''}`;
+          patch.smartConfigNote = `Smart Setup (GitHub) → ใช้สไตล์ Github สุ่มรูปจากคลังหัวข้อ ${picked.topicLabel}`;
+        } else {
+          patch.selectedImageUrl = item.selectedImageUrl || allImages[0] || '';
+          patch.smartSelectedImageReason = picked.error || 'ยังสุ่มรูป GitHub ไม่สำเร็จ';
+          patch.smartConfigNote = `Smart Setup (GitHub) → ใช้สไตล์ Github แต่ยังไม่ได้รูปจากคลัง${picked.topicLabel ? `หัวข้อ ${picked.topicLabel}` : ''}${picked.error ? ` (${picked.error})` : ''}`;
+        }
+      } else if (allImages.length > 0) {
         patch.useAttachedImage = true;
 
         if (isYoutube) {
@@ -3192,11 +3372,6 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
               ? 'Smart Setup วิเคราะห์รูปไม่สำเร็จ → คงรูปเดิมไว้ ให้เช็คอีกทีก่อนสร้าง'
               : 'Smart Setup วิเคราะห์รูปไม่สำเร็จ และไม่มีรูปเดิม';
           }
-        } else if (isGithub) {
-          patch.decorateOriginalPhoto = true;
-          patch.cardImagePromptStyleId = GITHUB_IMAGE_STYLE_ID;
-          patch.selectedImageUrl = item.selectedImageUrl || (allImages[0] || '');
-          patch.smartConfigNote = `Smart Setup (GitHub) → ใช้สไตล์ Github สุ่มรูปจากคลัง`;
         } else {
           // News → ข่าวAI style + คงรูปเดิมตกแต่งเพิ่ม
           patch.decorateOriginalPhoto = true;
@@ -3317,11 +3492,16 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
 
       }
 
-      if (i < selectedItems.length - 1) await new Promise(r => setTimeout(r, 300));
-    }
+        if (i < selectedItems.length - 1) await new Promise(r => setTimeout(r, 300));
+      }
 
-    setSmartConfigLog('');
-    setIsSmartConfigRunning(false);
+      setSmartConfigLog('');
+    } catch (e: any) {
+      console.error('[AIPage] Smart Setup failed:', e);
+      setSmartConfigLog(`❌ Smart Setup หยุด: ${e?.message || 'ไม่ทราบสาเหตุ'}`);
+    } finally {
+      setIsSmartConfigRunning(false);
+    }
   };
 
   const getWritingStyleName = (id: string) => writingStyles.find(s => s.id === id)?.name || 'ยังไม่เลือก';
@@ -3931,8 +4111,27 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                     {isSmartConfigRunning ? '⏳ กำลัง Smart Setup...' : `🧠 Smart Setup (${selectedBulkCount} อัน)`}
                   </button>
                   <span className="text-[10px] text-violet-400/60 mt-1 max-w-[280px] leading-tight">
-                    🔍 ดูดรูปข่าว (ถ้ายังไม่มี) → ตั้งสไตล์ภาพตามประเภท YouTube/ข่าว → ตั้งพาดหัว3บรรทัด → สร้างบทความ+พาดหัวไทย → เน้นคำสำคัญในพาดหัว → เปิด img2img คงรูปเดิมตกแต่งเพิ่ม
+                    🔍 ดูดรูปข่าว (ถ้ายังไม่มี) → ตั้งสไตล์ภาพตามประเภท YouTube/ข่าว/GitHub → GitHub สุ่มรูปตามหัวข้อจากคลัง → สร้างบทความ+พาดหัวไทย → เน้นคำสำคัญ
                   </span>
+                </div>
+
+                <div className="flex flex-col w-full sm:w-auto">
+                  <button
+                    onClick={handlePickGithubStockFolder}
+                    disabled={isSmartConfigRunning || isBulkProcessing}
+                    className="text-xs bg-slate-700/70 hover:bg-slate-600 disabled:opacity-50 text-slate-100 px-3 py-1.5 rounded-lg font-bold transition-all border border-slate-500/50 flex items-center gap-1.5"
+                    title="เลือก Folder แม่ของคลังรูป GitHub ระบบจะสุ่มจาก subfolder ตามหัวข้อ เช่น Claude Code"
+                  >
+                    📁 เลือกคลังรูป GitHub
+                  </button>
+                  <span className="text-[10px] text-slate-400/70 mt-1 max-w-[240px] leading-tight truncate" title={githubStockFolder || 'ยังไม่ได้เลือก'}>
+                    {githubStockFolder ? `ใช้คลัง: ${githubStockFolderName}` : 'ยังไม่ได้เลือกคลังรูป GitHub'}
+                  </span>
+                  {githubStockFolderLog && (
+                    <span className="text-[10px] text-emerald-300/80 mt-0.5 max-w-[240px] leading-tight">
+                      {githubStockFolderLog}
+                    </span>
+                  )}
                 </div>
 
                 {/* Restore cache for all selected */}
@@ -4369,6 +4568,37 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                                           ข่าวAI
                                         </div>
                                         <div className="absolute bottom-2 left-2 h-2 w-16 rounded" style={{ backgroundColor: style.accent }} />
+                                      </div>
+                                      <div className="mt-1 text-[10px] font-bold text-gray-200">{style.name}</div>
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : item.cardImagePromptStyleId === GITHUB_IMAGE_STYLE_ID ? (
+                              <div className="space-y-2">
+                                <label className="text-[9px] text-gray-500 block">กรอบพาดหัวซ้ายบน GitHub</label>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-2">
+                                  {GITHUB_BADGE_STYLES.map(style => (
+                                    <button
+                                      key={style.id}
+                                      type="button"
+                                      onClick={() => updateBulkItem(item.id, { aiNewsBadgeStyleId: style.id })}
+                                      className={`rounded-lg border p-2 text-left transition-all ${item.aiNewsBadgeStyleId === style.id ? 'border-cyan-400 bg-cyan-500/10' : 'border-gray-700 bg-black/20 hover:border-gray-500'}`}
+                                    >
+                                      <div className="relative h-14 overflow-hidden rounded bg-gradient-to-br from-slate-900 to-black">
+                                        <div
+                                          className="absolute left-0 top-1 flex h-9 items-center gap-1.5 pr-5 pl-2 shadow-lg"
+                                          style={{ backgroundColor: style.bg, color: style.fg, clipPath: 'polygon(0 0, 88% 0, 100% 50%, 88% 100%, 0 100%)' }}
+                                        >
+                                          <span className="grid h-5 w-5 place-items-center rounded text-[8px] font-black" style={{ backgroundColor: style.accent, color: style.bg }}>
+                                            {'</>'}
+                                          </span>
+                                          <span className="min-w-0">
+                                            <span className="block truncate text-[10px] font-black leading-tight">{style.label}</span>
+                                            <span className="block truncate text-[8px] font-bold leading-tight" style={{ color: style.accent }}>{style.subLabel}</span>
+                                          </span>
+                                        </div>
+                                        <div className="absolute bottom-1 left-2 h-1.5 w-20 rounded" style={{ backgroundColor: style.accent }} />
                                       </div>
                                       <div className="mt-1 text-[10px] font-bold text-gray-200">{style.name}</div>
                                     </button>

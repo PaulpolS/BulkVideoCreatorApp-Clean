@@ -23,6 +23,22 @@ export interface ApiProfile {
   apifyKey?: string;
 }
 
+const API_SETTINGS_FETCH_TIMEOUT_MS = 10_000;
+
+async function fetchJsonWithTimeout(url: string, init: RequestInit = {}, timeoutMs = API_SETTINGS_FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    return await res.json();
+  } catch (e: any) {
+    if (e?.name === 'AbortError') throw new Error(`Request timeout after ${Math.round(timeoutMs / 1000)}s`);
+    throw e;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
 // ─── Sync helpers (localStorage only, no network) ───────────────────────────
 
 function getLocalProfiles(): ApiProfile[] {
@@ -141,8 +157,7 @@ export function getActiveProfile(): ApiProfile | null {
 export async function getActiveOpenRouterKeyAsync(): Promise<string> {
   // 1. Try server-side profiles first
   try {
-    const res = await fetch('/api/get-app-data?key=api_profiles');
-    const profiles = await res.json();
+    const profiles = await fetchJsonWithTimeout('/api/get-app-data?key=api_profiles');
     if (Array.isArray(profiles) && profiles.length > 0) {
       const activeId = localStorage.getItem('api_global_active_id') || profiles[0].id;
       const activeProfile = profiles.find((p: any) => p.id === activeId) || profiles[0];
@@ -170,8 +185,7 @@ export async function getOpenRouterKeyCandidates(): Promise<{ key: string; label
 
   // 1. Server-side profiles
   try {
-    const res = await fetch('/api/get-app-data?key=api_profiles');
-    const profiles = await res.json();
+    const profiles = await fetchJsonWithTimeout('/api/get-app-data?key=api_profiles');
     if (Array.isArray(profiles) && profiles.length > 0) {
       const activeId = localStorage.getItem('api_global_active_id') || profiles[0].id;
       const active = profiles.find((p: any) => p.id === activeId) || profiles[0];
