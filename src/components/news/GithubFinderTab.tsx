@@ -232,6 +232,21 @@ export function GithubFinderTab({ onSendToAIPage }: GithubFinderProps) {
     setIsGeneratingPrompt(true);
     setFootageMessage('');
     setGeneratedPrompt('');
+    const buildFallbackStockPrompts = (count: number) => {
+      const topic = kw.label;
+      const concepts = [
+        `professional stock photo of a developer workstation showing ${topic} workflow, laptop screen with abstract code shapes, clean desk, soft daylight, modern technology atmosphere, no readable text, no logos, 16:9`,
+        `modern AI engineering workspace inspired by ${topic}, multiple monitors with blurred code editor, subtle blue and cyan lighting, premium clean background, hands typing from distance, no readable text, no brand logos, 16:9`,
+        `abstract technology scene for ${topic}, interconnected nodes, code blocks, automation pipeline, glassmorphism UI panels without readable text, bright professional lighting, clean modern stock image, 16:9`,
+        `close-up stock photo of a programmer planning ${topic} tools, notebook, keyboard, subtle GitHub-style developer mood, clean background, no readable words, no logos, cinematic but professional, 16:9`,
+        `wide shot of a clean software team desk setup for ${topic}, laptops, workflow diagrams blurred, modern office lighting, professional stock photo, no readable text, no people faces, 16:9`,
+        `premium cover image about ${topic}, futuristic AI coding assistant concept, soft holographic interface elements, clean technology background, no text, no logo, high quality stock photo, 16:9`,
+        `minimal modern developer tools composition for ${topic}, keyboard, terminal-like abstract shapes, blue accent light, clean empty space for headline overlay, no readable text, no watermark, 16:9`,
+        `professional tech editorial image for ${topic}, automation and agent workflow represented by glowing paths between devices, bright clean background, no readable text, no logos, 16:9`,
+      ];
+      return Array.from({ length: count }, (_, i) => concepts[i % concepts.length]);
+    };
+
     try {
       const promptText = `คุณคือผู้เชี่ยวชาญด้านการสร้าง Prompt สำหรับ AI Image Generation (เช่น Midjourney, DALL-E, Stable Diffusion)
 
@@ -249,26 +264,7 @@ export function GithubFinderTab({ onSendToAIPage }: GithubFinderProps) {
 ตอบเป็น JSON array เท่านั้น:
 ["prompt 1", "prompt 2", ...]`;
 
-      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${(await getOpenRouterKeyCandidates())[0]?.key || ''}`,
-          'HTTP-Referer': window.location.origin,
-          'X-Title': 'Bulk Video Creator - Footage Prompt',
-        },
-        body: JSON.stringify({
-          model: 'google/gemini-2.5-flash',
-          messages: [{ role: 'user', content: promptText }],
-          temperature: 0.8,
-        }),
-      });
-
-      if (!res.ok) throw new Error(`API error ${res.status}`);
-      const data = await res.json();
-      const raw = data.choices?.[0]?.message?.content || '';
-
-      // Parse JSON array from response
+      const raw = await callOpenRouter([{ role: 'user', content: promptText }]);
       const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/\s*```$/, '').trim();
       let prompts: string[] = [];
       try {
@@ -282,13 +278,15 @@ export function GithubFinderTab({ onSendToAIPage }: GithubFinderProps) {
 
       if (Array.isArray(prompts) && prompts.length > 0) {
         setGeneratedPrompt(prompts.join('\n\n'));
-        setFootageMessage(`✅ สร้าง ${prompts.length} Prompt เรียบร้อย!`);
+        setFootageMessage(`✅ AI สร้าง ${prompts.length} Prompt เรียบร้อย!`);
       } else {
         setGeneratedPrompt(raw);
-        setFootageMessage('⚠️ ได้ผลลัพธ์มาแล้ว กรุณาตรวจสอบ');
+        setFootageMessage('⚠️ AI ตอบกลับมาแล้ว แต่รูปแบบไม่ใช่ JSON array กรุณาตรวจสอบ');
       }
     } catch (e: any) {
-      setFootageMessage(`❌ ${e.message || 'เกิดข้อผิดพลาด'}`);
+      const prompts = buildFallbackStockPrompts(numCount);
+      setGeneratedPrompt(prompts.join('\n\n'));
+      setFootageMessage(`⚠️ AI เรียกไม่ผ่าน (${e.message || 'API error'}) เลยสร้าง Prompt สำรองให้ ${prompts.length} อัน`);
     } finally {
       setIsGeneratingPrompt(false);
     }
@@ -302,7 +300,7 @@ export function GithubFinderTab({ onSendToAIPage }: GithubFinderProps) {
     
     // ลอง model ที่เลือก → ถ้าไม่ได้ fallback ไป model ราคาถูกกว่า
     const modelsToTry = [ghModel, ...GH_MODEL_OPTIONS.map(m => m.id).filter(m => m !== ghModel)];
-    let lastErr = '';
+    const triedErrors: string[] = [];
     
     for (const cand of candidates) {
       for (const model of modelsToTry) {
@@ -321,21 +319,23 @@ export function GithubFinderTab({ onSendToAIPage }: GithubFinderProps) {
           if (res.ok && !data.error) {
             return data.choices?.[0]?.message?.content || '';
           }
-          lastErr = data.error?.message || `error ${res.status}`;
+          const message = data.error?.message || `HTTP ${res.status}`;
+          const detail = `${cand.label} + ${model}: ${message}`;
+          triedErrors.push(detail);
           // ถ้าเป็น credits error → ลอง model ถัดไปก่อน
-          if (/credits|afford/i.test(lastErr)) {
-            console.warn(`[GH Finder] Model ${model} credits error, trying next...`);
+          if (/credits|afford|402|payment|required/i.test(message) || res.status === 402) {
+            console.warn(`[GH Finder] ${detail} → trying next model/key...`);
             continue;
           }
           // error อื่นๆ → ลอง key ถัดไป
           break;
         } catch (fetchErr: any) {
-          lastErr = fetchErr.message || 'Network error';
+          triedErrors.push(`${cand.label} + ${model}: ${fetchErr.message || 'Network error'}`);
           break;
         }
       }
     }
-    throw new Error(lastErr || 'OpenRouter error — ลองเปลี่ยน model หรือเติม credit');
+    throw new Error(triedErrors.slice(-3).join(' | ') || 'OpenRouter error — ลองเปลี่ยน model หรือเช็ค active API key');
   };
 
   // ─── Extract GIF URLs only from README markdown ────────────────────────────
