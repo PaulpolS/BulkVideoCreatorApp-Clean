@@ -268,10 +268,6 @@ export function YoutubeChannelFinder() {
       alert('กรุณาใส่ Keyword ที่ต้องการค้นหา');
       return;
     }
-    if (savedChannels.length === 0) {
-      alert('กรุณาบันทึกช่อง YouTube ก่อนอย่างน้อย 1 ช่อง');
-      return;
-    }
 
     setIsKeywordSearching(true);
     setKeywordResult(null);
@@ -280,17 +276,16 @@ export function YoutubeChannelFinder() {
       id: taskId,
       title: `ค้นหา YouTube Keyword: ${q}`,
       category: 'youtube',
-      progress: `กำลังค้นหา Top 30 จาก ${savedChannels.length} ช่องในช่วง 30 วัน`,
+      progress: 'กำลังค้นหา YouTube จริงจาก keyword ในช่วง 30 วัน',
       status: 'running',
     });
 
     try {
-      const res = await fetch('/api/youtube-keyword-channel-search', {
+      const res = await fetch('/api/youtube-keyword-search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           keyword: q,
-          channels: savedChannels.map(ch => ({ name: ch.name, url: ch.url, logoUrl: ch.logoUrl, subscribers: ch.subscribers })),
           limit: 30,
           days: 30,
         }),
@@ -302,7 +297,7 @@ export function YoutubeChannelFinder() {
         id: `keyword:${q}`,
         name: `Keyword: ${q}`,
         url: '',
-        description: `คลิปยอดวิวสูงสุดใน 30 วันที่ผ่านมา จากช่องที่บันทึกไว้`,
+        description: 'คลิปยอดวิวสูงสุดใน 30 วันที่ผ่านมา จากการค้นหา YouTube จริง',
         subscribers: null,
         logoUrl: '',
         savedAt: new Date().toISOString(),
@@ -311,7 +306,7 @@ export function YoutubeChannelFinder() {
       };
       setKeywordResult(resultChannel);
       setSelectedVideoIds(prev => ({ ...prev, [resultChannel.id]: new Set((resultChannel.videos || []).map(v => v.id)) }));
-      globalTaskStore.updateTask(taskId, { progress: `พบ ${data.videos?.length || 0} คลิปจาก Keyword "${q}"`, status: 'completed' });
+      globalTaskStore.updateTask(taskId, { progress: `พบ ${data.videos?.length || 0} คลิปจาก YouTube Keyword "${q}"`, status: 'completed' });
     } catch (err: any) {
       globalTaskStore.updateTask(taskId, { progress: `Error: ${err?.message || String(err)}`, status: 'error' });
       alert(`❌ ค้นหาไม่สำเร็จ: ${err?.message || String(err)}`);
@@ -559,7 +554,7 @@ export function YoutubeChannelFinder() {
         <div className="flex flex-wrap items-center gap-3">
           <div className="min-w-0 flex-1">
             <h4 className="text-sm font-bold mb-1" style={{ color: 'var(--text-main)' }}>
-              🔥 ค้นหาคลิปจาก Keyword ในช่องที่บันทึกไว้
+              🔥 ค้นหาคลิปจาก Keyword บน YouTube จริง
             </h4>
             <input
               type="text"
@@ -573,16 +568,14 @@ export function YoutubeChannelFinder() {
           </div>
           <button
             onClick={handleKeywordSearch}
-            disabled={isKeywordSearching || !keyword.trim() || savedChannels.length === 0}
+            disabled={isKeywordSearching || !keyword.trim()}
             className={`mt-6 rounded-lg px-4 py-2 text-sm font-bold text-white ${isKeywordSearching ? 'cursor-not-allowed bg-gray-500 opacity-70' : 'bg-red-600 hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40'}`}
           >
             {isKeywordSearching ? '⏳ กำลังค้นหา...' : '🔥 หา Top 30 ใน 1 เดือน'}
           </button>
         </div>
-        <p className="mt-2 text-[11px]" style={{ color: savedChannels.length === 0 ? '#f59e0b' : 'var(--text-muted, #888)' }}>
-          {savedChannels.length === 0
-            ? 'ต้องบันทึกช่อง YouTube ก่อนอย่างน้อย 1 ช่อง แล้วช่องค้นหานี้จะใช้ช่องที่บันทึกไว้ไปหา Top 30 ตาม keyword'
-            : `จะค้นหาจาก ${savedChannels.length} ช่องที่บันทึกไว้ กรองคลิปใน 30 วันที่ผ่านมา แล้วเรียงตามยอดวิวสูงสุด`}
+        <p className="mt-2 text-[11px]" style={{ color: 'var(--text-muted, #888)' }}>
+          จะค้นหา YouTube จาก keyword โดยตรง กรองคลิปใน 30 วันที่ผ่านมา แล้วเรียงตามยอดวิวสูงสุด
         </p>
       </div>
 

@@ -2666,6 +2666,145 @@ const fileSaverPlugin = (): Plugin => ({
       });
     });
 
+    server.middlewares.use('/api/youtube-keyword-search', async (req, res) => {
+      if (req.method !== 'POST') return;
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', async () => {
+        try {
+          const { keyword, limit = 30, days = 30 } = JSON.parse(body);
+          const q = String(keyword || '').trim();
+          const resultLimit = Math.max(1, Math.min(100, Number(limit) || 30));
+          const dayWindow = Math.max(1, Math.min(365, Number(days) || 30));
+          if (!q) throw new Error('Missing keyword');
+
+          const { execFileSync } = require('child_process');
+          const searchLimit = Math.max(resultLimit * 2, Math.min(60, resultLimit * 5));
+          const cutoff = Date.now() - dayWindow * 24 * 60 * 60 * 1000;
+          const cutoffDate = new Date(cutoff).toISOString().slice(0, 10).replace(/-/g, '');
+          const seen = new Set<string>();
+          const rows: any[] = [];
+
+          const videoDate = (v: any): Date | null => {
+            const raw = String(v.upload_date || v.release_date || '');
+            if (/^\d{8}$/.test(raw)) {
+              return new Date(`${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}T00:00:00.000Z`);
+            }
+            if (typeof v.timestamp === 'number') return new Date(v.timestamp * 1000);
+            return null;
+          };
+
+          const parsePrintedRows = (raw: string) => {
+            raw.split('\n')
+              .map((line: string) => line.trim())
+              .filter(Boolean)
+              .forEach((line: string) => {
+                const [
+                  id,
+                  title,
+                  url,
+                  viewsRaw,
+                  uploadDate,
+                  timestampRaw,
+                  durationRaw,
+                  channel,
+                  channelUrl,
+                  thumbnail,
+                ] = line.split('\t');
+                const v = {
+                  id,
+                  title,
+                  webpage_url: url,
+                  view_count: viewsRaw && viewsRaw !== 'NA' ? Number(viewsRaw) : null,
+                  upload_date: uploadDate,
+                  timestamp: timestampRaw && timestampRaw !== 'NA' ? Number(timestampRaw) : null,
+                  duration: durationRaw && durationRaw !== 'NA' ? Number(durationRaw) : null,
+                  channel,
+                  channel_url: channelUrl,
+                  thumbnail,
+                };
+                const d = videoDate(v);
+                if (!d || d.getTime() < cutoff) return;
+                const videoId = v.id || v.display_id || v.webpage_url;
+                if (!videoId || seen.has(videoId)) return;
+                seen.add(videoId);
+                const thumbnails = Array.isArray(v.thumbnails) ? v.thumbnails : [];
+                const bestThumb = thumbnails.length > 0 ? thumbnails[thumbnails.length - 1]?.url : '';
+                rows.push({
+                  id: videoId,
+                  title: v.title || '(ไม่มีชื่อคลิป)',
+                  url: v.webpage_url || `https://www.youtube.com/watch?v=${videoId}`,
+                  views: v.view_count ?? null,
+                  description: '',
+                  uploadedAt: v.upload_date || v.release_date || (d ? d.toISOString() : ''),
+                  thumbnail: v.thumbnail || bestThumb || '',
+                  duration: v.duration ?? null,
+                  channelName: v.channel || v.uploader || '',
+                  channelUrl: v.channel_url || v.uploader_url || '',
+                  channelLogoUrl: v.channel_thumbnail || '',
+                  subscribers: v.channel_follower_count ?? null,
+                  viralScore: null,
+                  evergreenScore: null,
+                });
+              });
+          };
+
+          const runSearch = (target: string, useDateFilter: boolean) => {
+            const args = [
+              '--skip-download',
+              '--no-playlist',
+              '--no-warnings',
+              '--ignore-errors',
+              '--print',
+              '%(id)s\t%(title)s\t%(webpage_url)s\t%(view_count)s\t%(upload_date)s\t%(timestamp)s\t%(duration)s\t%(channel)s\t%(channel_url)s\t%(thumbnail)s',
+            ];
+            if (useDateFilter) args.push('--dateafter', cutoffDate);
+            args.push(target);
+            return execFileSync('yt-dlp', args, { timeout: 180000, maxBuffer: 1024 * 1024 * 20 }).toString();
+          };
+
+          try {
+            parsePrintedRows(runSearch(`ytsearchdate${searchLimit}:${q}`, true));
+          } catch (e: any) {
+            console.warn('[YT keyword direct] date search failed:', e?.message || e);
+          }
+
+          if (rows.length < resultLimit) {
+            try {
+              parsePrintedRows(runSearch(`ytsearch${searchLimit}:${q}`, true));
+            } catch (e: any) {
+              console.warn('[YT keyword direct] relevance search failed:', e?.message || e);
+            }
+          }
+
+          if (rows.length === 0) {
+            try {
+              parsePrintedRows(runSearch(`ytsearchdate${Math.max(resultLimit, 30)}:${q}`, false));
+            } catch (e: any) {
+              console.warn('[YT keyword direct] unfiltered fallback failed:', e?.message || e);
+            }
+          }
+
+          if (rows.length === 0) {
+            throw new Error('ไม่พบคลิป YouTube ในช่วงเวลาที่เลือก หรือ YouTube ไม่ส่งข้อมูลวันที่ของผลค้นหานี้');
+          }
+
+          rows.sort((a, b) => (b.views ?? 0) - (a.views ?? 0));
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({
+            success: true,
+            videos: rows.slice(0, resultLimit),
+            searched: true,
+            days: dayWindow,
+          }));
+        } catch(e: any) {
+          res.statusCode = 500;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ success: false, error: e.message || String(e) }));
+        }
+      });
+    });
+
     server.middlewares.use('/api/short-clip-download', async (req, res) => {
       if (req.method !== 'POST') return;
       let body = '';
