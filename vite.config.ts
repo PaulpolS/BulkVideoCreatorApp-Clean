@@ -42,6 +42,7 @@ function getAipageDataDir(): string {
 
 const dataStaticPlugin = (): Plugin => ({
   name: 'data-static-serve',
+  apply: 'serve',
 
   // Inject client script to block auto-reload when WebSocket disconnects.
   // Root cause: if the dev server crashes (unhandled error), the WS drops and
@@ -2574,6 +2575,97 @@ const fileSaverPlugin = (): Plugin => ({
       });
     });
 
+    server.middlewares.use('/api/youtube-keyword-channel-search', async (req, res) => {
+      if (req.method !== 'POST') return;
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', async () => {
+        try {
+          const { keyword, channels = [], limit = 30, days = 30 } = JSON.parse(body);
+          const q = String(keyword || '').trim().toLowerCase();
+          const channelList = Array.isArray(channels) ? channels.filter((c: any) => c?.url) : [];
+          const resultLimit = Math.max(1, Math.min(100, Number(limit) || 30));
+          const dayWindow = Math.max(1, Math.min(365, Number(days) || 30));
+          const scanLimit = Math.max(resultLimit, 200);
+          if (!q) throw new Error('Missing keyword');
+          if (channelList.length === 0) throw new Error('Missing YouTube channels');
+
+          const normalizeText = (s: string) => String(s || '').toLowerCase();
+          const terms = q.split(/\s+/).filter(Boolean);
+          const matchesKeyword = (v: any) => {
+            const haystack = normalizeText([v.title, v.description, v.tags?.join(' ')].filter(Boolean).join(' '));
+            return haystack.includes(q) || terms.every((term: string) => haystack.includes(term));
+          };
+          const videoDate = (v: any): Date | null => {
+            const raw = String(v.upload_date || v.release_date || '');
+            if (/^\d{8}$/.test(raw)) {
+              return new Date(`${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}T00:00:00.000Z`);
+            }
+            if (typeof v.timestamp === 'number') return new Date(v.timestamp * 1000);
+            return null;
+          };
+          const cutoff = Date.now() - dayWindow * 24 * 60 * 60 * 1000;
+          const rows: any[] = [];
+          const seen = new Set<string>();
+          const { execFileSync } = require('child_process');
+
+          for (const channel of channelList) {
+            try {
+              const raw = execFileSync('yt-dlp', [
+                '--dump-json',
+                '--no-warnings',
+                '--ignore-errors',
+                '--playlist-end',
+                String(scanLimit),
+                channel.url,
+              ], { timeout: 180000, maxBuffer: 1024 * 1024 * 80 }).toString();
+
+              raw.split('\n')
+                .map((line: string) => line.trim())
+                .filter(Boolean)
+                .forEach((line: string) => {
+                  let v: any = null;
+                  try { v = JSON.parse(line); } catch { return; }
+                  const d = videoDate(v);
+                  if (!d || d.getTime() < cutoff || !matchesKeyword(v)) return;
+                  const videoId = v.id || v.display_id || v.webpage_url;
+                  if (!videoId || seen.has(videoId)) return;
+                  seen.add(videoId);
+                  const thumbnails = Array.isArray(v.thumbnails) ? v.thumbnails : [];
+                  const bestThumb = thumbnails.length > 0 ? thumbnails[thumbnails.length - 1]?.url : '';
+                  rows.push({
+                    id: videoId,
+                    title: v.title || '(ไม่มีชื่อคลิป)',
+                    url: v.webpage_url || v.original_url || `https://www.youtube.com/watch?v=${videoId}`,
+                    views: v.view_count ?? null,
+                    description: v.description || '',
+                    uploadedAt: v.upload_date || v.release_date || (d ? d.toISOString() : ''),
+                    thumbnail: v.thumbnail || bestThumb || '',
+                    duration: v.duration ?? null,
+                    channelName: v.channel || v.uploader || channel.name || '',
+                    channelUrl: v.channel_url || v.uploader_url || channel.url || '',
+                    channelLogoUrl: v.channel_thumbnail || channel.logoUrl || '',
+                    subscribers: v.channel_follower_count ?? channel.subscribers ?? null,
+                    viralScore: null,
+                    evergreenScore: null,
+                  });
+                });
+            } catch (e: any) {
+              console.warn('[YT keyword] channel scan failed:', channel.url, e?.message || e);
+            }
+          }
+
+          rows.sort((a, b) => (b.views ?? 0) - (a.views ?? 0));
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ success: true, videos: rows.slice(0, resultLimit), scannedChannels: channelList.length }));
+        } catch(e: any) {
+          res.statusCode = 500;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ success: false, error: e.message || String(e) }));
+        }
+      });
+    });
+
     server.middlewares.use('/api/short-clip-download', async (req, res) => {
       if (req.method !== 'POST') return;
       let body = '';
@@ -4331,6 +4423,7 @@ const fileSaverPlugin = (): Plugin => ({
 
 
 export default defineConfig({
+  base: './',
   plugins: [react(), dataStaticPlugin(), fileSaverPlugin()],
   optimizeDeps: {
     exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util']

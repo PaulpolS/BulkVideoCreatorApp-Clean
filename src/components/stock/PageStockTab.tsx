@@ -2651,18 +2651,8 @@ Additional owner feedback to follow in future runs:
     if (nextKey) setLocalImagePrompt(nextBrains[nextKey].writingPrompt);
   };
 
-  const getOpenRouterKeyForLocalImage = () => {
-    if (activeProfile?.openRouterKey?.trim()) return activeProfile.openRouterKey.trim();
-    const legacyKey = localStorage.getItem('openrouter_key')?.trim();
-    if (legacyKey) return legacyKey;
-    try {
-      const keys = JSON.parse(localStorage.getItem('openrouter_keys') || '[]');
-      const active = keys.find((key: any) => key.isActive) || keys[0];
-      return String(active?.key || '').trim();
-    } catch {
-      return '';
-    }
-  };
+  // Always reads from the module cache so it works even before profiles state loads
+  const getOpenRouterKeyForLocalImage = () => getActiveOpenRouterKey();
 
   const getDropboxTokenForLocalImage = async () => {
     if (activeProfile?.dropboxRefreshToken && activeProfile.dropboxAppKey && activeProfile.dropboxAppSecret) {

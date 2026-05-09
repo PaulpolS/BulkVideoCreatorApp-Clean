@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { initApiSettings } from './hooks/useApiSettings';
 import ThemeSwitcher from './components/layout/ThemeSwitcher';
 import GlobalSettings from './components/layout/GlobalSettings';
 import { GlobalTaskOverlay } from './components/layout/GlobalTaskOverlay';
@@ -83,6 +84,9 @@ function App() {
     setPendingYoutubeUrls(urls);
     setActiveTab('news');
   };
+
+  // Sync server api_profiles → localStorage once on startup so sync key getters always work
+  useEffect(() => { initApiSettings(); }, []);
 
   // Track visited tabs for keep-alive (lazy mount, never unmount)
   useEffect(() => {

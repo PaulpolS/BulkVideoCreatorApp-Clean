@@ -23,6 +23,10 @@ interface YTVideo {
   uploadedAt: string;
   thumbnail: string;
   duration: number | null;
+  channelName?: string;
+  channelUrl?: string;
+  channelLogoUrl?: string;
+  subscribers?: number | null;
   viralScore?: number | null;
   evergreenScore?: number | null;
 }
@@ -34,7 +38,9 @@ interface AIChannelSuggestion {
   whyMatch: string;
 }
 
-import { getActiveOpenRouterKeyAsync as getOpenRouterKey } from '../../hooks/useApiSettings';
+import { checkOpenRouterCredits, getActiveOpenRouterKeyAsync as getOpenRouterKey } from '../../hooks/useApiSettings';
+
+const FREE_FALLBACK_MODEL = 'google/gemma-3-27b-it:free';
 
 function formatSubs(n: number | null): string {
   if (n == null) return '-';
@@ -62,6 +68,9 @@ export function YoutubeChannelFinder() {
   const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('radar_selected_model') || 'google/gemini-2.5-flash');
   const [scoringId, setScoringId] = useState<string | null>(null);
   const [selectedVideoIds, setSelectedVideoIds] = useState<Record<string, Set<string>>>({});
+  const [keyword, setKeyword] = useState('');
+  const [isKeywordSearching, setIsKeywordSearching] = useState(false);
+  const [keywordResult, setKeywordResult] = useState<YTChannel | null>(null);
   const savedChannelsRef = React.useRef<YTChannel[]>([]);
 
   useEffect(() => {
@@ -110,7 +119,7 @@ export function YoutubeChannelFinder() {
       prompt.trim() ? `ความต้องการ: ${prompt.trim()}` : '',
     ].filter(Boolean).join('\n');
 
-    try {
+    const callOpenRouter = async (model: string, messages: object[]) => {
       const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -119,21 +128,58 @@ export function YoutubeChannelFinder() {
           'HTTP-Referer': window.location.origin,
           'X-Title': 'Bulk Video Creator',
         },
-        body: JSON.stringify({
-          model: selectedModel,
-          response_format: { type: 'json_object' },
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userMsg },
-          ],
-        }),
+        body: JSON.stringify({ model, response_format: { type: 'json_object' }, messages }),
       });
-      if (!res.ok) throw new Error(`API Error ${res.status}`);
-      const data = await res.json();
+      if (!res.ok) {
+        let detail = '';
+        try { const err = await res.json(); detail = err?.error?.message || err?.message || ''; } catch {}
+        const error: any = new Error(detail || `API Error ${res.status}`);
+        error.status = res.status;
+        throw error;
+      }
+      return res.json();
+    };
+
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMsg },
+    ];
+
+    try {
+      let data: any;
+      try {
+        data = await callOpenRouter(selectedModel, messages);
+      } catch (e: any) {
+        if (e.status !== 402) throw e;
+        // 402 on paid model → auto-retry with free model
+        if (selectedModel === FREE_FALLBACK_MODEL) throw e;
+        data = await callOpenRouter(FREE_FALLBACK_MODEL, messages);
+        alert(`⚠️ โมเดล "${selectedModel}" ต้องใช้เครดิต แต่บัญชีคุณอาจไม่มีเครดิตหรือ key ไม่ได้เปิดใช้โมเดลนี้\n✅ สลับมาใช้ "${FREE_FALLBACK_MODEL}" แทนสำเร็จแล้ว`);
+      }
       const parsed = JSON.parse(data?.choices?.[0]?.message?.content || '{}');
       setSuggestions(Array.isArray(parsed.channels) ? parsed.channels : []);
     } catch (e: any) {
-      alert(`❌ ค้นหาล้มเหลว: ${e.message}`);
+      if (e.status === 402) {
+        let creditText = '';
+        try {
+          const info = await checkOpenRouterCredits(apiKey);
+          if (info.valid) {
+            const usageStr = `ใช้ไปแล้ว $${Number(info.usage).toFixed(4)}`;
+            const limitStr = info.limit !== null ? ` / ลิมิต $${Number(info.limit).toFixed(2)}` : ' (ไม่ได้ตั้ง spending limit)';
+            const tierStr = info.isFreeTier ? ' · Free Tier' : '';
+            creditText = `\n📊 สถานะ Key: ${usageStr}${limitStr}${tierStr}`;
+          }
+        } catch {}
+        alert(
+          `❌ ค้นหาล้มเหลว: OpenRouter ปฏิเสธคำขอ (402)${creditText}\n\n` +
+          `สาเหตุที่เป็นไปได้:\n` +
+          `• เครดิตฟรีหมดแล้ว → ต้องเติมเงินที่ openrouter.ai\n` +
+          `• โมเดล "${selectedModel}" ต้องใช้เครดิต → เลือกโมเดล 🆓 ฟรีแทน\n` +
+          `• API Key ผิด profile → เช็คในปุ่มตั้งค่าว่าเลือก profile ถูกต้อง`
+        );
+      } else {
+        alert(`❌ ค้นหาล้มเหลว: ${e.message}`);
+      }
     }
     setIsSearching(false);
   };
@@ -216,6 +262,64 @@ export function YoutubeChannelFinder() {
     });
   };
 
+  const handleKeywordSearch = async () => {
+    const q = keyword.trim();
+    if (!q) {
+      alert('กรุณาใส่ Keyword ที่ต้องการค้นหา');
+      return;
+    }
+    if (savedChannels.length === 0) {
+      alert('กรุณาบันทึกช่อง YouTube ก่อนอย่างน้อย 1 ช่อง');
+      return;
+    }
+
+    setIsKeywordSearching(true);
+    setKeywordResult(null);
+    const taskId = `yt_keyword_${Date.now()}`;
+    globalTaskStore.addTask({
+      id: taskId,
+      title: `ค้นหา YouTube Keyword: ${q}`,
+      category: 'youtube',
+      progress: `กำลังค้นหา Top 30 จาก ${savedChannels.length} ช่องในช่วง 30 วัน`,
+      status: 'running',
+    });
+
+    try {
+      const res = await fetch('/api/youtube-keyword-channel-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          keyword: q,
+          channels: savedChannels.map(ch => ({ name: ch.name, url: ch.url, logoUrl: ch.logoUrl, subscribers: ch.subscribers })),
+          limit: 30,
+          days: 30,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Search failed');
+
+      const resultChannel: YTChannel = {
+        id: `keyword:${q}`,
+        name: `Keyword: ${q}`,
+        url: '',
+        description: `คลิปยอดวิวสูงสุดใน 30 วันที่ผ่านมา จากช่องที่บันทึกไว้`,
+        subscribers: null,
+        logoUrl: '',
+        savedAt: new Date().toISOString(),
+        videos: data.videos || [],
+        lastScannedAt: new Date().toISOString(),
+      };
+      setKeywordResult(resultChannel);
+      setSelectedVideoIds(prev => ({ ...prev, [resultChannel.id]: new Set((resultChannel.videos || []).map(v => v.id)) }));
+      globalTaskStore.updateTask(taskId, { progress: `พบ ${data.videos?.length || 0} คลิปจาก Keyword "${q}"`, status: 'completed' });
+    } catch (err: any) {
+      globalTaskStore.updateTask(taskId, { progress: `Error: ${err?.message || String(err)}`, status: 'error' });
+      alert(`❌ ค้นหาไม่สำเร็จ: ${err?.message || String(err)}`);
+    } finally {
+      setIsKeywordSearching(false);
+    }
+  };
+
   const handleScoreVideosAI = async (channel: YTChannel) => {
     const apiKey = await getOpenRouterKey();
     if (!apiKey) { alert('❌ ยังไม่ได้ใส่ OpenRouter API Key'); return; }
@@ -250,6 +354,7 @@ export function YoutubeChannelFinder() {
 
       try {
         const totalBatches = Math.ceil(unscored.length / BATCH);
+        let scoringModel = selectedModel;
         for (let i = 0; i < unscored.length; i += BATCH) {
           const batch = unscored.slice(i, i + BATCH);
           const batchNo = Math.floor(i / BATCH) + 1;
@@ -258,8 +363,18 @@ export function YoutubeChannelFinder() {
           const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': window.location.origin, 'X-Title': 'Bulk Video Creator' },
-            body: JSON.stringify({ model: selectedModel, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: JSON.stringify(input) }] }),
+            body: JSON.stringify({ model: scoringModel, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: JSON.stringify(input) }] }),
           });
+          if (!res.ok) {
+            if (res.status === 402 && scoringModel !== FREE_FALLBACK_MODEL) {
+              scoringModel = FREE_FALLBACK_MODEL;
+              globalTaskStore.updateTask(taskId, { progress: `Batch ${batchNo}: โมเดลต้องใช้เครดิต → สลับไปโมเดลฟรี (${FREE_FALLBACK_MODEL}) แล้วลองใหม่` });
+              i -= BATCH; // retry this batch with free model
+              continue;
+            }
+            globalTaskStore.updateTask(taskId, { progress: `Batch ${batchNo} error: HTTP ${res.status}` });
+            continue;
+          }
           const data = await res.json();
           if (data.error) {
             globalTaskStore.updateTask(taskId, { progress: `Batch ${batchNo} error: ${data.error?.message || JSON.stringify(data.error)}` });
@@ -310,6 +425,9 @@ export function YoutubeChannelFinder() {
     if (/^\d{8}$/.test(uploadedAt)) {
       return `${uploadedAt.slice(0, 4)}-${uploadedAt.slice(4, 6)}-${uploadedAt.slice(6, 8)}T00:00:00.000Z`;
     }
+    if (uploadedAt && !Number.isNaN(new Date(uploadedAt).getTime())) {
+      return new Date(uploadedAt).toISOString();
+    }
     return new Date().toISOString();
   };
 
@@ -336,9 +454,9 @@ export function YoutubeChannelFinder() {
         domain: 'youtube.com',
         createdAt: normalizeUploadedAt(v.uploadedAt),
         sourceType: 'youtube',
-        channelName: channel.name,
-        channelLogoUrl: channel.logoUrl || '',
-        subscriberCount: channel.subscribers ?? 0,
+        channelName: v.channelName || channel.name,
+        channelLogoUrl: v.channelLogoUrl || channel.logoUrl || '',
+        subscriberCount: v.subscribers ?? channel.subscribers ?? 0,
         thumbnail: v.thumbnail,
         images: v.thumbnail ? [v.thumbnail] : [],
         fbViews: v.views ?? 0,
@@ -437,6 +555,37 @@ export function YoutubeChannelFinder() {
         </div>
       </div>
 
+      <div className="p-5 rounded-2xl border" style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <h4 className="text-sm font-bold mb-1" style={{ color: 'var(--text-main)' }}>
+              🔥 ค้นหาคลิปจาก Keyword ในช่องที่บันทึกไว้
+            </h4>
+            <input
+              type="text"
+              value={keyword}
+              onChange={e => setKeyword(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleKeywordSearch()}
+              placeholder="เช่น AI agent, Sora, การเงิน, รีวิวเครื่องมือ..."
+              className="w-full rounded-lg border bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-red-500"
+              style={{ borderColor: 'var(--border-color)', color: 'var(--text-main)' }}
+            />
+          </div>
+          <button
+            onClick={handleKeywordSearch}
+            disabled={isKeywordSearching || !keyword.trim() || savedChannels.length === 0}
+            className={`mt-6 rounded-lg px-4 py-2 text-sm font-bold text-white ${isKeywordSearching ? 'cursor-not-allowed bg-gray-500 opacity-70' : 'bg-red-600 hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40'}`}
+          >
+            {isKeywordSearching ? '⏳ กำลังค้นหา...' : '🔥 หา Top 30 ใน 1 เดือน'}
+          </button>
+        </div>
+        <p className="mt-2 text-[11px]" style={{ color: savedChannels.length === 0 ? '#f59e0b' : 'var(--text-muted, #888)' }}>
+          {savedChannels.length === 0
+            ? 'ต้องบันทึกช่อง YouTube ก่อนอย่างน้อย 1 ช่อง แล้วช่องค้นหานี้จะใช้ช่องที่บันทึกไว้ไปหา Top 30 ตาม keyword'
+            : `จะค้นหาจาก ${savedChannels.length} ช่องที่บันทึกไว้ กรองคลิปใน 30 วันที่ผ่านมา แล้วเรียงตามยอดวิวสูงสุด`}
+        </p>
+      </div>
+
       {/* AI Suggestions */}
       {suggestions.length > 0 && (
         <div className="p-5 rounded-2xl border" style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
@@ -475,13 +624,84 @@ export function YoutubeChannelFinder() {
       {/* Saved Channels */}
       {savedChannels.length > 0 && (
         <div className="p-5 rounded-2xl border" style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
             <h4 className="font-bold" style={{ color: 'var(--text-main)' }}>📌 ช่อง YouTube ที่บันทึกไว้ ({savedChannels.length})</h4>
             <div className="flex items-center gap-2">
               <label className="text-xs" style={{ color: 'var(--text-muted, #888)' }}>จำนวนคลิป:</label>
               <NumInput min={5} max={200} value={scanLimit} onChange={setScanLimit} className="w-16 px-2 py-1 rounded border text-xs text-center bg-transparent outline-none" />
             </div>
           </div>
+
+          {keywordResult?.videos && keywordResult.videos.length > 0 && (
+            <div className="mb-4 overflow-hidden rounded-xl border" style={{ borderColor: 'var(--border-color)' }}>
+              <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2" style={{ borderColor: 'var(--border-color)', backgroundColor: 'var(--bg-card)' }}>
+                <span className="text-xs font-bold" style={{ color: 'var(--text-main)' }}>
+                  🔥 Top 30 Keyword: {keywordResult.name.replace('Keyword: ', '')}
+                </span>
+                <span className="rounded-full px-2 py-0.5 text-[10px]" style={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#f87171' }}>
+                  เลือกแล้ว {selectedVideoIds[keywordResult.id]?.size || 0}/{keywordResult.videos.length}
+                </span>
+                <button onClick={() => selectAllVideos(keywordResult)} className="rounded border px-2 py-1 text-[10px]" style={{ borderColor: 'var(--border-color)', color: 'var(--text-muted, #888)' }}>
+                  เลือกทั้งหมด
+                </button>
+                <button onClick={() => clearVideoSelection(keywordResult.id)} className="rounded border px-2 py-1 text-[10px]" style={{ borderColor: 'var(--border-color)', color: 'var(--text-muted, #888)' }}>
+                  ยกเลิก
+                </button>
+                <button
+                  onClick={() => handleSaveSelectedVideosToStock(keywordResult)}
+                  disabled={(selectedVideoIds[keywordResult.id]?.size || 0) === 0}
+                  className="ml-auto rounded px-3 py-1.5 text-[10px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
+                  style={{ backgroundColor: '#0891b2' }}
+                >
+                  📦 ส่งเข้าคลังบทความ
+                </button>
+              </div>
+              <div className="max-h-96 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0" style={{ backgroundColor: 'var(--bg-card)' }}>
+                    <tr className="border-b" style={{ borderColor: 'var(--border-color)' }}>
+                      <th className="px-3 py-2 text-center font-semibold" style={{ color: 'var(--text-muted, #888)' }}>เลือก</th>
+                      <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-muted, #888)' }}>#</th>
+                      <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-muted, #888)' }}>ชื่อคลิป</th>
+                      <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-muted, #888)' }}>ช่อง</th>
+                      <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-muted, #888)' }}>ยอดวิว</th>
+                      <th className="px-3 py-2 text-center font-semibold" style={{ color: 'var(--text-muted, #888)' }}>วันที่ลง</th>
+                      <th className="px-3 py-2 text-center font-semibold" style={{ color: 'var(--text-muted, #888)' }}>Link</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {keywordResult.videos.map((v, idx) => (
+                      <tr key={v.id} className="border-b last:border-0 transition-colors hover:bg-white/5" style={{ borderColor: 'var(--border-color)' }}>
+                        <td className="px-3 py-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={!!selectedVideoIds[keywordResult.id]?.has(v.id)}
+                            onChange={() => toggleVideoSelect(keywordResult.id, v.id)}
+                            className="h-4 w-4 cursor-pointer accent-cyan-500"
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-center" style={{ color: 'var(--text-muted, #888)' }}>{idx + 1}</td>
+                        <td className="px-3 py-2">
+                          <div className="max-w-xs truncate font-medium" style={{ color: 'var(--text-main)' }} title={v.title}>{v.title}</div>
+                          {v.description && <div className="mt-0.5 max-w-xs truncate text-[10px]" style={{ color: 'var(--text-muted, #888)' }}>{v.description}</div>}
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="max-w-[160px] truncate" style={{ color: 'var(--text-secondary, #aaa)' }}>{v.channelName || '-'}</div>
+                        </td>
+                        <td className="px-3 py-2 text-right font-semibold" style={{ color: '#f97316' }}>{formatViews(v.views)}</td>
+                        <td className="px-3 py-2 text-center" style={{ color: 'var(--text-muted, #888)' }}>
+                          {v.uploadedAt ? new Date(normalizeUploadedAt(v.uploadedAt)).toLocaleDateString('th-TH') : '-'}
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <a href={v.url} target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-300">🔗</a>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           <div className="space-y-3">
             {savedChannels.map(channel => (
