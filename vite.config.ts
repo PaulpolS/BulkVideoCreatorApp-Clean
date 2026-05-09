@@ -3557,32 +3557,18 @@ const fileSaverPlugin = (): Plugin => ({
             return;
           }
 
-          // 4. Randomly select clips to fill the audio duration
-          let remainingTime = audioDuration;
+          // 4. Randomly select clips to fill the audio duration.
+          // The same stock clip may be reused when audio is longer than the available footage.
+          // We intentionally overfill by a small buffer; ffmpeg -shortest trims video to audio length.
           const selectedClips: string[] = [];
-          // Shuffle the clip pool for randomness
-          const pool = [...clipDurations].sort(() => Math.random() - 0.5);
+          let selectedDuration = 0;
+          const targetDuration = audioDuration + 1.0;
+          const maxClips = Math.max(clipDurations.length * Math.ceil(targetDuration / Math.max(...clipDurations.map(c => c.duration), 1)) * 3, 1000);
 
-          // Use a greedy approach: keep picking random clips until we fill the duration
-          let attempts = 0;
-          const maxAttempts = 10000;
-          while (remainingTime > 0 && attempts < maxAttempts) {
-            attempts++;
-            // Pick a random clip from the pool
-            const clip = pool[Math.floor(Math.random() * pool.length)];
-            if (clip.duration <= remainingTime) {
-              selectedClips.push(clip.path);
-              remainingTime -= clip.duration;
-            } else {
-              // If this clip is too long, still use it but trim it with a very short segment
-              // Actually, let's just skip if too long and try another
-              continue;
-            }
-          }
-
-          // If we couldn't fill the duration, add one more clip (will be trimmed)
-          if (remainingTime > 0 && clipDurations.length > 0) {
-            selectedClips.push(pool[Math.floor(Math.random() * pool.length)].path);
+          while (selectedDuration < targetDuration && selectedClips.length < maxClips) {
+            const clip = clipDurations[Math.floor(Math.random() * clipDurations.length)];
+            selectedClips.push(clip.path);
+            selectedDuration += clip.duration;
           }
 
           if (selectedClips.length === 0) {
@@ -3592,7 +3578,8 @@ const fileSaverPlugin = (): Plugin => ({
             return;
           }
 
-          res.write(`data: ${JSON.stringify({ log: `สุ่มเลือก ${selectedClips.length} คลิป มาเรียงต่อกัน` })}\n\n`);
+          const repeatedCount = selectedClips.length - new Set(selectedClips).size;
+          res.write(`data: ${JSON.stringify({ log: `สุ่มเลือก ${selectedClips.length} คลิป รวมประมาณ ${selectedDuration.toFixed(1)} วินาที${repeatedCount > 0 ? ` (มีคลิปซ้ำ ${repeatedCount} ครั้ง เพื่อให้ยาวพอเสียง)` : ''}` })}\n\n`);
 
           // 5. Detect resolution from first clip for 16:9 consistency
           let targetW = 1920, targetH = 1080;
