@@ -258,6 +258,7 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
   const refImageInputRef = useRef<HTMLInputElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
   const isQueueProcessingRef = useRef(false);
+  const tasksRef = useRef<GenerationTask[]>([]);
 
   // Queue & Processing
   const [tasks, setTasks] = useState<GenerationTask[]>([]);
@@ -1202,11 +1203,15 @@ Return ONLY valid JSON format.`;
     // Optionally keep inputs or clear them
   };
 
+  // Keep tasksRef in sync so processQueue always reads latest
+  useEffect(() => { tasksRef.current = tasks; }, [tasks]);
+
   useEffect(() => {
     // Background Queue Processor — guard against concurrent runs
     const processQueue = async () => {
       if (isQueueProcessingRef.current) return;
-      const pendingTask = tasks.find(t => t.status === 'pending');
+      const currentTasks = tasksRef.current;
+      const pendingTask = currentTasks.find(t => t.status === 'pending');
       if (!pendingTask) return;
       isQueueProcessingRef.current = true;
 
@@ -1590,6 +1595,9 @@ Return ONLY valid JSON format.`;
         }
       } finally {
         isQueueProcessingRef.current = false;
+        // Re-trigger queue processing after ref is cleared — fixes race condition
+        // where useEffect fires before the ref is reset, causing next task to be skipped
+        setTimeout(() => processQueue(), 50);
       }
 
     };
