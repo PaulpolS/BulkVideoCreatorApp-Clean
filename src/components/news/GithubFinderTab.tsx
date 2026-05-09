@@ -108,6 +108,59 @@ const GH_MODEL_OPTIONS = [
   { id: 'google/gemma-3-27b-it:free', name: 'Gemma 3 27B (ฟรี!)' },
 ];
 
+const STOCK_VISUAL_TONES = [
+  {
+    name: 'bright editorial daylight',
+    prompt: 'bright editorial stock photo, natural morning daylight, warm white office, clean realistic colors, approachable professional mood',
+    scene: 'a tidy developer desk near a window, laptop with abstract interface shapes, coffee, notebook, soft shadows',
+  },
+  {
+    name: 'dark cinematic command center',
+    prompt: 'dark cinematic tech lab, deep charcoal background, controlled blue rim light, dramatic contrast, premium cybersecurity atmosphere',
+    scene: 'multiple monitors with blurred code-like shapes, hands at keyboard from behind, glowing hardware details',
+  },
+  {
+    name: 'minimal flat lay product style',
+    prompt: 'minimal top-down flat lay, airy negative space, matte surfaces, soft studio light, clean product-photography composition',
+    scene: 'keyboard, notebook diagrams, small electronic modules, abstract workflow cards arranged neatly, no readable labels',
+  },
+  {
+    name: 'futuristic holographic concept',
+    prompt: 'futuristic AI concept art blended with realistic photography, translucent holographic UI, neon cyan and amber accents, sleek high-tech feel',
+    scene: 'floating automation nodes around a laptop, abstract agent network, depth of field, no actual text',
+  },
+  {
+    name: 'documentary startup workspace',
+    prompt: 'candid documentary-style office photography, handheld realism, natural mixed lighting, lived-in workspace, authentic team atmosphere',
+    scene: 'wide shot of a small software team desk area, blurred people in background, boards and screens intentionally unreadable',
+  },
+  {
+    name: 'macro hardware detail',
+    prompt: 'macro photography, shallow depth of field, crisp hardware texture, precise technical mood, premium close-up lighting',
+    scene: 'close-up of keyboard switches, circuit traces, cable connections, reflected abstract code colors',
+  },
+  {
+    name: 'clean SaaS dashboard mockup',
+    prompt: 'polished SaaS dashboard aesthetic, bright gradient-free interface glow, crisp glass panels, modern enterprise software mood',
+    scene: 'large monitor showing abstract dashboard blocks and automation flow shapes, no readable text, spacious composition',
+  },
+  {
+    name: 'moody research lab',
+    prompt: 'quiet AI research lab mood, cool fluorescent light, muted greens and steel tones, analytical and serious atmosphere',
+    scene: 'workbench with laptop, papers turned away, small server device, subtle cables and data visualization shapes',
+  },
+  {
+    name: 'social media cover graphic',
+    prompt: 'bold social media cover image, high-energy tech editorial composition, vibrant but professional color blocking, strong empty area for headline overlay',
+    scene: 'abstract developer tools collage with laptop silhouette, glowing paths, geometric depth, no words or logos',
+  },
+  {
+    name: 'human hands workflow',
+    prompt: 'realistic lifestyle technology photo, warm practical lighting, human-centered workflow, trustworthy professional tone',
+    scene: 'hands sketching an automation workflow beside a laptop and phone, faces out of frame, no readable writing',
+  },
+];
+
 export function GithubFinderTab({ onSendToAIPage }: GithubFinderProps) {
   const [selectedQuery, setSelectedQuery] = useState(KEYWORDS[0].query);
   const selectedKw = KEYWORDS.find(k => k.query === selectedQuery);
@@ -234,32 +287,33 @@ export function GithubFinderTab({ onSendToAIPage }: GithubFinderProps) {
     setGeneratedPrompt('');
     const buildFallbackStockPrompts = (count: number) => {
       const topic = kw.label;
-      const concepts = [
-        `professional stock photo of a developer workstation showing ${topic} workflow, laptop screen with abstract code shapes, clean desk, soft daylight, modern technology atmosphere, no readable text, no logos, 16:9`,
-        `modern AI engineering workspace inspired by ${topic}, multiple monitors with blurred code editor, subtle blue and cyan lighting, premium clean background, hands typing from distance, no readable text, no brand logos, 16:9`,
-        `abstract technology scene for ${topic}, interconnected nodes, code blocks, automation pipeline, glassmorphism UI panels without readable text, bright professional lighting, clean modern stock image, 16:9`,
-        `close-up stock photo of a programmer planning ${topic} tools, notebook, keyboard, subtle GitHub-style developer mood, clean background, no readable words, no logos, cinematic but professional, 16:9`,
-        `wide shot of a clean software team desk setup for ${topic}, laptops, workflow diagrams blurred, modern office lighting, professional stock photo, no readable text, no people faces, 16:9`,
-        `premium cover image about ${topic}, futuristic AI coding assistant concept, soft holographic interface elements, clean technology background, no text, no logo, high quality stock photo, 16:9`,
-        `minimal modern developer tools composition for ${topic}, keyboard, terminal-like abstract shapes, blue accent light, clean empty space for headline overlay, no readable text, no watermark, 16:9`,
-        `professional tech editorial image for ${topic}, automation and agent workflow represented by glowing paths between devices, bright clean background, no readable text, no logos, 16:9`,
-      ];
-      return Array.from({ length: count }, (_, i) => concepts[i % concepts.length]);
+      return Array.from({ length: count }, (_, i) => {
+        const tone = STOCK_VISUAL_TONES[i % STOCK_VISUAL_TONES.length];
+        return `${tone.scene} representing ${topic}, ${tone.prompt}, professional stock image for a Facebook article cover, visually distinct from the other prompts, no readable text, no logos, no watermarks, 16:9`;
+      });
     };
 
     try {
+      const tonePlan = Array.from({ length: numCount }, (_, i) => {
+        const tone = STOCK_VISUAL_TONES[i % STOCK_VISUAL_TONES.length];
+        return `${i + 1}. ${tone.name}: ${tone.prompt}; scene idea: ${tone.scene}`;
+      }).join('\n');
       const promptText = `คุณคือผู้เชี่ยวชาญด้านการสร้าง Prompt สำหรับ AI Image Generation (เช่น Midjourney, DALL-E, Stable Diffusion)
 
 ฉันต้องการสร้างรูปภาพ "Footage / ภาพประกอบ" สำหรับใช้ในบทความและโพส Facebook เกี่ยวกับ "${kw.label}" (หัวข้อ GitHub: ${kw.query})
 
 สร้าง Prompt ภาษาอังกฤษจำนวน ${numCount} แบบ สำหรับใช้สร้างรูปภาพประกอบเนื้อหา โดยแต่ละ Prompt:
 1. อธิบายภาพที่ต้องการอย่างละเอียด ในสไตล์ professional stock photo / modern technology
-2. ระบุ mood & lighting: bright, professional, modern, clean background
+2. แต่ละ prompt ต้องมีโทนภาพ, lighting, composition, camera distance, color palette, scene type แตกต่างกันชัดเจน ห้ามออกมาเป็น mood เดียวกัน
 3. Aspect ratio: 16:9 (suitable for cover images)
 4. ไม่มีตัวหนังสือในภาพ
 5. ไม่มีคน (หรือมีก็ได้ แต่เป็นมุมมองมือ/ภาพไกลๆ)
 6. เน้น visual ที่ดูทันสมัย เป็นสากล
 7. ให้เหมาะกับใช้เป็น "ภาพประกอบบทความ" ในโซเชียลมีเดีย
+8. ใช้ tone plan ตามลำดับนี้ให้ครบ ห้ามรวมหลาย tone ไว้ใน prompt เดียว และห้ามใช้คำว่า same style / similar style
+
+Tone plan สำหรับแต่ละ prompt:
+${tonePlan}
 
 ตอบเป็น JSON array เท่านั้น:
 ["prompt 1", "prompt 2", ...]`;
