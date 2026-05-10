@@ -62,11 +62,123 @@ interface CelebrityTagResult {
   categorySummary: string;
 }
 
+interface CelebrityTemplate {
+  id: string;
+  name: string;
+  description: string;
+  accent: string;
+  preview: 'bottom-bar' | 'poster' | 'split' | 'quote-card' | 'diagonal' | 'magazine';
+}
+
+interface CelebrityFontTheme {
+  id: string;
+  name: string;
+  base: string;
+  accent: string;
+  highlight: string;
+  muted: string;
+  panel: string;
+  textBg: string;
+  shadow: string;
+}
+
 const DEFAULT_NAMES = 'Albert Einstein\nWarren Buffett\nSteve Jobs';
 const CANVAS_SIZE = 1080;
 const IMAGE_AREA_HEIGHT = 690;
 const OUTPUT_FOLDER = 'public/app_data/celebrity_teachings';
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+const CELEBRITY_TEMPLATES: CelebrityTemplate[] = [
+  {
+    id: 'bottom-bar',
+    name: 'แถบดำล่าง',
+    description: 'รูปใหญ่ด้านบน ข้อความ 3 บรรทัดด้านล่าง',
+    accent: '#22d3ee',
+    preview: 'bottom-bar',
+  },
+  {
+    id: 'poster',
+    name: 'โปสเตอร์เต็มภาพ',
+    description: 'ใช้รูปเต็มเฟรม วางข้อความบนกล่องโปร่ง',
+    accent: '#f59e0b',
+    preview: 'poster',
+  },
+  {
+    id: 'split',
+    name: 'คำสอนครึ่งภาพ',
+    description: 'ภาพบุคคลด้านขวา คำสอนอ่านง่ายด้านซ้าย',
+    accent: '#10b981',
+    preview: 'split',
+  },
+  {
+    id: 'quote-card',
+    name: 'การ์ดคำคม',
+    description: 'รูปวงกลมเด่นกลางภาพ พร้อมคำสอนแบบ quote',
+    accent: '#a855f7',
+    preview: 'quote-card',
+  },
+  {
+    id: 'diagonal',
+    name: 'เส้นเฉียงพลัง',
+    description: 'ภาพเต็มพร้อมแผงข้อความเฉียง ดูดุดันขึ้น',
+    accent: '#ef4444',
+    preview: 'diagonal',
+  },
+  {
+    id: 'magazine',
+    name: 'ปกแมกกาซีน',
+    description: 'ภาพใหญ่แบบปกนิตยสาร มีหัวเรื่องชัด',
+    accent: '#38bdf8',
+    preview: 'magazine',
+  },
+];
+
+const CELEBRITY_FONT_THEMES: CelebrityFontTheme[] = [
+  {
+    id: 'gold-cyan',
+    name: 'ทอง + ฟ้า',
+    base: '#ffffff',
+    accent: '#ffd166',
+    highlight: '#7df9ff',
+    muted: '#cbd5e1',
+    panel: 'rgba(0,0,0,0.72)',
+    textBg: 'rgba(3,7,18,0.82)',
+    shadow: 'rgba(0,0,0,0.72)',
+  },
+  {
+    id: 'white-red',
+    name: 'ขาว + แดง',
+    base: '#ffffff',
+    accent: '#ff4d4d',
+    highlight: '#ffe45e',
+    muted: '#e5e7eb',
+    panel: 'rgba(15,15,18,0.78)',
+    textBg: 'rgba(127,29,29,0.72)',
+    shadow: 'rgba(0,0,0,0.76)',
+  },
+  {
+    id: 'mint-violet',
+    name: 'มิ้นต์ + ม่วง',
+    base: '#f8fafc',
+    accent: '#5eead4',
+    highlight: '#c084fc',
+    muted: '#dbeafe',
+    panel: 'rgba(12,18,28,0.76)',
+    textBg: 'rgba(49,46,129,0.62)',
+    shadow: 'rgba(0,0,0,0.7)',
+  },
+  {
+    id: 'mono-lime',
+    name: 'ขาวดำ + เขียว',
+    base: '#f9fafb',
+    accent: '#bef264',
+    highlight: '#ffffff',
+    muted: '#d1d5db',
+    panel: 'rgba(0,0,0,0.82)',
+    textBg: 'rgba(20,83,45,0.66)',
+    shadow: 'rgba(0,0,0,0.78)',
+  },
+];
 
 const splitNames = (text: string) => {
   return text
@@ -145,12 +257,21 @@ const loadImage = (src: string) => new Promise<HTMLImageElement>((resolve, rejec
   img.src = src;
 });
 
-const drawCoverImage = (ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: number, y: number, w: number, h: number) => {
+const drawCoverImage = (
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  focusX = 0.5,
+  focusY = 0.35,
+) => {
   const scale = Math.max(w / img.naturalWidth, h / img.naturalHeight);
   const sw = w / scale;
   const sh = h / scale;
-  const sx = (img.naturalWidth - sw) / 2;
-  const sy = Math.max(0, (img.naturalHeight - sh) / 2);
+  const sx = Math.max(0, Math.min(img.naturalWidth - sw, (img.naturalWidth - sw) * focusX));
+  const sy = Math.max(0, Math.min(img.naturalHeight - sh, (img.naturalHeight - sh) * focusY));
   ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
 };
 
@@ -191,6 +312,119 @@ const drawHeadlineLine = (
   }
 };
 
+const getTemplateById = (id: string) => CELEBRITY_TEMPLATES.find(template => template.id === id) || CELEBRITY_TEMPLATES[0];
+const getFontThemeById = (id: string) => CELEBRITY_FONT_THEMES.find(theme => theme.id === id) || CELEBRITY_FONT_THEMES[0];
+
+const headlineLines = (copy: GeneratedCopy) => copy.headline.split('\n').map(line => line.trim()).filter(Boolean).slice(0, 3);
+
+const fitFontSize = (ctx: CanvasRenderingContext2D, lines: string[], maxWidth: number, start = 66, min = 38) => {
+  let fontSize = start;
+  while (fontSize > min) {
+    ctx.font = `900 ${fontSize}px Kanit, "Noto Sans Thai", sans-serif`;
+    const longest = Math.max(...lines.map(line => ctx.measureText(line).width), 0);
+    if (longest <= maxWidth) break;
+    fontSize -= 2;
+  }
+  return fontSize;
+};
+
+const drawPageLabel = (ctx: CanvasRenderingContext2D, label: string, x: number, y: number, align: CanvasTextAlign = 'right') => {
+  ctx.save();
+  ctx.font = 'bold 30px Kanit, "Noto Sans Thai", sans-serif';
+  const labelWidth = Math.min(480, Math.max(240, ctx.measureText(label).width + 58));
+  const boxX = align === 'right' ? x - labelWidth : x;
+  ctx.fillStyle = 'rgba(0,0,0,0.78)';
+  ctx.fillRect(boxX, y, labelWidth, 58);
+  ctx.fillStyle = '#ffffff';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = align;
+  ctx.fillText(label, align === 'right' ? x - 28 : x + 28, y + 29);
+  ctx.restore();
+};
+
+const fillRoundRect = (
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+) => {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  ctx.fill();
+};
+
+const drawHeadlineText = (
+  ctx: CanvasRenderingContext2D,
+  line: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  fontSize: number,
+  color: string,
+  align: CanvasTextAlign,
+  useTextBg: boolean,
+  bgColor: string,
+) => {
+  const text = wrapText(ctx, line, maxWidth).slice(0, 1)[0] || line;
+  const width = Math.min(maxWidth, ctx.measureText(text).width);
+  const drawX = align === 'center' ? x - width / 2 : align === 'right' ? x - width : x;
+  if (useTextBg) {
+    ctx.save();
+    ctx.fillStyle = bgColor;
+    fillRoundRect(ctx, drawX - 20, y - fontSize * 0.9, width + 40, fontSize * 1.18, 16);
+    ctx.restore();
+  }
+  ctx.textAlign = align;
+  ctx.strokeText(text, x, y);
+  ctx.fillStyle = color;
+  ctx.fillText(text, x, y);
+};
+
+const drawHeadlineBlock = (
+  ctx: CanvasRenderingContext2D,
+  lines: string[],
+  x: number,
+  y: number,
+  maxWidth: number,
+  lineHeight: number,
+  colors: string[][],
+  centered = true,
+) => {
+  ctx.textBaseline = 'alphabetic';
+  ctx.shadowColor = 'rgba(0,0,0,0.55)';
+  ctx.shadowBlur = 6;
+  ctx.lineWidth = 9;
+  ctx.strokeStyle = 'rgba(0,0,0,0.9)';
+  lines.forEach((line, index) => {
+    const wrapped = wrapText(ctx, line, maxWidth).slice(0, 1);
+    const text = wrapped[0] || line;
+    const drawY = y + index * lineHeight;
+    if (centered) {
+      const width = ctx.measureText(text).width;
+      ctx.strokeText(text, x + (maxWidth - width) / 2, drawY);
+      const originalCanvasSize = CANVAS_SIZE;
+      drawHeadlineLine(ctx, text, drawY, originalCanvasSize, colors[index]?.[0] || '#ffffff', colors[index]?.[1] || '#ffd166');
+    } else {
+      ctx.strokeText(text, x, drawY);
+      ctx.fillStyle = colors[index]?.[0] || '#ffffff';
+      ctx.fillText(text, x, drawY);
+    }
+  });
+  ctx.shadowBlur = 0;
+};
+
 export function CelebrityTeachingsTab({ onLog }: CelebrityTeachingsTabProps) {
   const { packs } = useHeadlinePacks();
   const [namesText, setNamesText] = useState(DEFAULT_NAMES);
@@ -199,6 +433,10 @@ export function CelebrityTeachingsTab({ onLog }: CelebrityTeachingsTabProps) {
   const [selectedFolderNames, setSelectedFolderNames] = useState<Set<string>>(new Set());
   const [selectedName, setSelectedName] = useState('');
   const [pageName, setPageName] = useState(() => localStorage.getItem('celebrity_teachings_page_name') || 'Mindset Daily');
+  const [selectedTemplateId, setSelectedTemplateId] = useState(() => localStorage.getItem('celebrity_teachings_template_id') || 'bottom-bar');
+  const [selectedFontThemeId, setSelectedFontThemeId] = useState(() => localStorage.getItem('celebrity_teachings_font_theme_id') || 'gold-cyan');
+  const [useTextBg, setUseTextBg] = useState(() => localStorage.getItem('celebrity_teachings_text_bg') !== 'false');
+  const [useFontAccent, setUseFontAccent] = useState(() => localStorage.getItem('celebrity_teachings_font_accent') !== 'false');
   const [imageCountText, setImageCountText] = useState('6');
   const [isCreating, setIsCreating] = useState(false);
   const [isBatchLoading, setIsBatchLoading] = useState(false);
@@ -220,6 +458,7 @@ export function CelebrityTeachingsTab({ onLog }: CelebrityTeachingsTabProps) {
   const [dropboxFolderPath, setDropboxFolderPath] = useState(() => localStorage.getItem('celebrity_dropbox_folder') || '/Apps/CelebrityTeachings');
   const [dropboxUploadLog, setDropboxUploadLog] = useState('');
   const [isUploadingResults, setIsUploadingResults] = useState(false);
+  const [isDeletingResults, setIsDeletingResults] = useState(false);
   const previewRef = useRef<HTMLCanvasElement | null>(null);
 
   const selectedFolder = useMemo(() => folders.find(folder => folder.name === selectedName) || folders[0], [folders, selectedName]);
@@ -272,6 +511,22 @@ export function CelebrityTeachingsTab({ onLog }: CelebrityTeachingsTabProps) {
   useEffect(() => {
     localStorage.setItem('celebrity_teachings_page_name', pageName);
   }, [pageName]);
+
+  useEffect(() => {
+    localStorage.setItem('celebrity_teachings_template_id', selectedTemplateId);
+  }, [selectedTemplateId]);
+
+  useEffect(() => {
+    localStorage.setItem('celebrity_teachings_font_theme_id', selectedFontThemeId);
+  }, [selectedFontThemeId]);
+
+  useEffect(() => {
+    localStorage.setItem('celebrity_teachings_text_bg', String(useTextBg));
+  }, [useTextBg]);
+
+  useEffect(() => {
+    localStorage.setItem('celebrity_teachings_font_accent', String(useFontAccent));
+  }, [useFontAccent]);
 
   useEffect(() => {
     if (rootFolder.trim()) localStorage.setItem('celebrity_teachings_root_folder', rootFolder.trim());
@@ -419,6 +674,32 @@ export function CelebrityTeachingsTab({ onLog }: CelebrityTeachingsTabProps) {
       next.delete(id);
       return next;
     });
+  };
+
+  const deleteSelectedResults = async () => {
+    const ids = [...selectedResultIds].filter(id => savedResults.some(result => result.id === id));
+    if (ids.length === 0) return alert('เลือกรายการที่จะลบก่อนครับ');
+    if (!confirm(`ลบผลลัพธ์ที่เลือก ${ids.length} รายการใช่ไหมครับ?\n\nระบบจะลบรายการออกจากผลลัพธ์ และลบไฟล์รูปโพสต์ที่สร้างไว้ในโฟลเดอร์ด้วย`)) return;
+    setIsDeletingResults(true);
+    setDropboxUploadLog(`กำลังลบผลลัพธ์ที่เลือก ${ids.length} รายการ...`);
+    try {
+      const res = await fetch('/api/celebrity-results', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(celebrityResultsBody({ action: 'delete-many', ids })),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'ลบผลลัพธ์ที่เลือกไม่สำเร็จ');
+      setSavedResults(data.results || []);
+      setSelectedResultIds(new Set());
+      setDropboxUploadLog(`✅ ลบผลลัพธ์ที่เลือกแล้ว ${data.deleted ?? ids.length} รายการ`);
+      log(`🗑️ ลบผลลัพธ์ที่เลือกแล้ว ${data.deleted ?? ids.length} รายการ`);
+    } catch (e: any) {
+      setDropboxUploadLog(`❌ ${e.message}`);
+      alert(`ลบไม่สำเร็จ: ${e.message}`);
+    } finally {
+      setIsDeletingResults(false);
+    }
   };
 
   const toggleResultSelection = (id: string) => {
@@ -1020,7 +1301,8 @@ ${headlineExamples}
     setRenderingName(folderName);
     const taskId = `celebrity_render_${Date.now()}`;
     globalTaskStore.addTask({ id: taskId, title: `สร้างรูปโพสต์ ${folderName}`, category: 'celebrity', progress: 'กำลังจัดวาง Canvas 1:1...', status: 'running' });
-    log(`🎨 กำลังสร้างรูป 1:1 ของ ${folderName} ด้วยรูปที่เลือกและพาดหัว 3 บรรทัด`);
+    const template = getTemplateById(selectedTemplateId);
+    log(`🎨 กำลังสร้างรูป 1:1 ของ ${folderName} ด้วย Template: ${template.name}`);
     try {
       const img = await loadImage(imageUrl);
       const canvas = previewRef.current || document.createElement('canvas');
@@ -1029,60 +1311,216 @@ ${headlineExamples}
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('Canvas context ไม่พร้อม');
 
-      ctx.fillStyle = '#080808';
-      ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-      drawCoverImage(ctx, img, 0, 0, CANVAS_SIZE, IMAGE_AREA_HEIGHT);
-
-      const gradient = ctx.createLinearGradient(0, IMAGE_AREA_HEIGHT - 120, 0, IMAGE_AREA_HEIGHT + 20);
-      gradient.addColorStop(0, 'rgba(0,0,0,0)');
-      gradient.addColorStop(1, 'rgba(0,0,0,0.92)');
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, IMAGE_AREA_HEIGHT - 120, CANVAS_SIZE, 140);
-
       const label = pageName.trim() || 'Mindset Daily';
-      ctx.font = 'bold 30px Kanit, "Noto Sans Thai", sans-serif';
-      const labelWidth = Math.min(480, Math.max(240, ctx.measureText(label).width + 58));
-      ctx.fillStyle = 'rgba(0,0,0,0.78)';
-      ctx.fillRect(CANVAS_SIZE - labelWidth - 34, 30, labelWidth, 58);
-      ctx.fillStyle = '#ffffff';
-      ctx.textBaseline = 'middle';
-      ctx.textAlign = 'right';
-      ctx.fillText(label, CANVAS_SIZE - 62, 59);
+      const rawLines = headlineLines(copy);
+      const fontTheme = getFontThemeById(selectedFontThemeId);
+      const lineColors = useFontAccent
+        ? [fontTheme.accent, fontTheme.base, fontTheme.highlight]
+        : [fontTheme.base, fontTheme.base, fontTheme.base];
 
-      ctx.fillStyle = '#020202';
-      ctx.fillRect(0, IMAGE_AREA_HEIGHT, CANVAS_SIZE, CANVAS_SIZE - IMAGE_AREA_HEIGHT);
+      if (template.id === 'poster') {
+        ctx.fillStyle = '#080808';
+        ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+        drawCoverImage(ctx, img, 0, 0, CANVAS_SIZE, CANVAS_SIZE, 0.5, 0.22);
+        const overlay = ctx.createLinearGradient(0, 0, 0, CANVAS_SIZE);
+        overlay.addColorStop(0, 'rgba(0,0,0,0.18)');
+        overlay.addColorStop(0.48, 'rgba(0,0,0,0.25)');
+        overlay.addColorStop(1, 'rgba(0,0,0,0.92)');
+        ctx.fillStyle = overlay;
+        ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+        drawPageLabel(ctx, label, CANVAS_SIZE - 34, 30, 'right');
 
-      const rawLines = copy.headline.split('\n').map(line => line.trim()).filter(Boolean).slice(0, 3);
-      let fontSize = 66;
-      const maxWidth = 960;
-      while (fontSize > 42) {
+        if (useTextBg) {
+          ctx.fillStyle = fontTheme.panel;
+          ctx.fillRect(54, 628, 972, 360);
+        }
+        ctx.fillStyle = fontTheme.accent;
+        ctx.fillRect(54, 628, 12, 360);
+        const fontSize = fitFontSize(ctx, rawLines, 900, 62, 40);
         ctx.font = `900 ${fontSize}px Kanit, "Noto Sans Thai", sans-serif`;
-        const longest = Math.max(...rawLines.map(line => ctx.measureText(line).width), 0);
-        if (longest <= maxWidth) break;
-        fontSize -= 2;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        ctx.shadowColor = fontTheme.shadow;
+        ctx.shadowBlur = 8;
+        ctx.strokeStyle = fontTheme.shadow;
+        ctx.lineWidth = 7;
+        rawLines.forEach((line, index) => {
+          const y = 728 + index * Math.round(fontSize * 1.24);
+          drawHeadlineText(ctx, line, 94, y, 860, fontSize, lineColors[index] || fontTheme.base, 'left', false, fontTheme.textBg);
+        });
+        ctx.shadowBlur = 0;
+      } else if (template.id === 'split') {
+        ctx.fillStyle = '#050505';
+        ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+        drawCoverImage(ctx, img, 470, 0, 610, CANVAS_SIZE, 0.5, 0.22);
+        const sideFade = ctx.createLinearGradient(430, 0, 720, 0);
+        sideFade.addColorStop(0, '#050505');
+        sideFade.addColorStop(1, 'rgba(5,5,5,0)');
+        ctx.fillStyle = sideFade;
+        ctx.fillRect(430, 0, 330, CANVAS_SIZE);
+        drawPageLabel(ctx, label, 44, 34, 'left');
+
+        ctx.fillStyle = fontTheme.accent;
+        ctx.fillRect(58, 198, 116, 10);
+        ctx.fillStyle = fontTheme.muted;
+        ctx.font = 'bold 28px Kanit, "Noto Sans Thai", sans-serif';
+        ctx.fillText('คำสอนจากคนดัง', 58, 270);
+        const fontSize = fitFontSize(ctx, rawLines, 390, 58, 38);
+        ctx.font = `900 ${fontSize}px Kanit, "Noto Sans Thai", sans-serif`;
+        ctx.textAlign = 'left';
+        ctx.strokeStyle = fontTheme.shadow;
+        ctx.lineWidth = 7;
+        ctx.shadowColor = fontTheme.shadow;
+        ctx.shadowBlur = 7;
+        rawLines.forEach((line, index) => {
+          drawHeadlineText(ctx, line, 58, 370 + index * Math.round(fontSize * 1.24), 390, fontSize, lineColors[index] || fontTheme.base, 'left', useTextBg, fontTheme.textBg);
+        });
+        ctx.fillStyle = 'rgba(255,255,255,0.09)';
+        ctx.fillRect(58, 790, 330, 2);
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = fontTheme.muted;
+        ctx.font = 'bold 30px Kanit, "Noto Sans Thai", sans-serif';
+        ctx.fillText(folderName, 58, 855);
+      } else if (template.id === 'quote-card') {
+        ctx.fillStyle = '#050505';
+        ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+        drawCoverImage(ctx, img, 0, 0, CANVAS_SIZE, CANVAS_SIZE, 0.5, 0.24);
+        ctx.fillStyle = 'rgba(0,0,0,0.72)';
+        ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+        drawPageLabel(ctx, label, CANVAS_SIZE - 34, 30, 'right');
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(540, 250, 168, 0, Math.PI * 2);
+        ctx.clip();
+        drawCoverImage(ctx, img, 372, 82, 336, 336, 0.5, 0.2);
+        ctx.restore();
+        ctx.lineWidth = 10;
+        ctx.strokeStyle = fontTheme.accent;
+        ctx.beginPath();
+        ctx.arc(540, 250, 172, 0, Math.PI * 2);
+        ctx.stroke();
+
+        if (useTextBg) {
+          ctx.fillStyle = fontTheme.panel;
+          fillRoundRect(ctx, 84, 492, 912, 390, 28);
+        }
+        ctx.fillStyle = fontTheme.accent;
+        ctx.font = '900 94px Kanit, "Noto Sans Thai", sans-serif';
+        ctx.fillText('“', 106, 586);
+        const fontSize = fitFontSize(ctx, rawLines, 810, 58, 38);
+        ctx.font = `900 ${fontSize}px Kanit, "Noto Sans Thai", sans-serif`;
+        ctx.textBaseline = 'alphabetic';
+        ctx.strokeStyle = fontTheme.shadow;
+        ctx.lineWidth = 8;
+        ctx.shadowColor = fontTheme.shadow;
+        ctx.shadowBlur = 8;
+        rawLines.forEach((line, index) => {
+          drawHeadlineText(ctx, line, 540, 620 + index * Math.round(fontSize * 1.22), 810, fontSize, lineColors[index] || fontTheme.base, 'center', false, fontTheme.textBg);
+        });
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = fontTheme.muted;
+        ctx.font = 'bold 32px Kanit, "Noto Sans Thai", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(folderName, 540, 930);
+      } else if (template.id === 'diagonal') {
+        ctx.fillStyle = '#060606';
+        ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+        drawCoverImage(ctx, img, 0, 0, CANVAS_SIZE, CANVAS_SIZE, 0.5, 0.22);
+        const shade = ctx.createLinearGradient(0, 260, 0, CANVAS_SIZE);
+        shade.addColorStop(0, 'rgba(0,0,0,0.08)');
+        shade.addColorStop(1, 'rgba(0,0,0,0.86)');
+        ctx.fillStyle = shade;
+        ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+        ctx.fillStyle = useTextBg ? fontTheme.panel : 'rgba(0,0,0,0.46)';
+        ctx.beginPath();
+        ctx.moveTo(0, 555);
+        ctx.lineTo(CANVAS_SIZE, 430);
+        ctx.lineTo(CANVAS_SIZE, CANVAS_SIZE);
+        ctx.lineTo(0, CANVAS_SIZE);
+        ctx.closePath();
+        ctx.fill();
+        drawPageLabel(ctx, label, CANVAS_SIZE - 34, 30, 'right');
+
+        ctx.fillStyle = fontTheme.accent;
+        ctx.fillRect(74, 596, 168, 12);
+        const fontSize = fitFontSize(ctx, rawLines, 850, 64, 40);
+        ctx.font = `900 ${fontSize}px Kanit, "Noto Sans Thai", sans-serif`;
+        ctx.textBaseline = 'alphabetic';
+        ctx.strokeStyle = fontTheme.shadow;
+        ctx.lineWidth = 9;
+        ctx.shadowColor = fontTheme.shadow;
+        ctx.shadowBlur = 8;
+        rawLines.forEach((line, index) => {
+          drawHeadlineText(ctx, line, 82, 700 + index * Math.round(fontSize * 1.22), 850, fontSize, lineColors[index] || fontTheme.base, 'left', false, fontTheme.textBg);
+        });
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = fontTheme.muted;
+        ctx.font = 'bold 30px Kanit, "Noto Sans Thai", sans-serif';
+        ctx.fillText(folderName, 82, 980);
+      } else if (template.id === 'magazine') {
+        ctx.fillStyle = '#090909';
+        ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+        drawCoverImage(ctx, img, 0, 0, CANVAS_SIZE, CANVAS_SIZE, 0.5, 0.22);
+        const magazineShade = ctx.createLinearGradient(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+        magazineShade.addColorStop(0, 'rgba(0,0,0,0.78)');
+        magazineShade.addColorStop(0.45, 'rgba(0,0,0,0.2)');
+        magazineShade.addColorStop(1, 'rgba(0,0,0,0.72)');
+        ctx.fillStyle = magazineShade;
+        ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+        drawPageLabel(ctx, label, 44, 30, 'left');
+
+        ctx.fillStyle = fontTheme.accent;
+        ctx.fillRect(64, 170, 10, 680);
+        ctx.font = '900 46px Kanit, "Noto Sans Thai", sans-serif';
+        ctx.fillStyle = fontTheme.base;
+        ctx.fillText('LESSON', 98, 222);
+        ctx.fillStyle = fontTheme.muted;
+        ctx.font = 'bold 26px Kanit, "Noto Sans Thai", sans-serif';
+        ctx.fillText(folderName, 98, 266);
+        const fontSize = fitFontSize(ctx, rawLines, 760, 72, 42);
+        ctx.font = `900 ${fontSize}px Kanit, "Noto Sans Thai", sans-serif`;
+        ctx.textBaseline = 'alphabetic';
+        ctx.strokeStyle = fontTheme.shadow;
+        ctx.lineWidth = 9;
+        ctx.shadowColor = fontTheme.shadow;
+        ctx.shadowBlur = 8;
+        rawLines.forEach((line, index) => {
+          drawHeadlineText(ctx, line, 98, 650 + index * Math.round(fontSize * 1.2), 760, fontSize, lineColors[index] || fontTheme.base, 'left', useTextBg, fontTheme.textBg);
+        });
+        ctx.shadowBlur = 0;
+      } else {
+        ctx.fillStyle = '#080808';
+        ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+        drawCoverImage(ctx, img, 0, 0, CANVAS_SIZE, IMAGE_AREA_HEIGHT, 0.5, 0.18);
+
+        const gradient = ctx.createLinearGradient(0, IMAGE_AREA_HEIGHT - 120, 0, IMAGE_AREA_HEIGHT + 20);
+        gradient.addColorStop(0, 'rgba(0,0,0,0)');
+        gradient.addColorStop(1, 'rgba(0,0,0,0.92)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, IMAGE_AREA_HEIGHT - 120, CANVAS_SIZE, 140);
+        drawPageLabel(ctx, label, CANVAS_SIZE - 34, 30, 'right');
+
+        ctx.fillStyle = '#020202';
+        ctx.fillRect(0, IMAGE_AREA_HEIGHT, CANVAS_SIZE, CANVAS_SIZE - IMAGE_AREA_HEIGHT);
+
+        const fontSize = fitFontSize(ctx, rawLines, 960, 66, 42);
+        ctx.font = `900 ${fontSize}px Kanit, "Noto Sans Thai", sans-serif`;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        ctx.shadowColor = fontTheme.shadow;
+        ctx.shadowBlur = 6;
+        ctx.lineWidth = 9;
+        ctx.strokeStyle = fontTheme.shadow;
+        const lineHeight = Math.round(fontSize * 1.28);
+        const startY = IMAGE_AREA_HEIGHT + 105;
+        rawLines.forEach((line, index) => {
+          const wrapped = wrapText(ctx, line, 960).slice(0, 1);
+          const y = startY + index * lineHeight;
+          drawHeadlineText(ctx, wrapped[0] || line, CANVAS_SIZE / 2, y, 960, fontSize, lineColors[index] || fontTheme.base, 'center', useTextBg, fontTheme.textBg);
+        });
+        ctx.shadowBlur = 0;
       }
-      ctx.font = `900 ${fontSize}px Kanit, "Noto Sans Thai", sans-serif`;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'alphabetic';
-      ctx.shadowColor = 'rgba(0,0,0,0.55)';
-      ctx.shadowBlur = 6;
-      ctx.lineWidth = 9;
-      ctx.strokeStyle = 'rgba(0,0,0,0.9)';
-      const colors = [
-        ['#ff7a1a', '#ffd166'],
-        ['#ffffff', '#ffd166'],
-        ['#ffffff', '#7df9ff'],
-      ];
-      const lineHeight = Math.round(fontSize * 1.28);
-      const startY = IMAGE_AREA_HEIGHT + 105;
-      rawLines.forEach((line, index) => {
-        const wrapped = wrapText(ctx, line, maxWidth).slice(0, 1);
-        const y = startY + index * lineHeight;
-        const width = ctx.measureText(wrapped[0] || line).width;
-        ctx.strokeText(wrapped[0] || line, (CANVAS_SIZE - width) / 2, y);
-        drawHeadlineLine(ctx, wrapped[0] || line, y, maxWidth, colors[index]?.[0] || '#ffffff', colors[index]?.[1] || '#ffd166');
-      });
-      ctx.shadowBlur = 0;
 
       const dataUrl = canvas.toDataURL('image/jpeg', 0.94);
       const res = await fetch('/api/celebrity-save-canvas', {
@@ -1174,6 +1612,140 @@ ${headlineExamples}
           <div className="min-w-[260px] space-y-2">
             <label className="text-xs font-bold text-gray-400 block mb-1">ชื่อเพจมุมขวาบน</label>
             <input value={pageName} onChange={e => setPageName(e.target.value)} className="input-field text-sm w-full" placeholder="เช่น Mindset Daily" />
+          </div>
+        </div>
+
+        <div className="mt-5 rounded-xl border border-gray-700/60 bg-gray-900/30 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <div>
+              <label className="text-xs font-bold text-gray-300 block">Template รูปโพสต์</label>
+              <p className="text-[10px] text-gray-500 mt-0.5">เลือกหน้าตาก่อนกดสร้างรูป ต่อไปเพิ่ม Template ใหม่แล้วจะมาอยู่ตรงนี้</p>
+            </div>
+            <span className="text-[10px] text-cyan-300">กำลังใช้: {getTemplateById(selectedTemplateId).name}</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {CELEBRITY_TEMPLATES.map(template => (
+              <button
+                key={template.id}
+                onClick={() => setSelectedTemplateId(template.id)}
+                className={`text-left rounded-xl border p-3 transition-all ${selectedTemplateId === template.id ? 'border-cyan-400 bg-cyan-500/10 shadow-lg shadow-cyan-500/10' : 'border-gray-700 bg-black/20 hover:border-gray-500'}`}
+              >
+                <div className="flex gap-3">
+                  <div className="relative w-20 h-20 rounded-lg overflow-hidden bg-gray-950 border border-gray-700 shrink-0">
+                    {template.preview === 'bottom-bar' && (
+                      <>
+                        <div className="absolute inset-x-0 top-0 h-[62%] bg-gradient-to-br from-gray-300 via-gray-600 to-gray-900" />
+                        <div className="absolute inset-x-0 bottom-0 h-[38%] bg-black" />
+                        <div className="absolute left-2 right-2 bottom-5 h-1.5 rounded bg-amber-300" />
+                        <div className="absolute left-2 right-4 bottom-3 h-1 rounded bg-white" />
+                        <div className="absolute left-2 right-6 bottom-1.5 h-1 rounded bg-cyan-300" />
+                      </>
+                    )}
+                    {template.preview === 'poster' && (
+                      <>
+                        <div className="absolute inset-0 bg-gradient-to-br from-slate-200 via-slate-700 to-black" />
+                        <div className="absolute inset-x-2 bottom-2 h-8 bg-black/70 border-l-4 border-amber-400" />
+                        <div className="absolute left-4 right-4 bottom-6 h-1.5 rounded bg-amber-300" />
+                        <div className="absolute left-4 right-5 bottom-4 h-1 rounded bg-white" />
+                      </>
+                    )}
+                    {template.preview === 'split' && (
+                      <>
+                        <div className="absolute inset-y-0 right-0 w-[52%] bg-gradient-to-br from-gray-200 via-gray-600 to-gray-950" />
+                        <div className="absolute inset-y-0 left-0 w-[58%] bg-black" />
+                        <div className="absolute left-2 top-4 w-7 h-1 rounded" style={{ background: template.accent }} />
+                        <div className="absolute left-2 right-9 top-8 h-1.5 rounded bg-white" />
+                        <div className="absolute left-2 right-12 top-12 h-1 rounded bg-amber-300" />
+                      </>
+                    )}
+                    {template.preview === 'quote-card' && (
+                      <>
+                        <div className="absolute inset-0 bg-gradient-to-br from-violet-950 via-gray-950 to-black" />
+                        <div className="absolute left-6 top-3 w-8 h-8 rounded-full bg-gradient-to-br from-gray-200 to-gray-700 border-2 border-violet-300" />
+                        <div className="absolute left-3 right-3 bottom-3 h-8 rounded bg-black/70" />
+                        <div className="absolute left-5 right-5 bottom-7 h-1.5 rounded bg-violet-300" />
+                        <div className="absolute left-5 right-7 bottom-5 h-1 rounded bg-white" />
+                      </>
+                    )}
+                    {template.preview === 'diagonal' && (
+                      <>
+                        <div className="absolute inset-0 bg-gradient-to-br from-gray-300 via-gray-700 to-black" />
+                        <div className="absolute -left-2 right-[-8px] bottom-[-6px] h-11 bg-black/80 rotate-[-7deg]" />
+                        <div className="absolute left-3 bottom-8 w-8 h-1 rounded bg-red-400" />
+                        <div className="absolute left-3 right-4 bottom-5 h-1.5 rounded bg-white" />
+                        <div className="absolute left-3 right-8 bottom-3 h-1 rounded bg-red-300" />
+                      </>
+                    )}
+                    {template.preview === 'magazine' && (
+                      <>
+                        <div className="absolute inset-0 bg-gradient-to-br from-black via-gray-700 to-sky-950" />
+                        <div className="absolute left-2 top-3 bottom-3 w-1 rounded bg-sky-300" />
+                        <div className="absolute left-4 top-4 w-9 h-1.5 rounded bg-white" />
+                        <div className="absolute left-4 right-3 bottom-7 h-1.5 rounded bg-sky-300" />
+                        <div className="absolute left-4 right-6 bottom-5 h-1 rounded bg-white" />
+                        <div className="absolute left-4 right-8 bottom-3 h-1 rounded bg-white" />
+                      </>
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="font-bold text-gray-100 text-sm">{template.name}</div>
+                    <div className="text-[10px] text-gray-400 leading-snug mt-1">{template.description}</div>
+                    {selectedTemplateId === template.id && <div className="mt-2 text-[10px] text-cyan-300">เลือกอยู่</div>}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-gray-700/60 grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-4">
+            <div>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <label className="text-xs font-bold text-gray-300 block">ชุดสี Font</label>
+                <span className="text-[10px] text-gray-500">ใช้กับพาดหัวตอนสร้างรูป</span>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {CELEBRITY_FONT_THEMES.map(theme => (
+                  <button
+                    key={theme.id}
+                    onClick={() => setSelectedFontThemeId(theme.id)}
+                    className={`rounded-lg border p-2 text-left transition-all ${selectedFontThemeId === theme.id ? 'border-amber-300 bg-amber-400/10' : 'border-gray-700 bg-black/20 hover:border-gray-500'}`}
+                  >
+                    <div className="flex gap-1 mb-2">
+                      <span className="h-5 flex-1 rounded" style={{ background: theme.base }} />
+                      <span className="h-5 flex-1 rounded" style={{ background: theme.accent }} />
+                      <span className="h-5 flex-1 rounded" style={{ background: theme.highlight }} />
+                    </div>
+                    <div className="text-[11px] font-bold text-gray-100">{theme.name}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-gray-700/70 bg-black/20 p-3">
+              <label className="text-xs font-bold text-gray-300 block mb-2">รูปแบบตัวอักษร</label>
+              <div className="space-y-2">
+                <label className="flex items-center justify-between gap-3 rounded-lg bg-gray-900/70 px-3 py-2 text-xs font-bold text-gray-200">
+                  <span>ถมสีด้านหลัง Font</span>
+                  <input type="checkbox" checked={useTextBg} onChange={e => setUseTextBg(e.target.checked)} className="w-5 h-5 accent-cyan-500" />
+                </label>
+                <label className="flex items-center justify-between gap-3 rounded-lg bg-gray-900/70 px-3 py-2 text-xs font-bold text-gray-200">
+                  <span>เน้นสี Font</span>
+                  <input type="checkbox" checked={useFontAccent} onChange={e => setUseFontAccent(e.target.checked)} className="w-5 h-5 accent-amber-500" />
+                </label>
+              </div>
+              <div className="mt-3 rounded-lg border border-gray-700 bg-gray-950 p-3">
+                <div className="text-[10px] text-gray-500 mb-1">ตัวอย่างสี</div>
+                <div className="text-sm font-black leading-tight" style={{ color: useFontAccent ? getFontThemeById(selectedFontThemeId).accent : getFontThemeById(selectedFontThemeId).base }}>
+                  คิดให้ลึกกว่าเดิม
+                </div>
+                <div className="text-sm font-black leading-tight" style={{ color: getFontThemeById(selectedFontThemeId).base }}>
+                  แล้วลงมือทำให้จริง
+                </div>
+                <div className="text-sm font-black leading-tight" style={{ color: useFontAccent ? getFontThemeById(selectedFontThemeId).highlight : getFontThemeById(selectedFontThemeId).base }}>
+                  จนผลลัพธ์เปลี่ยน
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1549,10 +2121,17 @@ ${headlineExamples}
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={uploadSelectedResultsToDropbox}
-              disabled={isUploadingResults || selectedResultIds.size === 0}
+              disabled={isUploadingResults || isDeletingResults || selectedResultIds.size === 0}
               className="px-3 py-2 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white text-xs font-bold rounded-lg"
             >
               ☁️ อัปโหลดที่เลือก ({selectedResultIds.size})
+            </button>
+            <button
+              onClick={deleteSelectedResults}
+              disabled={isDeletingResults || selectedResultIds.size === 0}
+              className="px-3 py-2 bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white text-xs font-bold rounded-lg"
+            >
+              🗑 ลบที่เลือก ({selectedResultIds.size})
             </button>
             <button onClick={exportSelectedCsv} disabled={savedResults.length === 0} className="px-3 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-bold rounded-lg">
               💾 บันทึก CSV
@@ -1589,7 +2168,14 @@ ${headlineExamples}
           <button onClick={clearSelectedResults} className="text-xs bg-gray-700/50 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded font-bold transition-all">
             ☐ ยกเลิกทั้งหมด
           </button>
-          <span className="text-xs text-gray-400">เลือกอัปโหลด Dropbox อยู่ {selectedResultIds.size}/{savedResults.length} รายการ</span>
+          <button
+            onClick={deleteSelectedResults}
+            disabled={isDeletingResults || selectedResultIds.size === 0}
+            className="text-xs bg-red-700/50 hover:bg-red-700 disabled:opacity-50 text-red-100 px-3 py-1.5 rounded font-bold transition-all"
+          >
+            🗑 ลบทั้งหมดที่เลือก
+          </button>
+          <span className="text-xs text-gray-400">เลือกอยู่ {selectedResultIds.size}/{savedResults.length} รายการ</span>
         </div>
 
         {savedResults.length === 0 ? (

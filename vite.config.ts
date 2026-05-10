@@ -101,6 +101,26 @@ function writeCelebrityResults(root: string, results: any[]) {
   fs.writeFileSync(path.join(root, 'celebrity_results.json'), JSON.stringify(results, null, 2), 'utf-8');
 }
 
+function deleteCelebrityResultFiles(root: string, result: any) {
+  const urls = [result?.localImageUrl, result?.imageUrl]
+    .map((value: any) => String(value || ''))
+    .filter(Boolean);
+  for (const url of urls) {
+    try {
+      if (!url.startsWith('/api/celebrity-image?')) continue;
+      const params = new URLSearchParams(url.split('?')[1] || '');
+      const urlRoot = path.resolve(String(params.get('root') || root));
+      const folder = safeFolderName(String(params.get('folder') || ''));
+      const file = safeFolderName(String(params.get('file') || '')).replace(/\s+/g, '_');
+      if (urlRoot !== root || !folder || !file || !IMAGE_EXTS.includes(path.extname(file).toLowerCase())) continue;
+      if (/^portrait_\d+\.(png|jpg|jpeg|webp)$/i.test(file)) continue;
+      const filePath = path.join(root, folder, file);
+      if (!filePath.startsWith(root) || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) continue;
+      fs.unlinkSync(filePath);
+    } catch {}
+  }
+}
+
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -1648,9 +1668,26 @@ const fileSaverPlugin = (): Plugin => ({
             }
 
             if (action === 'delete') {
+              const target = results.find((r: any) => r.id === id);
+              if (target) deleteCelebrityResultFiles(root, target);
               results = results.filter((r: any) => r.id !== id);
               writeCelebrityResults(root, results);
               res.end(JSON.stringify({ success: true, results }));
+              return;
+            }
+
+            if (action === 'delete-many') {
+              const targetIds = new Set(Array.isArray(ids) ? ids.map((value: any) => String(value)) : []);
+              let deleted = 0;
+              for (const result of results) {
+                if (targetIds.has(String(result.id))) {
+                  deleteCelebrityResultFiles(root, result);
+                  deleted++;
+                }
+              }
+              results = results.filter((r: any) => !targetIds.has(String(r.id)));
+              writeCelebrityResults(root, results);
+              res.end(JSON.stringify({ success: true, deleted, results }));
               return;
             }
 
