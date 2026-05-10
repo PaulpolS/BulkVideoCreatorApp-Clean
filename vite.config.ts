@@ -40,6 +40,274 @@ function getAipageDataDir(): string {
   return path.resolve(__dirname, 'public/app_data');
 }
 
+const CELEBRITY_TEACHINGS_DIR = path.resolve(__dirname, 'public/app_data/celebrity_teachings');
+const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
+
+function getCelebrityRoot(parentFolder?: string): string {
+  const requested = String(parentFolder || '').trim();
+  return requested ? path.resolve(requested) : CELEBRITY_TEACHINGS_DIR;
+}
+
+function safeFolderName(name: string): string {
+  return String(name || '')
+    .trim()
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+    .replace(/\s+/g, ' ')
+    .slice(0, 100);
+}
+
+function ensureCelebrityDir(parentFolder?: string): string {
+  const root = getCelebrityRoot(parentFolder);
+  if (!fs.existsSync(root)) fs.mkdirSync(root, { recursive: true });
+  return root;
+}
+
+function celebrityImageUrl(root: string, folder: string, file: string): string {
+  return `/api/celebrity-image?root=${encodeURIComponent(root)}&folder=${encodeURIComponent(folder)}&file=${encodeURIComponent(file)}`;
+}
+
+function readCelebrityMeta(folderPath: string) {
+  const metaPath = path.join(folderPath, 'celebrity_meta.json');
+  try {
+    if (!fs.existsSync(metaPath)) return {};
+    const parsed = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeCelebrityMeta(folderPath: string, meta: Record<string, unknown>) {
+  const current = readCelebrityMeta(folderPath);
+  fs.writeFileSync(
+    path.join(folderPath, 'celebrity_meta.json'),
+    JSON.stringify({ ...current, ...meta, updatedAt: new Date().toISOString() }, null, 2),
+    'utf-8',
+  );
+}
+
+function readCelebrityResults(root: string) {
+  const resultsPath = path.join(root, 'celebrity_results.json');
+  try {
+    if (!fs.existsSync(resultsPath)) return [];
+    const parsed = JSON.parse(fs.readFileSync(resultsPath, 'utf-8'));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeCelebrityResults(root: string, results: any[]) {
+  fs.writeFileSync(path.join(root, 'celebrity_results.json'), JSON.stringify(results, null, 2), 'utf-8');
+}
+
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function listCelebrityFolders(parentFolder?: string) {
+  const root = ensureCelebrityDir(parentFolder);
+  return fs.readdirSync(root, { withFileTypes: true })
+    .filter(entry => entry.isDirectory())
+    .map(entry => {
+      const folderPath = path.join(root, entry.name);
+      const meta = readCelebrityMeta(folderPath);
+      const files = fs.readdirSync(folderPath).filter(file => IMAGE_EXTS.includes(path.extname(file).toLowerCase()));
+      const images = files
+        .filter(file => !/^post_/i.test(file) && !/_post_\d+/i.test(file))
+        .map(file => {
+          const filePath = path.join(folderPath, file);
+          return {
+            name: file,
+            url: celebrityImageUrl(root, entry.name, file),
+            sizeBytes: fs.statSync(filePath).size,
+          };
+        });
+      const outputs = files
+        .filter(file => /^post_/i.test(file) || /_post_\d+/i.test(file))
+        .map(file => {
+          const filePath = path.join(folderPath, file);
+          return {
+            name: file,
+            url: celebrityImageUrl(root, entry.name, file),
+            sizeBytes: fs.statSync(filePath).size,
+          };
+        });
+      return {
+        name: entry.name,
+        path: folderPath,
+        imageCount: images.length,
+        images,
+        outputs,
+        tags: Array.isArray((meta as any).tags) ? (meta as any).tags : [],
+        categorySummary: typeof (meta as any).categorySummary === 'string' ? (meta as any).categorySummary : '',
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function fetchJsonWithAgent(url: string) {
+  const res = await fetchWithTimeout(url, 12000, {
+    headers: {
+      'User-Agent': 'BulkVideoCreatorApp/2.0 (local creator tool)',
+      'Accept': 'application/json',
+    },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.json();
+}
+
+async function fetchWithTimeout(url: string, timeoutMs = 15000, options: RequestInit = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function findWikimediaImages(personName: string, count: number) {
+  const found: { url: string; width: number; height: number; source: string }[] = [];
+  const seen = new Set<string>();
+  const pushImage = (url: string, width = 0, height = 0, source = 'wikimedia') => {
+    if (!url || seen.has(url)) return;
+    const lower = url.toLowerCase();
+    if (lower.includes('.svg') || lower.includes('sprite') || lower.includes('logo')) return;
+    seen.add(url);
+    found.push({ url, width, height, source });
+  };
+
+  try {
+    const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(personName)}&srlimit=1&format=json`;
+    const searchData = await fetchJsonWithAgent(searchUrl);
+    const title = searchData?.query?.search?.[0]?.title || personName;
+    const summaryUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
+    const summary = await fetchJsonWithAgent(summaryUrl);
+    const original = summary?.originalimage || summary?.thumbnail;
+    if (original?.source) pushImage(original.source, original.width || 0, original.height || 0, 'wikipedia-summary');
+  } catch {}
+
+  const searchTerms = [
+    `${personName} portrait`,
+    `${personName} headshot`,
+    personName,
+  ];
+  for (const term of searchTerms) {
+    if (found.length >= count) break;
+    try {
+      const commonsUrl = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=${encodeURIComponent(term)}&gsrlimit=18&prop=imageinfo&iiprop=url|size|mime&iiurlwidth=1800&format=json`;
+      const data = await fetchJsonWithAgent(commonsUrl);
+      const pages = Object.values(data?.query?.pages || {}) as any[];
+      for (const page of pages) {
+        const info = page?.imageinfo?.[0];
+        const url = info?.thumburl || info?.url;
+        const width = Number(info?.thumbwidth || info?.width || 0);
+        const height = Number(info?.thumbheight || info?.height || 0);
+        if (width && height && (width < 500 || height < 500)) continue;
+        pushImage(url, width, height, 'wikimedia-commons');
+        if (found.length >= count) break;
+      }
+    } catch {}
+  }
+
+  return found.slice(0, count);
+}
+
+async function findDuckDuckGoImages(personName: string, count: number) {
+  const found: { url: string; width: number; height: number; source: string }[] = [];
+  const seen = new Set<string>();
+  const pushImage = (url: string, width = 0, height = 0) => {
+    if (!url || seen.has(url)) return;
+    const lower = url.toLowerCase();
+    if (lower.includes('.svg') || lower.includes('sprite') || lower.includes('logo')) return;
+    seen.add(url);
+    found.push({ url, width, height, source: 'duckduckgo-images' });
+  };
+
+  const queries = [
+    `${personName} portrait photo`,
+    `${personName} investor photo`,
+    `${personName} official photo`,
+    `${personName} interview photo`,
+  ];
+  for (const query of queries) {
+    if (found.length >= count) break;
+    try {
+      const searchUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}&iar=images&iax=images&ia=images`;
+      const htmlRes = await fetchWithTimeout(searchUrl, 12000, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml',
+        },
+      });
+      const html = await htmlRes.text();
+      const vqd = html.match(/vqd=['"]?([^'"&\s]+)['"]?/)?.[1];
+      if (!vqd) continue;
+
+      const apiUrl = `https://duckduckgo.com/i.js?l=us-en&o=json&q=${encodeURIComponent(query)}&vqd=${encodeURIComponent(vqd)}&f=,,,&p=1`;
+      const apiRes = await fetchWithTimeout(apiUrl, 12000, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+          'Accept': 'application/json,text/javascript,*/*;q=0.8',
+          'Referer': searchUrl,
+        },
+      });
+      if (!apiRes.ok) continue;
+      const data = await apiRes.json();
+      const results = Array.isArray(data?.results) ? data.results : [];
+      for (const item of results) {
+        const url = item?.image || item?.thumbnail;
+        const width = Number(item?.width || 0);
+        const height = Number(item?.height || 0);
+        if (width && height && (width < 260 || height < 260)) continue;
+        pushImage(url, width, height);
+        if (found.length >= count) break;
+      }
+    } catch {}
+  }
+  return found.slice(0, count);
+}
+
+async function findCelebrityImages(personName: string, count: number) {
+  const sources = [
+    ...(await findWikimediaImages(personName, Math.max(count, 12))),
+    ...(await findDuckDuckGoImages(personName, Math.max(count * 2, 20))),
+  ];
+  const seen = new Set<string>();
+  return sources.filter(item => {
+    if (!item.url || seen.has(item.url)) return false;
+    seen.add(item.url);
+    return true;
+  }).slice(0, Math.max(count * 3, count));
+}
+
+async function downloadImageToFile(imageUrl: string, targetFile: string): Promise<string> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await fetchWithTimeout(imageUrl, 18000, {
+      redirect: 'follow',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+      },
+    });
+    if (!res.ok) {
+      if (res.status === 429 && attempt === 0) {
+        await sleep(1400);
+        continue;
+      }
+      throw new Error(`download failed ${res.status}`);
+    }
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.startsWith('image/')) throw new Error(`not an image: ${contentType}`);
+    if (contentType.includes('svg')) throw new Error('svg image skipped');
+    const buf = Buffer.from(await res.arrayBuffer());
+    fs.writeFileSync(targetFile, buf);
+    return contentType;
+  }
+  throw new Error('download failed 429');
+}
+
 const dataStaticPlugin = (): Plugin => ({
   name: 'data-static-serve',
   apply: 'serve',
@@ -137,7 +405,7 @@ const dataStaticPlugin = (): Plugin => ({
         let filePath: string | null = null;
         const aipageDir = getAipageDataDir();
         if (url.startsWith('/app_data/aipage_images/')) {
-          const rel = url.slice('/app_data/aipage_images/'.length);
+          const rel = decodeURIComponent(url.slice('/app_data/aipage_images/'.length));
           filePath = path.join(aipageDir, 'aipage_images', rel);
         } else if (url === '/app_data/aipage_results.json') {
           filePath = path.join(aipageDir, 'aipage_results.json');
@@ -148,7 +416,7 @@ const dataStaticPlugin = (): Plugin => ({
         if (!filePath) {
           const prefix = Object.keys(DATA_STATIC_DIRS).find(p => url === p || url.startsWith(p + '/'));
           if (!prefix) return next();
-          const rel = url.slice(prefix.length);
+          const rel = decodeURIComponent(url.slice(prefix.length));
           filePath = path.join(DATA_STATIC_DIRS[prefix], rel);
           if (!filePath.startsWith(DATA_STATIC_DIRS[prefix])) return next();
         }
@@ -1099,6 +1367,331 @@ const fileSaverPlugin = (): Plugin => ({
           res.end(JSON.stringify({ success: false, error: e.message }));
         }
       });
+    });
+
+    // === Celebrity Teachings: folders/images/canvas outputs ===
+    server.middlewares.use('/api/celebrity-folders', (req, res) => {
+      res.setHeader('Content-Type', 'application/json');
+      try {
+        const params = new URLSearchParams((req.url || '').split('?')[1] || '');
+        const root = ensureCelebrityDir(params.get('parentFolder') || '');
+        res.end(JSON.stringify({ root, folders: listCelebrityFolders(root) }));
+      } catch (e: any) {
+        res.statusCode = 500;
+        res.end(JSON.stringify({ error: e.message, folders: [] }));
+      }
+    });
+
+    server.middlewares.use('/api/celebrity-image', (req, res) => {
+      if (req.method !== 'GET' && req.method !== 'HEAD') { res.statusCode = 405; res.end(''); return; }
+      try {
+        const params = new URLSearchParams((req.url || '').split('?')[1] || '');
+        const root = ensureCelebrityDir(params.get('root') || params.get('parentFolder') || '');
+        const folder = safeFolderName(params.get('folder') || '');
+        const file = safeFolderName(params.get('file') || '').replace(/\s+/g, '_');
+        if (!folder || !file || !IMAGE_EXTS.includes(path.extname(file).toLowerCase())) {
+          res.statusCode = 400;
+          res.end('Bad image path');
+          return;
+        }
+        const filePath = path.join(root, folder, file);
+        if (!filePath.startsWith(root) || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+          res.statusCode = 404;
+          res.end('Image not found');
+          return;
+        }
+        const ext = path.extname(filePath).toLowerCase();
+        const mime = DATA_MIME[ext] || 'image/jpeg';
+        const stat = fs.statSync(filePath);
+        res.setHeader('Content-Type', mime);
+        res.setHeader('Content-Length', stat.size);
+        res.setHeader('Cache-Control', 'no-cache');
+        if (req.method === 'HEAD') {
+          res.end();
+          return;
+        }
+        const stream = fs.createReadStream(filePath);
+        stream.on('error', () => { if (!res.writableEnded) res.end(); });
+        stream.pipe(res);
+      } catch (e: any) {
+        res.statusCode = 500;
+        res.end(e.message);
+      }
+    });
+
+    server.middlewares.use('/api/celebrity-create-folders', (req, res) => {
+      if (req.method !== 'POST') { res.statusCode = 405; res.end(''); return; }
+      res.setHeader('Content-Type', 'application/json');
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', () => {
+        try {
+          const { names, parentFolder } = JSON.parse(body);
+          const root = ensureCelebrityDir(parentFolder);
+          if (!Array.isArray(names)) throw new Error('Missing names array');
+          const created = names
+            .map((name: string) => safeFolderName(name))
+            .filter(Boolean)
+            .map((name: string) => {
+              const folderPath = path.join(root, name);
+              if (!folderPath.startsWith(root)) throw new Error('Invalid folder name');
+              if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true });
+              return { name, path: folderPath };
+            });
+          res.end(JSON.stringify({ success: true, root, created, folders: listCelebrityFolders(root) }));
+        } catch (e: any) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ success: false, error: e.message }));
+        }
+      });
+    });
+
+    server.middlewares.use('/api/celebrity-delete-image', (req, res) => {
+      if (req.method !== 'POST') { res.statusCode = 405; res.end(''); return; }
+      res.setHeader('Content-Type', 'application/json');
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', () => {
+        try {
+          const { folder, file, parentFolder } = JSON.parse(body);
+          const root = ensureCelebrityDir(parentFolder);
+          const safeFolder = safeFolderName(folder);
+          const safeFile = safeFolderName(file).replace(/\s+/g, '_');
+          if (!safeFolder || !safeFile || !IMAGE_EXTS.includes(path.extname(safeFile).toLowerCase())) {
+            throw new Error('Invalid image path');
+          }
+          if (!/^portrait_\d+\.(png|jpg|jpeg|webp)$/i.test(safeFile)) {
+            throw new Error('ลบได้เฉพาะไฟล์รูปต้นทาง portrait เท่านั้น');
+          }
+          const filePath = path.join(root, safeFolder, safeFile);
+          if (!filePath.startsWith(root)) throw new Error('Invalid folder path');
+          if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+            throw new Error('ไม่พบไฟล์รูปที่จะลบ');
+          }
+          fs.unlinkSync(filePath);
+          res.end(JSON.stringify({ success: true, deleted: { folder: safeFolder, file: safeFile }, folders: listCelebrityFolders(root) }));
+        } catch (e: any) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ success: false, error: e.message }));
+        }
+      });
+    });
+
+    server.middlewares.use('/api/celebrity-save-tags', (req, res) => {
+      if (req.method !== 'POST') { res.statusCode = 405; res.end(''); return; }
+      res.setHeader('Content-Type', 'application/json');
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', () => {
+        try {
+          const { parentFolder, items } = JSON.parse(body);
+          const root = ensureCelebrityDir(parentFolder);
+          if (!Array.isArray(items)) throw new Error('Missing items array');
+          const saved = items.map((item: any) => {
+            const safeName = safeFolderName(item?.name);
+            if (!safeName) return null;
+            const folderPath = path.join(root, safeName);
+            if (!folderPath.startsWith(root)) throw new Error('Invalid folder name');
+            if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true });
+            const tags = Array.isArray(item.tags)
+              ? item.tags.map((tag: unknown) => String(tag).trim()).filter(Boolean).slice(0, 8)
+              : [];
+            const categorySummary = String(item.categorySummary || '').trim().slice(0, 240);
+            writeCelebrityMeta(folderPath, { name: safeName, tags, categorySummary });
+            return { name: safeName, tags, categorySummary };
+          }).filter(Boolean);
+          res.end(JSON.stringify({ success: true, saved, folders: listCelebrityFolders(root) }));
+        } catch (e: any) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ success: false, error: e.message }));
+        }
+      });
+    });
+
+    server.middlewares.use('/api/celebrity-download-images', (req, res) => {
+      if (req.method !== 'POST') { res.statusCode = 405; res.end(''); return; }
+      res.setHeader('Content-Type', 'application/json');
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', async () => {
+        try {
+          const { name, count = 6, parentFolder } = JSON.parse(body);
+          const safeName = safeFolderName(name);
+          if (!safeName) throw new Error('Missing celebrity name');
+          const root = ensureCelebrityDir(parentFolder);
+          const folderPath = path.join(root, safeName);
+          if (!folderPath.startsWith(root)) throw new Error('Invalid folder name');
+          if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true });
+
+          const wanted = Math.max(1, Math.min(30, Number(count) || 6));
+          const existingPortraits = fs.readdirSync(folderPath)
+            .filter(file => /^portrait_\d+\.(png|jpg|jpeg|webp)$/i.test(file))
+            .map(file => Number(file.match(/^portrait_(\d+)/i)?.[1] || 0))
+            .filter(Number.isFinite);
+          let nextIndex = Math.max(0, ...existingPortraits) + 1;
+          const candidates = await findCelebrityImages(safeName, wanted * 4);
+          const saved: any[] = [];
+          const downloadErrors: string[] = [];
+          for (let i = 0; i < candidates.length && saved.length < wanted; i++) {
+            const candidate = candidates[i];
+            const urlPath = new URL(candidate.url).pathname;
+            const extRaw = path.extname(urlPath).toLowerCase();
+            const ext = IMAGE_EXTS.includes(extRaw) ? extRaw : '.jpg';
+            const fileName = `portrait_${String(nextIndex++).padStart(2, '0')}${ext}`;
+            const filePath = path.join(folderPath, fileName);
+            try {
+              await downloadImageToFile(candidate.url, filePath);
+              saved.push({
+                name: fileName,
+                url: celebrityImageUrl(root, safeName, fileName),
+                source: candidate.source,
+              });
+            } catch (e: any) {
+              if (downloadErrors.length < 5) {
+                downloadErrors.push(`${candidate.source}: ${e?.message || 'download failed'}`);
+              }
+            }
+          }
+
+          if (saved.length === 0) {
+            const detail = candidates.length > 0 && downloadErrors.length > 0 ? ` (${downloadErrors.join(' | ')})` : '';
+            throw new Error(`ไม่พบรูปที่ดาวน์โหลดได้จาก Wikimedia/DuckDuckGo${detail}`);
+          }
+          const metaPath = path.join(folderPath, 'sources.json');
+          fs.writeFileSync(metaPath, JSON.stringify({ name: safeName, downloadedAt: new Date().toISOString(), candidates }, null, 2), 'utf-8');
+          res.end(JSON.stringify({
+            success: true,
+            root,
+            images: saved,
+            candidatesCount: candidates.length,
+            unusedCandidates: Math.max(0, candidates.length - saved.length),
+            failedCount: downloadErrors.length,
+            downloadErrors,
+            folders: listCelebrityFolders(root),
+          }));
+        } catch (e: any) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ success: false, error: e.message }));
+        }
+      });
+    });
+
+    server.middlewares.use('/api/celebrity-save-canvas', (req, res) => {
+      if (req.method !== 'POST') { res.statusCode = 405; res.end(''); return; }
+      res.setHeader('Content-Type', 'application/json');
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', () => {
+        try {
+          const { folder, base64Data, fileName, parentFolder } = JSON.parse(body);
+          const safeName = safeFolderName(folder);
+          if (!safeName || !base64Data) throw new Error('Missing folder or base64Data');
+          const root = ensureCelebrityDir(parentFolder);
+          const folderPath = path.join(root, safeName);
+          if (!folderPath.startsWith(root)) throw new Error('Invalid folder name');
+          if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true });
+
+          const safeFileName = safeFolderName(fileName || `post_${Date.now()}.jpg`).replace(/\s+/g, '_');
+          const finalName = /\.(png|jpg|jpeg|webp)$/i.test(safeFileName) ? safeFileName : `${safeFileName}.jpg`;
+          const filePath = path.join(folderPath, finalName);
+          const b64 = String(base64Data).replace(/^data:image\/\w+;base64,/, '');
+          fs.writeFileSync(filePath, b64, 'base64');
+          res.end(JSON.stringify({
+            success: true,
+            fileName: finalName,
+            url: celebrityImageUrl(root, safeName, finalName),
+          }));
+        } catch (e: any) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ success: false, error: e.message }));
+        }
+      });
+    });
+
+    server.middlewares.use('/api/celebrity-results', (req, res) => {
+      res.setHeader('Content-Type', 'application/json');
+
+      if (req.method === 'GET') {
+        try {
+          const params = new URLSearchParams((req.url || '').split('?')[1] || '');
+          const root = ensureCelebrityDir(params.get('parentFolder') || '');
+          res.end(JSON.stringify({ success: true, root, results: readCelebrityResults(root) }));
+        } catch (e: any) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ success: false, error: e.message, results: [] }));
+        }
+        return;
+      }
+
+      if (req.method === 'POST') {
+        let body = '';
+        req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+        req.on('end', () => {
+          try {
+            const { action, parentFolder, item, id, changes, ids, outputFolder } = JSON.parse(body || '{}');
+            const root = ensureCelebrityDir(parentFolder);
+            let results = readCelebrityResults(root);
+
+            if (action === 'add') {
+              const next = { ...(item || {}), id: item?.id || `celebrity_${Date.now()}`, createdAt: item?.createdAt || new Date().toISOString() };
+              results = [next, ...results.filter((r: any) => r.id !== next.id)];
+              writeCelebrityResults(root, results);
+              res.end(JSON.stringify({ success: true, item: next, results }));
+              return;
+            }
+
+            if (action === 'update') {
+              results = results.map((r: any) => r.id === id ? { ...r, ...(changes || {}), updatedAt: new Date().toISOString() } : r);
+              writeCelebrityResults(root, results);
+              res.end(JSON.stringify({ success: true, results }));
+              return;
+            }
+
+            if (action === 'delete') {
+              results = results.filter((r: any) => r.id !== id);
+              writeCelebrityResults(root, results);
+              res.end(JSON.stringify({ success: true, results }));
+              return;
+            }
+
+            if (action === 'export-csv') {
+              const targetIds = Array.isArray(ids) ? new Set(ids) : null;
+              const selected = targetIds ? results.filter((r: any) => targetIds.has(r.id)) : results;
+              const headers = ['id', 'person_name', 'headline', 'post_text', 'dropbox_dl1_url', 'image_url', 'dropbox_path', 'selected_tag', 'tags', 'category_summary', 'created_at'];
+              const esc = (value: any) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+              const rows = selected.map((r: any) => [
+                r.id,
+                r.personName,
+                r.headline,
+                r.article,
+                r.dropboxUrl || '',
+                r.dropboxUrl || r.imageUrl || r.localImageUrl || '',
+                r.dropboxPath || '',
+                r.selectedTag || '',
+                Array.isArray(r.tags) ? r.tags.join('|') : '',
+                r.categorySummary || '',
+                r.createdAt || '',
+              ].map(esc).join(','));
+              const saveRoot = outputFolder ? path.resolve(String(outputFolder)) : root;
+              if (!fs.existsSync(saveRoot)) fs.mkdirSync(saveRoot, { recursive: true });
+              const csvPath = path.join(saveRoot, `celebrity_results_export_${Date.now()}.csv`);
+              fs.writeFileSync(csvPath, '\uFEFF' + [headers.join(','), ...rows].join('\n'), 'utf-8');
+              res.end(JSON.stringify({ success: true, csvPath }));
+              return;
+            }
+
+            res.statusCode = 400;
+            res.end(JSON.stringify({ success: false, error: 'Unknown action' }));
+          } catch (e: any) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ success: false, error: e.message }));
+          }
+        });
+        return;
+      }
+
+      res.statusCode = 405;
+      res.end(JSON.stringify({ success: false, error: 'Method not allowed' }));
     });
 
     // === Run bash script directly via SSE ===
