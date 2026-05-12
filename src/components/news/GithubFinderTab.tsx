@@ -1,8 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Card } from '../ui/Card';
 import { getOpenRouterKeyCandidates } from '../../hooks/useApiSettings';
+import {
+  fetchGithubRateLimit,
+  fetchGithubReadme,
+  fetchGithubTrendingRepos,
+  GITHUB_TRENDS_MAX_LIMIT,
+  type GithubTrendingRepository,
+} from '../../features/github-trends';
 
 const KEYWORDS = [
+  { label: 'ไม่ระบุหัวข้อ', query: '', emoji: '🌐' },
   { label: 'Claude Code', query: 'claude-code', emoji: '🤖' },
   { label: 'AI Agent / Multi-agent', query: 'topic:ai-agent', emoji: '🕹️' },
   { label: 'Local LLM (รันในเครื่อง)', query: 'topic:local-llm', emoji: '💻' },
@@ -35,29 +43,58 @@ const KEYWORDS = [
   { label: 'OpenAI / GPT Tools', query: 'topic:openai', emoji: '💬' },
 ];
 
+type GithubDiscoveryModeId = 'trending' | 'fresh' | 'rising' | 'active' | 'helpWanted';
+
+const DISCOVERY_MODES: Array<{
+  id: GithubDiscoveryModeId;
+  label: string;
+  short: string;
+  description: string;
+}> = [
+  {
+    id: 'trending',
+    label: '🔥 เทรนด์วันนี้',
+    short: 'ดาวขึ้นจริงวันนี้',
+    description: 'ใช้ GitHub Trending รายวันก่อน ถ้าไม่ครบจะเติม repo ใหม่ที่ดาวดี',
+  },
+  {
+    id: 'fresh',
+    label: '🌱 Repo ใหม่มาแรง',
+    short: 'สร้างใหม่แต่เริ่มมีคนสนใจ',
+    description: 'เหมาะทำคอนเทนต์ “ของใหม่ที่น่าจับตา”',
+  },
+  {
+    id: 'rising',
+    label: '🚀 โตไวสัปดาห์นี้',
+    short: 'โปรเจกต์ที่ถูกอัปเดตช่วงนี้และดาวรวมเริ่มสูง',
+    description: 'ใช้หา repo ที่กำลังมี momentum แต่ไม่จำกัดแค่หน้า Trending',
+  },
+  {
+    id: 'active',
+    label: '⚡ อัปเดตล่าสุด',
+    short: 'โปรเจกต์ดังที่ยังขยับอยู่',
+    description: 'เหมาะหาเรื่องจาก repo ที่ยังมีการพัฒนา ไม่ใช่ของเก่าทิ้งไว้',
+  },
+  {
+    id: 'helpWanted',
+    label: '🙋 คนอยากให้ช่วย',
+    short: 'issue เยอะ ชุมชนมีงานให้ร่วม',
+    description: 'เหมาะทำโพสต์สาย open-source/community และ beginner friendly',
+  },
+];
+
 interface GithubFinderProps {
   onSendToAIPage?: (items: { rawArticle: string; sourceUrl: string; title: string; tags?: string[]; images?: string[]; sourceType?: string; domain?: string }[]) => void;
 }
 
-interface GithubRepo {
-  id: number;
-  name: string;
-  full_name: string;
-  description: string | null;
-  html_url: string;
-  stargazers_count: number;
-  forks_count: number;
-  language: string | null;
-  topics: string[];
-  updated_at: string;
-  owner: { login: string; avatar_url: string };
-}
+type GithubRepo = GithubTrendingRepository;
 
 interface GeneratedPost {
   repoId: number;
   full_name: string;
   html_url: string;
   stars: number;
+  stars_today: number;
   description: string;
   clickbait_caption: string;
   comment_1: string;
@@ -79,6 +116,12 @@ function timeAgo(dateStr: string): string {
   if (days < 30) return `${days} วันที่แล้ว`;
   if (days < 365) return `${Math.floor(days / 30)} เดือนที่แล้ว`;
   return `${Math.floor(days / 365)} ปีที่แล้ว`;
+}
+
+function githubDateDaysAgo(days: number) {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().slice(0, 10);
 }
 
 function csvEscape(val: string): string {
@@ -164,11 +207,15 @@ const STOCK_VISUAL_TONES = [
 export function GithubFinderTab({ onSendToAIPage }: GithubFinderProps) {
   const [selectedQuery, setSelectedQuery] = useState(KEYWORDS[0].query);
   const selectedKw = KEYWORDS.find(k => k.query === selectedQuery);
-  const [count, setCount] = useState('10');
+  const [selectedDiscoveryMode, setSelectedDiscoveryMode] = useState<GithubDiscoveryModeId>('trending');
+  const [count, setCount] = useState('30');
+  const topCount = Math.max(1, Math.min(GITHUB_TRENDS_MAX_LIMIT, parseInt(count || '30') || 30));
   const [isLoading, setIsLoading] = useState(false);
   const [repos, setRepos] = useState<GithubRepo[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [error, setError] = useState('');
+  const [resultNote, setResultNote] = useState('');
+  const [lastQueryPreview, setLastQueryPreview] = useState('');
   const [generatedPosts, setGeneratedPosts] = useState<GeneratedPost[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [rateLimit, setRateLimit] = useState<{ search: { remaining: number; limit: number; reset: number }; core: { remaining: number; limit: number; reset: number } } | null>(null);
@@ -176,6 +223,7 @@ export function GithubFinderTab({ onSendToAIPage }: GithubFinderProps) {
   const [genLog, setGenLog] = useState('');
   const stopRef = useRef(false);
   const [ghModel, setGhModel] = useState<string>(() => localStorage.getItem('gh_finder_model') || GH_MODEL_OPTIONS[0].id);
+  const [githubToken, setGithubToken] = useState(() => localStorage.getItem('github_api_token') || localStorage.getItem('github_token') || '');
 
   // ─── Footage folder management ────────────────────────────────────
   const [footageFolder, setFootageFolder] = useState(() => localStorage.getItem('gh_footage_folder') || '');
@@ -204,6 +252,12 @@ export function GithubFinderTab({ onSendToAIPage }: GithubFinderProps) {
       loadSubfolders(saved);
     }
   }, []);
+
+  useEffect(() => {
+    const token = githubToken.trim();
+    if (token) localStorage.setItem('github_api_token', token);
+    else localStorage.removeItem('github_api_token');
+  }, [githubToken]);
 
   const pickFootageFolder = async () => {
     try {
@@ -417,46 +471,119 @@ ${tonePlan}
 
   // ─── Fetch GitHub README ────────────────────────────────────────────────────
   const fetchReadme = async (fullName: string): Promise<{ content: string; images: string[] }> => {
-    try {
-      const res = await fetch(`https://api.github.com/repos/${fullName}/readme`, {
-        headers: { Accept: 'application/vnd.github+json' },
-      });
-      if (!res.ok) return { content: '', images: ['', '', ''] };
-      const data = await res.json();
-      const decoded = atob(data.content.replace(/\n/g, ''));
+    return fetchGithubReadme(fullName, githubToken.trim() || undefined);
+  };
+
+  const buildDiscoveryOptions = (modeId: GithubDiscoveryModeId, topicQuery: string) => {
+    const topic = topicQuery.trim();
+    const withTopic = (base: string) => `${topic ? `${topic} ` : ''}${base}`.trim();
+    const mode = DISCOVERY_MODES.find(m => m.id === modeId) || DISCOVERY_MODES[0];
+
+    if (modeId === 'trending') {
       return {
-        content: decoded.slice(0, 3500),
-        images: extractImages(decoded),
+        mode,
+        options: topic
+          ? { query: topic, days: 1, sort: 'stars' as const }
+          : { query: '', days: 1 },
+        note: topic
+          ? `โหมด ${mode.label}: ค้นในหัวข้อ ${selectedKw?.label || topic} จาก repo ที่ขยับใน 1 วัน`
+          : `โหมด ${mode.label}: ดึงจาก GitHub Trending รายวันก่อน แล้วเติม repo ใหม่ให้ครบจำนวนถ้าหน้า Trending มีน้อย`,
       };
-    } catch {
-      return { content: '', images: ['', '', ''] };
     }
+
+    if (modeId === 'fresh') {
+      return {
+        mode,
+        options: {
+          query: withTopic(`created:>=${githubDateDaysAgo(14)} stars:>5 is:public`),
+          rawQuery: true,
+          sort: 'stars' as const,
+          includeStarsToday: false,
+          days: 14,
+        },
+        note: `โหมด ${mode.label}: repo ที่สร้างใน 14 วันที่ผ่านมา เรียงตามดาวรวม`,
+      };
+    }
+
+    if (modeId === 'rising') {
+      return {
+        mode,
+        options: {
+          query: withTopic(`pushed:>=${githubDateDaysAgo(7)} stars:>50 is:public`),
+          rawQuery: true,
+          sort: 'stars' as const,
+          includeStarsToday: false,
+          days: 7,
+        },
+        note: `โหมด ${mode.label}: repo ที่ยังอัปเดตใน 7 วัน และเริ่มมีฐานผู้ใช้`,
+      };
+    }
+
+    if (modeId === 'active') {
+      return {
+        mode,
+        options: {
+          query: withTopic(`pushed:>=${githubDateDaysAgo(1)} stars:>100 is:public`),
+          rawQuery: true,
+          sort: 'updated' as const,
+          includeStarsToday: false,
+          days: 1,
+        },
+        note: `โหมด ${mode.label}: repo ดังที่เพิ่งอัปเดตล่าสุด เหมาะหาเรื่องที่ยังสด`,
+      };
+    }
+
+    return {
+      mode,
+      options: {
+        query: withTopic('help-wanted-issues:>10 is:public'),
+        rawQuery: true,
+        sort: 'help-wanted-issues' as const,
+        includeStarsToday: false,
+        days: 30,
+      },
+      note: `โหมด ${mode.label}: repo ที่มี issue ต้องการคนช่วยเยอะ เหมาะสาย community/open-source`,
+    };
   };
 
   // ─── Search ─────────────────────────────────────────────────────────────────
-  const handleSearch = async () => {
-    const kw = KEYWORDS.find(k => k.query === selectedQuery);
+  const handleSearch = async (override?: { query?: string; count?: string; mode?: GithubDiscoveryModeId }) => {
+    const query = override?.query ?? selectedQuery;
+    const countValue = override?.count ?? count;
+    const modeId = override?.mode ?? selectedDiscoveryMode;
+    const kw = KEYWORDS.find(k => k.query === query) || KEYWORDS[0];
     if (!kw) return;
-    const numCount = Math.max(1, Math.min(30, parseInt(count) || 10));
+    const numCount = Math.max(1, Math.min(GITHUB_TRENDS_MAX_LIMIT, parseInt(countValue) || 30));
+    const discovery = buildDiscoveryOptions(modeId, kw.query);
     setIsLoading(true);
     setError('');
     setRepos([]);
     setSelectedIds(new Set());
     setGeneratedPosts([]);
+    setResultNote(discovery.note);
+    setLastQueryPreview(String(discovery.options.query || 'GitHub Trending daily'));
     try {
-      const res = await fetch(
-        `https://api.github.com/search/repositories?q=${encodeURIComponent(kw.query)}&sort=stars&order=desc&per_page=${numCount}`,
-        { headers: { Accept: 'application/vnd.github+json' } }
-      );
-      if (res.status === 403) throw new Error('Rate limit — รอสักครู่แล้วลองใหม่ (60 req/ชั่วโมง)');
-      if (!res.ok) throw new Error(`GitHub API error ${res.status}`);
-      const data = await res.json();
-      setRepos(data.items || []);
+      const results = await fetchGithubTrendingRepos({
+        ...discovery.options,
+        limit: numCount,
+        candidateLimit: Math.max(numCount, 30),
+        token: githubToken.trim() || undefined,
+      });
+      setRepos(results);
     } catch (err: any) {
-      setError(err.message);
+      if (err.status === 403) setError('Rate limit — รอสักครู่แล้วลองใหม่ หรือใส่ GitHub token ในโมดูลภายหลังเพื่อเพิ่ม quota');
+      else setError(err.message);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleSearchTodayTop30 = () => {
+    setSelectedQuery('');
+    setSelectedDiscoveryMode('trending');
+    const nextCount = count.trim() || '30';
+    setCount(nextCount);
+    handleSearch({ query: '', count: nextCount, mode: 'trending' });
   };
 
   // ─── Selection ──────────────────────────────────────────────────────────────
@@ -470,9 +597,9 @@ ${tonePlan}
   const downloadReposCSV = () => {
     const selected = repos.filter(r => selectedIds.has(r.id));
     if (!selected.length) return alert('กรุณาเลือก repo ก่อน');
-    const rows: string[][] = [['name', 'full_name', 'description', 'stars', 'language', 'topics', 'url']];
+    const rows: string[][] = [['name', 'full_name', 'description', 'stars_today', 'stars_total', 'language', 'topics', 'url']];
     selected.forEach(r =>
-      rows.push([r.name, r.full_name, r.description || '', String(r.stargazers_count), r.language || '', r.topics.join(';'), r.html_url])
+      rows.push([r.name, r.full_name, r.description || '', String(r.stars_today || 0), String(r.stargazers_count), r.language || '', r.topics.join(';'), r.html_url])
     );
     downloadCSV(rows, `github_repos_${Date.now()}.csv`);
   };
@@ -488,7 +615,7 @@ ${tonePlan}
     setIsGenerating(true);
     setGeneratedPosts(selected.map(r => ({
       repoId: r.id, full_name: r.full_name, html_url: r.html_url,
-      stars: r.stargazers_count, description: r.description || '',
+      stars: r.stargazers_count, stars_today: r.stars_today || 0, description: r.description || '',
       clickbait_caption: '', comment_1: '', comment_2: '', comment_3: '',
       images: [],
       status: 'pending',
@@ -529,6 +656,7 @@ ${tonePlan}
     const repoInfo = [
       `ชื่อ: ${repo.full_name}`,
       `คำอธิบาย: ${repo.description || '(ไม่มี)'}`,
+      `ดาวเพิ่มใน 1 วัน: ${(repo.stars_today || 0).toLocaleString()}`,
       `ดาว: ${repo.stargazers_count.toLocaleString()}`,
       `ภาษา: ${repo.language || 'N/A'}`,
       `Topics: ${repo.topics.join(', ') || 'N/A'}`,
@@ -652,11 +780,7 @@ ${repo.html_url}"
   const checkRateLimit = async () => {
     setIsCheckingRate(true);
     try {
-      const res = await fetch('https://api.github.com/rate_limit', {
-        headers: { Accept: 'application/vnd.github+json' },
-      });
-      if (!res.ok) throw new Error(`${res.status}`);
-      const data = await res.json();
+      const data = await fetchGithubRateLimit(githubToken.trim() || undefined);
       setRateLimit({
         search: data.resources.search,
         core: data.resources.core,
@@ -679,7 +803,7 @@ ${repo.html_url}"
     const done = generatedPosts.filter(p => p.status === 'done');
     if (!done.length) return alert('ยังไม่มีโพสที่สร้างสำเร็จ');
     const headers = [
-      'id', 'headline', 'repo_url', 'stars', 'description',
+      'id', 'headline', 'repo_url', 'stars_today', 'stars_total', 'description',
       'clickbait_caption', 'comment_1', 'comment_2', 'comment_3',
       'comment_1_image_url', 'comment_2_image_url', 'comment_3_image_url',
     ];
@@ -689,6 +813,7 @@ ${repo.html_url}"
         `result_${Date.now()}_${p.repoId}`,
         p.full_name,
         p.html_url,
+        String(p.stars_today || 0),
         String(p.stars),
         p.description,
         p.clickbait_caption,
@@ -713,7 +838,7 @@ ${repo.html_url}"
     const selected = repos.filter(r => selectedIds.has(r.id));
     if (!selected.length) return alert('กรุณาเลือก repo ก่อน');
     const kw = KEYWORDS.find(k => k.query === selectedQuery);
-    const topicLabel = kw?.label || 'GitHub';
+    const topicLabel = kw?.query ? kw.label : 'GitHub';
 
     setSendLog('⏳ กำลังดึง README ของ repo ที่เลือก...');
     const items = [];
@@ -731,6 +856,7 @@ ${repo.html_url}"
         rawArticle: `[GitHub - ${r.full_name}]
 ${r.description || ''}
 ⭐ ${r.stargazers_count.toLocaleString()} | 🍴 ${r.forks_count.toLocaleString()} | 🔵 ${r.language || 'N/A'}
+🔥 Stars today: ${(r.stars_today || 0).toLocaleString()}
 Topics: ${r.topics.join(', ') || 'N/A'}
 URL: ${r.html_url}
 
@@ -738,7 +864,7 @@ ${readmeContent ? `📖 README (บางส่วน):
 ${readmeContent}` : ''}`,
         sourceUrl: r.html_url,
         title: r.full_name,
-        tags: ['github', topicLabel],
+        tags: Array.from(new Set(['github', topicLabel, ...(r.tags || [])])),
         images: gifImages,
         sourceType: 'github',
         domain: 'github.com',
@@ -754,8 +880,53 @@ ${readmeContent}` : ''}`,
         <span className="text-2xl">🐙</span> หาของดีจาก GitHub
       </h2>
       <p className="text-xs text-gray-400 mb-5">
-        สกัด keyword จากบทความยอดแชร์ → ค้นหา repo → สร้างโพส Clickbait พร้อมโพส
+        ดู GitHub Trending วันนี้จากดาวที่เพิ่มใน 1 วัน หรือเลือกหมวดเพื่อเจาะหัวข้อ แล้วค่อยสร้างโพส Clickbait
       </p>
+
+      <div className="mb-4 rounded-xl border border-orange-500/30 bg-orange-500/10 p-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-bold text-orange-200">🔥 ไม่รู้จะค้นคำว่าอะไร?</div>
+          <div className="text-xs text-gray-400 mt-1">กดปุ่มนี้เพื่อดึง Top {topCount} repo วันนี้จาก GitHub โดยดูจากดาวที่เพิ่มใน 24 ชั่วโมงล่าสุด</div>
+        </div>
+        <button
+          onClick={handleSearchTodayTop30}
+          disabled={isLoading}
+          className="px-5 py-2.5 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-sm font-bold rounded-lg transition-all whitespace-nowrap"
+        >
+          {isLoading ? `⏳ กำลังดึง Top ${topCount}...` : `🔥 Top ${topCount} วันนี้`}
+        </button>
+      </div>
+
+      <div className="mb-4 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <div>
+            <div className="text-sm font-bold text-cyan-200">เลือกวิธีหา repo</div>
+            <div className="text-xs text-gray-400 mt-1">ถ้าไม่รู้ GitHub มาก่อน ให้เริ่มจากเทรนด์วันนี้ หรือ repo ใหม่มาแรง</div>
+          </div>
+          <div className="text-xs text-gray-500">โหมดนี้ใช้ร่วมกับหัวข้อด้านล่างได้</div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
+          {DISCOVERY_MODES.map(mode => {
+            const active = selectedDiscoveryMode === mode.id;
+            return (
+              <button
+                key={mode.id}
+                type="button"
+                onClick={() => setSelectedDiscoveryMode(mode.id)}
+                className={`text-left p-3 rounded-lg border transition-all ${
+                  active
+                    ? 'border-cyan-400 bg-cyan-500/20 shadow-[0_0_18px_rgba(34,211,238,0.16)]'
+                    : 'border-gray-700 bg-black/20 hover:border-cyan-500/40'
+                }`}
+                title={mode.description}
+              >
+                <div className={`text-sm font-bold ${active ? 'text-white' : 'text-gray-200'}`}>{mode.label}</div>
+                <div className="text-[11px] text-gray-400 mt-1 leading-snug">{mode.short}</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       {/* ── Search controls ── */}
       <div className="flex gap-3 flex-wrap items-center mb-4">
@@ -774,14 +945,23 @@ ${readmeContent}` : ''}`,
           <input
             type="number"
             value={count}
-            onChange={e => setCount(e.target.value)}
-            className="w-14 bg-transparent text-sm font-bold text-white text-center outline-none"
-            placeholder="10"
+            min={1}
+            max={GITHUB_TRENDS_MAX_LIMIT}
+            onChange={e => {
+              const value = e.target.value;
+              if (value === '' || /^\d+$/.test(value)) setCount(value);
+            }}
+            onBlur={() => {
+              if (!count.trim()) setCount('30');
+              else setCount(String(Math.max(1, Math.min(GITHUB_TRENDS_MAX_LIMIT, parseInt(count) || 30))));
+            }}
+            className="w-16 bg-transparent text-sm font-bold text-white text-center outline-none"
+            placeholder="30"
           />
         </div>
 
         <button
-          onClick={handleSearch}
+          onClick={() => handleSearch()}
           disabled={isLoading}
           className="px-5 py-2.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white text-sm font-bold rounded-lg transition-all flex items-center gap-2 whitespace-nowrap"
         >
@@ -803,6 +983,20 @@ ${readmeContent}` : ''}`,
           ))}
         </select>
         <span className="text-[10px] text-gray-500">ถ้า model ใช้ไม่ได้ ระบบจะ fallback อัตโนมัติ</span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 mb-4 p-3 rounded-lg border border-gray-700 bg-black/20">
+        <span className="text-xs text-gray-400 font-semibold whitespace-nowrap">🔑 GitHub Token:</span>
+        <input
+          type="password"
+          value={githubToken}
+          onChange={e => setGithubToken(e.target.value)}
+          className="input-field flex-1 min-w-[260px] text-xs"
+          placeholder="ไม่ใส่ก็ได้ แต่ guest จะได้ core API 60 ครั้ง/ชั่วโมง"
+        />
+        <span className={`text-[10px] ${githubToken.trim() ? 'text-green-300' : 'text-amber-300'}`}>
+          {githubToken.trim() ? 'ใช้ token แล้ว quota จะสูงขึ้น' : 'Guest mode: จำกัดกว่า'}
+        </span>
       </div>
 
       {/* ── Rate limit checker ── */}
@@ -861,7 +1055,9 @@ ${readmeContent}` : ''}`,
 
       {selectedKw && (
         <div className="mb-4 px-3 py-2 bg-violet-500/10 border border-violet-500/20 rounded-lg text-xs text-violet-300">
-          🔎 query: <span className="font-mono">{selectedKw.query}</span>
+          🔎 query: <span className="font-mono">{lastQueryPreview || (selectedKw.query || 'GitHub Trending daily')}</span>
+          <span className="text-gray-400"> · {DISCOVERY_MODES.find(m => m.id === selectedDiscoveryMode)?.label}</span>
+          {resultNote && <div className="mt-1 text-gray-400">{resultNote}</div>}
         </div>
       )}
 
@@ -1084,7 +1280,12 @@ ${readmeContent}` : ''}`,
 
           {/* Repo list */}
           <div className="space-y-2 mb-4">
-            <p className="text-xs text-gray-400">พบ <span className="text-white font-bold">{repos.length}</span> repos — เรียงตาม ⭐ มากสุด</p>
+            <p className="text-xs text-gray-400">
+              พบ <span className="text-white font-bold">{repos.length}</span> repos — {DISCOVERY_MODES.find(m => m.id === selectedDiscoveryMode)?.short || 'เรียงตามความน่าสนใจ'}
+              {selectedDiscoveryMode === 'trending' && repos.some(r => (r.stars_today || 0) === 0) && (
+                <span className="text-amber-300"> · บางรายการเป็นตัวเติมจาก repo ใหม่เพราะ Trending วันนี้มีน้อย</span>
+              )}
+            </p>
             {repos.map((repo, idx) => {
               const isChecked = selectedIds.has(repo.id);
               return (
@@ -1135,7 +1336,10 @@ ${readmeContent}` : ''}`,
                         <span>🕐 {timeAgo(repo.updated_at)}</span>
                       </div>
                     </div>
-                    <span className="text-yellow-400 font-bold text-sm shrink-0">⭐ {formatStars(repo.stargazers_count)}</span>
+                    <div className="shrink-0 text-right">
+                      <div className="text-orange-300 font-bold text-sm">🔥 +{formatStars(repo.stars_today || 0)}</div>
+                      <div className="text-yellow-400 font-semibold text-xs">⭐ {formatStars(repo.stargazers_count)}</div>
+                    </div>
                   </div>
                 </div>
               );

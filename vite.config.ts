@@ -1199,6 +1199,108 @@ const fileSaverPlugin = (): Plugin => ({
       res.statusCode = 405; res.end('{}');
     });
 
+    server.middlewares.use('/api/github-trending', async (req, res) => {
+      if (req.method !== 'GET') { res.statusCode = 405; res.end(''); return; }
+      res.setHeader('Content-Type', 'application/json');
+      const decodeHtml = (value: string) => String(value || '')
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>');
+      const stripTags = (value: string) => decodeHtml(String(value || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+      const numberFromText = (value: string) => Number(String(value || '').replace(/[^\d]/g, '')) || 0;
+      const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      try {
+        const params = new URLSearchParams((req.url || '').split('?')[1] || '');
+        const limit = Math.max(1, Math.min(100, Number(params.get('limit') || 30)));
+        const language = String(params.get('language') || '').trim();
+        const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+        const trendUrl = `https://github.com/trending${language ? `/${encodeURIComponent(language)}` : ''}?since=daily`;
+        const trendRes = await fetch(trendUrl, {
+          headers: {
+            'User-Agent': 'BulkVideoCreatorApp/2.0',
+            'Accept': 'text/html',
+          },
+        });
+        if (!trendRes.ok) throw new Error(`GitHub Trending HTTP ${trendRes.status}`);
+        const html = await trendRes.text();
+        const articles = html.match(/<article[\s\S]*?<\/article>/g) || [];
+        const repos = articles.map((article, index) => {
+          const href = article.match(/<h2[\s\S]*?<a[^>]+href="([^"]+)"/i)?.[1] || '';
+          const fullName = href.replace(/^\/+/, '').trim();
+          const [owner = '', name = ''] = fullName.split('/');
+          const description = stripTags(article.match(/<p[^>]*>([\s\S]*?)<\/p>/i)?.[1] || '');
+          const languageMatch = article.match(/itemprop="programmingLanguage"[^>]*>([\s\S]*?)<\/span>/i);
+          const repoLanguage = stripTags(languageMatch?.[1] || '');
+          const starsTodayText = stripTags(article.match(/(\d[\d,]*)\s+stars?\s+today/i)?.[0] || '');
+          const starsToday = numberFromText(starsTodayText);
+          const starHref = fullName ? `/${fullName}/stargazers` : '';
+          const starAnchor = starHref ? new RegExp(`<a[^>]+href="${escapeRegExp(starHref)}"[^>]*>([\\s\\S]*?)<\\/a>`, 'i').exec(article) : null;
+          const totalStars = numberFromText(stripTags(starAnchor?.[1] || ''));
+          const forkHref = fullName ? `/${fullName}/forks` : '';
+          const forkAnchor = forkHref ? new RegExp(`<a[^>]+href="${escapeRegExp(forkHref)}"[^>]*>([\\s\\S]*?)<\\/a>`, 'i').exec(article) : null;
+          const forks = numberFromText(stripTags(forkAnchor?.[1] || ''));
+          return {
+            id: index + 1,
+            name,
+            full_name: fullName,
+            description,
+            html_url: fullName ? `https://github.com/${fullName}` : '',
+            stargazers_count: totalStars,
+            forks_count: forks,
+            language: repoLanguage || null,
+            topics: [],
+            updated_at: new Date().toISOString(),
+            pushed_at: new Date().toISOString(),
+            owner: { login: owner, avatar_url: owner ? `https://github.com/${owner}.png` : '' },
+            stars_today: starsToday,
+            trend_since: new Date(Date.now() - 86400000).toISOString(),
+            fetched_at: new Date().toISOString(),
+            tags: ['github', ...(repoLanguage ? [repoLanguage.toLowerCase().replace(/\s+/g, '-')] : [])],
+            trending_source: 'github-trending-daily',
+          };
+        }).filter(repo => repo.full_name)
+          .sort((a, b) => b.stars_today - a.stars_today || b.stargazers_count - a.stargazers_count)
+          .slice(0, limit);
+
+        const apiHeaders: Record<string, string> = {
+          'User-Agent': 'BulkVideoCreatorApp/2.0',
+          'Accept': 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+        };
+        if (token) apiHeaders.Authorization = `Bearer ${token}`;
+
+        const enriched = await Promise.all(repos.map(async (repo) => {
+          try {
+            const apiRes = await fetch(`https://api.github.com/repos/${repo.full_name}`, { headers: apiHeaders });
+            if (!apiRes.ok) return repo;
+            const apiRepo: any = await apiRes.json();
+            return {
+              ...repo,
+              id: apiRepo.id || repo.id,
+              description: apiRepo.description || repo.description,
+              stargazers_count: apiRepo.stargazers_count ?? repo.stargazers_count,
+              forks_count: apiRepo.forks_count ?? repo.forks_count,
+              language: apiRepo.language || repo.language,
+              topics: Array.isArray(apiRepo.topics) ? apiRepo.topics : repo.topics,
+              updated_at: apiRepo.updated_at || repo.updated_at,
+              pushed_at: apiRepo.pushed_at || repo.pushed_at,
+              owner: apiRepo.owner || repo.owner,
+              tags: ['github', ...(apiRepo.language ? [String(apiRepo.language).toLowerCase().replace(/\s+/g, '-')] : []), ...(Array.isArray(apiRepo.topics) ? apiRepo.topics.slice(0, 5) : [])],
+            };
+          } catch {
+            return repo;
+          }
+        }));
+
+        res.end(JSON.stringify({ success: true, source: 'github-trending-daily', repos: enriched.slice(0, limit) }));
+      } catch (e: any) {
+        res.statusCode = 500;
+        res.end(JSON.stringify({ success: false, error: e.message, repos: [] }));
+      }
+    });
+
     // === Pick Folder via macOS native dialog ===
     server.middlewares.use('/api/pick-folder', (req, res) => {
       if (req.method !== 'POST') { res.statusCode = 405; res.end(''); return; }
@@ -1308,22 +1410,63 @@ const fileSaverPlugin = (): Plugin => ({
             return;
           }
           const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
-          const files = fs.readdirSync(folder).filter(f => IMAGE_EXTS.includes(path.extname(f).toLowerCase()));
-          if (files.length === 0) {
+          const collectImages = (dir: string, depth = 0): string[] => {
+            if (!fs.existsSync(dir) || depth > 2) return [];
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            const direct = entries
+              .filter(entry => entry.isFile() && IMAGE_EXTS.includes(path.extname(entry.name).toLowerCase()))
+              .map(entry => path.join(dir, entry.name));
+            const nested = entries
+              .filter(entry => entry.isDirectory())
+              .flatMap(entry => collectImages(path.join(dir, entry.name), depth + 1));
+            return [...direct, ...nested];
+          };
+          const imagePaths = collectImages(folder);
+          if (imagePaths.length === 0) {
             res.end(JSON.stringify({ success: false, error: 'No images in folder' }));
             return;
           }
-          const randomFile = files[Math.floor(Math.random() * files.length)];
-          const filePath = path.join(folder, randomFile);
+          const filePath = imagePaths[Math.floor(Math.random() * imagePaths.length)];
+          const randomFile = path.basename(filePath);
+          const imageFolder = path.dirname(filePath);
           const ext = path.extname(randomFile).toLowerCase().replace('.', '');
           const mime = ext === 'jpg' ? 'jpeg' : ext;
           const data = fs.readFileSync(filePath).toString('base64');
-          res.end(JSON.stringify({ success: true, dataUrl: `data:image/${mime};base64,${data}`, fileName: randomFile }));
+          const fileUrl = `/api/local-stock-image?folder=${encodeURIComponent(imageFolder)}&file=${encodeURIComponent(randomFile)}`;
+          res.end(JSON.stringify({ success: true, dataUrl: `data:image/${mime};base64,${data}`, fileUrl, fileName: randomFile, folder: imageFolder }));
         } catch (e: any) {
           res.statusCode = 500;
           res.end(JSON.stringify({ success: false, error: e.message }));
         }
       });
+    });
+
+    server.middlewares.use('/api/local-stock-image', (req, res) => {
+      if (req.method !== 'GET') { res.statusCode = 405; res.end(''); return; }
+      try {
+        const params = new URLSearchParams((req.url || '').split('?')[1] || '');
+        const folder = path.resolve(String(params.get('folder') || ''));
+        const file = path.basename(String(params.get('file') || ''));
+        const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
+        if (!folder || !file || !IMAGE_EXTS.includes(path.extname(file).toLowerCase())) {
+          res.statusCode = 400;
+          res.end('Invalid image');
+          return;
+        }
+        const filePath = path.join(folder, file);
+        if (!filePath.startsWith(folder) || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+          res.statusCode = 404;
+          res.end('Not found');
+          return;
+        }
+        const mime = DATA_MIME[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
+        res.setHeader('Content-Type', mime);
+        res.setHeader('Cache-Control', 'no-cache');
+        fs.createReadStream(filePath).pipe(res);
+      } catch (e: any) {
+        res.statusCode = 500;
+        res.end(e.message || 'Local stock image error');
+      }
     });
 
     // === List subfolders with image counts (for footage management) ===

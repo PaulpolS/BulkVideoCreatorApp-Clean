@@ -572,7 +572,10 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
 
   const getGithubTopicLabel = (item: BulkArticleItem) => {
     const tags = item.tags || [];
-    const topicTag = tags.find(tag => normalizeGithubStockKey(tag) !== 'github');
+    const topicTag = tags.find(tag => {
+      const key = normalizeGithubStockKey(tag);
+      return key !== 'github' && !key.includes('top30') && !key.includes('ไม่ต้องใส่keyword');
+    });
     if (topicTag) return topicTag;
 
     const raw = `${item.title || ''} ${item.sourceUrl || ''} ${item.rawArticle || ''}`.toLowerCase();
@@ -609,13 +612,13 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
       if (partial?.path) return partial.path;
     } catch {}
 
-    return `${rootFolder}/${topicLabel}`;
+    return rootFolder;
   };
 
   const pickRandomGithubStockImage = async (item: BulkArticleItem) => {
     const rootFolder = githubStockFolder || localStorage.getItem(GH_FOOTAGE_FOLDER_KEY) || '';
     if (!rootFolder) {
-      return { dataUrl: '', topicLabel: getGithubTopicLabel(item), folder: '', fileName: '', error: 'ยังไม่ได้เลือก Folder คลังรูป GitHub' };
+      return { imageUrl: '', dataUrl: '', topicLabel: getGithubTopicLabel(item), folder: '', fileName: '', error: 'ยังไม่ได้เลือก Folder คลังรูป GitHub' };
     }
     const topicLabel = getGithubTopicLabel(item);
     const folder = await resolveGithubStockFolder(rootFolder, topicLabel);
@@ -627,11 +630,11 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
       }, LOCAL_API_TIMEOUT_MS);
       const data = await res.json();
       if (data.success && data.dataUrl) {
-        return { dataUrl: data.dataUrl as string, topicLabel, folder, fileName: String(data.fileName || ''), error: '' };
+        return { imageUrl: String(data.fileUrl || data.dataUrl || ''), dataUrl: data.dataUrl as string, topicLabel, folder, fileName: String(data.fileName || ''), error: '' };
       }
-      return { dataUrl: '', topicLabel, folder, fileName: '', error: data.error || 'ไม่พบรูปในโฟลเดอร์หัวข้อนี้' };
+      return { imageUrl: '', dataUrl: '', topicLabel, folder, fileName: '', error: data.error || 'ไม่พบรูปในโฟลเดอร์หัวข้อนี้' };
     } catch (e: any) {
-      return { dataUrl: '', topicLabel, folder, fileName: '', error: e?.message || 'สุ่มรูป GitHub ไม่สำเร็จ' };
+      return { imageUrl: '', dataUrl: '', topicLabel, folder, fileName: '', error: e?.message || 'สุ่มรูป GitHub ไม่สำเร็จ' };
     }
   };
 
@@ -2022,6 +2025,7 @@ Return ONLY valid JSON format.`;
   const isSpecialImageStyle = (id: string) => id === YOUTUBE_IMAGE_STYLE_ID || id === AI_NEWS_IMAGE_STYLE_ID || id === GITHUB_IMAGE_STYLE_ID;
   const isOverlayImageStyle = (id: string) => id === YOUTUBE_IMAGE_STYLE_ID || id === AI_NEWS_IMAGE_STYLE_ID || id === GITHUB_IMAGE_STYLE_ID;
   const getDisplayImageUrl = (url: string) => url.startsWith('http') ? `/api/proxy-image?url=${encodeURIComponent(url)}` : url;
+  const isGithubStockUrl = (url: string) => url.startsWith('data:image') || url.startsWith('/api/local-stock-image');
 
   const fetchNewsImages = async (id: string) => {
     const item = bulkItems.find(b => b.id === id);
@@ -2301,8 +2305,12 @@ Return only the final Thai text in the required format.`;
   };
 
   const loadCanvasImage = (src: string) => new Promise<HTMLImageElement>((resolve, reject) => {
+    if (!src) {
+      reject(new Error('ไม่มีรูปต้นแบบสำหรับสร้าง Canvas'));
+      return;
+    }
     const img = new Image();
-    img.crossOrigin = 'anonymous';
+    if (!src.startsWith('data:image')) img.crossOrigin = 'anonymous';
     img.onload = () => resolve(img);
     img.onerror = () => {
       // External URL failed directly — retry through server-side proxy (bypasses CORS)
@@ -2312,8 +2320,13 @@ Return only the final Thai text in the required format.`;
         proxied.onload = () => resolve(proxied);
         proxied.onerror = () => reject(new Error('โหลดรูปไม่สำเร็จ'));
         proxied.src = `/api/proxy-image?url=${encodeURIComponent(src)}`;
+      } else if (src.startsWith('/api/local-stock-image')) {
+        const retry = new Image();
+        retry.onload = () => resolve(retry);
+        retry.onerror = () => reject(new Error('โหลดรูปจากคลัง GitHub ไม่สำเร็จ'));
+        retry.src = `${src}${src.includes('?') ? '&' : '?'}t=${Date.now()}`;
       } else {
-        reject(new Error('โหลดรูปไม่สำเร็จ'));
+        reject(new Error(`โหลดรูปไม่สำเร็จ (${src.slice(0, 80)})`));
       }
     };
     img.src = src;
@@ -2355,6 +2368,73 @@ Return only the final Thai text in the required format.`;
     }
     if (line) lines.push(line);
     return lines.length ? lines : [text];
+  };
+
+  const splitHeadlineForCanvas = (headline: string) => headline
+    .split(/\n+/)
+    .map(line => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+
+  const fitCanvasHeadlineLayout = (
+    ctx: CanvasRenderingContext2D,
+    headline: string,
+    maxWidth: number,
+    maxHeight: number,
+    baseFontSize: number,
+    minFontSize: number,
+    maxVisualLines: number,
+  ) => {
+    const rawLines = splitHeadlineForCanvas(headline);
+    const sourceLines = rawLines.length ? rawLines : [headline.replace(/\s+/g, ' ').trim()];
+    const lineHeightRatio = 1.12;
+    const fontFor = (size: number) => `900 ${size}px Kanit, Prompt, Arial, sans-serif`;
+
+    // First try hard to preserve the AI headline's intended 3-line structure.
+    for (let size = baseFontSize; size >= minFontSize; size -= 2) {
+      ctx.font = fontFor(size);
+      const fitsWidth = sourceLines.every(line => ctx.measureText(line).width <= maxWidth);
+      const fitsHeight = sourceLines.length * size * lineHeightRatio <= maxHeight;
+      if (fitsWidth && fitsHeight && sourceLines.length <= maxVisualLines) {
+        return {
+          lines: sourceLines,
+          fontSize: size,
+          lineHeight: size * lineHeightRatio,
+          truncated: false,
+        };
+      }
+    }
+
+    // If a line is genuinely too long, wrap each source line, then fit the whole block.
+    for (let size = Math.min(baseFontSize, Math.max(minFontSize, baseFontSize - 6)); size >= minFontSize; size -= 2) {
+      ctx.font = fontFor(size);
+      const wrapped = sourceLines.flatMap(line => wrapCanvasText(ctx, line, maxWidth));
+      const fitsHeight = wrapped.length * size * lineHeightRatio <= maxHeight;
+      if (wrapped.length <= maxVisualLines && fitsHeight) {
+        return {
+          lines: wrapped,
+          fontSize: size,
+          lineHeight: size * lineHeightRatio,
+          truncated: false,
+        };
+      }
+    }
+
+    ctx.font = fontFor(minFontSize);
+    const fallback = sourceLines.flatMap(line => wrapCanvasText(ctx, line, maxWidth));
+    const allowedLines = Math.max(1, Math.min(maxVisualLines, Math.floor(maxHeight / (minFontSize * lineHeightRatio))));
+    const lines = fallback.slice(0, allowedLines);
+    if (fallback.length > allowedLines && lines.length) {
+      const last = lines[lines.length - 1];
+      let clipped = last;
+      while (clipped.length > 1 && ctx.measureText(`${clipped}...`).width > maxWidth) clipped = clipped.slice(0, -1);
+      lines[lines.length - 1] = `${clipped}...`;
+    }
+    return {
+      lines,
+      fontSize: minFontSize,
+      lineHeight: minFontSize * lineHeightRatio,
+      truncated: fallback.length > allowedLines,
+    };
   };
 
   const drawRoundRect = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) => {
@@ -2509,12 +2589,13 @@ Return only the final Thai text in the required format.`;
     const palette = YOUTUBE_FONT_PALETTES.find(p => p.id === task.localYoutubeOverlay?.fontPaletteId) || YOUTUBE_FONT_PALETTES[0];
     drawCoverImage(ctx, base, w, h);
     const overlayKind = task.localYoutubeOverlay?.overlayKind || 'youtube';
+    const isGithubOverlay = overlayKind === 'github';
 
     const isPortrait = task.imageRatio === '9:16';
     const isLandscape = task.imageRatio === '16:9';
 
     // Gradient — deeper on landscape (shorter image needs more contrast coverage)
-    const gradStart = isLandscape ? h * 0.28 : isPortrait ? h * 0.48 : h * 0.40;
+    const gradStart = isLandscape ? h * 0.28 : isPortrait ? h * 0.45 : isGithubOverlay ? h * 0.34 : h * 0.40;
     const bottomGradient = ctx.createLinearGradient(0, gradStart, 0, h);
     bottomGradient.addColorStop(0, 'rgba(0,0,0,0)');
     bottomGradient.addColorStop(0.5, 'rgba(0,0,0,0.60)');
@@ -2522,36 +2603,43 @@ Return only the final Thai text in the required format.`;
     ctx.fillStyle = bottomGradient;
     ctx.fillRect(0, 0, w, h);
 
-    const pad = Math.max(20, w * 0.04);
+    const pad = Math.max(22, w * (isGithubOverlay ? 0.052 : 0.04));
     const headlineMaxW = w - pad * 2;
 
     // Per-ratio: max lines and initial font size
-    const maxLines = isPortrait ? 5 : isLandscape ? 3 : 4;
+    const maxLines = isPortrait ? 7 : isLandscape ? 4 : isGithubOverlay ? 6 : 5;
     // Max height for text block (reserve bottom zone)
-    const maxTextZoneH = isLandscape ? h * 0.50 : isPortrait ? h * 0.40 : h * 0.42;
+    const maxTextZoneH = isLandscape ? h * 0.50 : isPortrait ? h * 0.42 : isGithubOverlay ? h * 0.43 : h * 0.42;
 
     let fontSize = isPortrait
       ? Math.max(36, Math.floor(w * 0.095))                              // 9:16 → ~102px
       : isLandscape
       ? Math.max(28, Math.floor(Math.min(w * 0.058, h * 0.105)))         // 16:9 → ~74px
-      : Math.max(36, Math.floor(w * 0.072));                             // 1:1  → ~77px
+      : Math.max(36, Math.floor(w * (isGithubOverlay ? 0.065 : 0.072))); // 1:1
 
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
+    const layout = fitCanvasHeadlineLayout(ctx, headline, headlineMaxW, maxTextZoneH, fontSize, isGithubOverlay ? 34 : 28, maxLines);
+    fontSize = layout.fontSize;
+    const lines = layout.lines;
     ctx.font = `900 ${fontSize}px Kanit, Prompt, Arial, sans-serif`;
-    let lines = wrapCanvasText(ctx, headline, headlineMaxW).slice(0, maxLines);
-
-    // Shrink font until the whole text block fits inside maxTextZoneH
-    while (lines.length * fontSize * 1.14 > maxTextZoneH && fontSize > 22) {
-      fontSize -= 2;
-      ctx.font = `900 ${fontSize}px Kanit, Prompt, Arial, sans-serif`;
-      lines = wrapCanvasText(ctx, headline, headlineMaxW).slice(0, maxLines);
-    }
 
     // Anchor text to bottom, but never let it start above h * 0.52 (keeps image visible)
-    const textBlockH = lines.length * fontSize * 1.14;
-    const minY = isLandscape ? h * 0.38 : h * 0.52;
+    const textBlockH = lines.length * layout.lineHeight;
+    const minY = isLandscape ? h * 0.38 : isGithubOverlay ? h * 0.50 : h * 0.52;
     let y = Math.max(minY, h - pad - textBlockH);
+    const panelPad = Math.max(16, fontSize * 0.24);
+    if (isGithubOverlay) {
+      const panelY = Math.max(0, y - panelPad * 0.7);
+      const panelH = Math.min(h - panelY, textBlockH + panelPad * 1.65);
+      const panelGrad = ctx.createLinearGradient(0, panelY, 0, panelY + panelH);
+      panelGrad.addColorStop(0, 'rgba(0,0,0,0.24)');
+      panelGrad.addColorStop(0.34, 'rgba(0,0,0,0.68)');
+      panelGrad.addColorStop(1, 'rgba(0,0,0,0.90)');
+      ctx.fillStyle = panelGrad;
+      ctx.fillRect(0, panelY, w, panelH);
+      y = Math.min(y, h - pad - textBlockH);
+    }
 
     lines.forEach((line, index) => {
       drawHighlightedTextLine(
@@ -2565,7 +2653,7 @@ Return only the final Thai text in the required format.`;
         task.localYoutubeOverlay?.markedKeywords || [],
         index,
       );
-      y += fontSize * 1.14;
+      y += layout.lineHeight;
     });
 
     if (overlayKind === 'ai-news') {
@@ -2843,25 +2931,42 @@ Return only the final Thai text in the required format.`;
       }
 
       const taskId = Date.now().toString() + Math.random().toString(36).slice(2, 6);
-      globalTaskStore.addTask({ id: `aipage_${taskId}`, title: `AI: ${item.selectedHeadline.substring(0, 25)}...`, progress: 'เข้าคิวงานเรียบร้อย...', status: 'running' });
 
       let useImg = isOverlayStyle ? true : item.useAttachedImage && !!item.selectedImageUrl;
       let refUrl = useImg ? item.selectedImageUrl : referenceImageUrl;
       if (isGithubImageStyle) {
-        const picked = await pickRandomGithubStockImage(item);
-        if (picked.dataUrl) {
-          refUrl = picked.dataUrl;
+        const alreadyPickedStockImage = item.selectedImageUrl && isGithubStockUrl(item.selectedImageUrl);
+        if (alreadyPickedStockImage) {
+          refUrl = item.selectedImageUrl;
           useImg = true;
+        } else {
+          const picked = await pickRandomGithubStockImage(item);
+          if (picked.imageUrl) {
+            refUrl = picked.imageUrl;
+            useImg = true;
+            updateBulkItem(itemId, {
+              selectedImageUrl: picked.imageUrl,
+              images: [picked.imageUrl, ...(item.images || []).filter(img => img !== picked.imageUrl)],
+              smartSelectedImageReason: `สุ่มจากคลัง GitHub หัวข้อ ${picked.topicLabel}${picked.fileName ? `: ${picked.fileName}` : ''}`,
+              smartConfigNote: `Github (สุ่มรูปจากคลัง) → ${picked.topicLabel}`,
+            });
+          } else if (picked.error) {
+            console.warn(`[AIPage] GitHub stock image not found: ${picked.error}`);
+          }
+        }
+        if (useImg && refUrl) {
           updateBulkItem(itemId, {
-            selectedImageUrl: picked.dataUrl,
-            images: [picked.dataUrl, ...(item.images || []).filter(img => img !== picked.dataUrl)],
-            smartSelectedImageReason: `สุ่มจากคลัง GitHub หัวข้อ ${picked.topicLabel}${picked.fileName ? `: ${picked.fileName}` : ''}`,
-            smartConfigNote: `Github (สุ่มรูปจากคลัง) → ${picked.topicLabel}`,
+            selectedImageUrl: refUrl,
+            useAttachedImage: true,
+            decorateOriginalPhoto: true,
+            cardImagePromptStyleId: GITHUB_IMAGE_STYLE_ID,
           });
-        } else if (picked.error) {
-          console.warn(`[AIPage] GitHub stock image not found: ${picked.error}`);
         }
       }
+      if (isLocalCanvasOnly && (!useImg || !refUrl)) {
+        throw new Error('ไม่มีรูปในคลัง GitHub สำหรับสร้าง Canvas — กด “เลือกคลังรูป GitHub” แล้วใส่รูปไว้ในโฟลเดอร์แม่หรือ subfolder เช่น GitHub/Claude Code');
+      }
+      globalTaskStore.addTask({ id: `aipage_${taskId}`, title: `AI: ${item.selectedHeadline.substring(0, 25)}...`, progress: 'เข้าคิวงานเรียบร้อย...', status: 'running' });
       const newTask: GenerationTask = {
         id: taskId, status: 'pending', log: ['เข้าคิวจากกล่องบทความ...'],
         rawArticle: item.generatedArticle,
@@ -3333,10 +3438,10 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
           patch.decorateOriginalPhoto = true;
           patch.cardImagePromptStyleId = GITHUB_IMAGE_STYLE_ID;
           patch.aiNewsBadgeStyleId = GITHUB_BADGE_STYLES[0].id;
-        if (picked.dataUrl) {
-          allImages = [picked.dataUrl, ...allImages.filter(img => img !== picked.dataUrl)];
+        if (picked.imageUrl) {
+          allImages = [picked.imageUrl, ...allImages.filter(img => img !== picked.imageUrl)];
           patch.images = allImages;
-          patch.selectedImageUrl = picked.dataUrl;
+          patch.selectedImageUrl = picked.imageUrl;
           patch.smartSelectedImageIndex = 0;
           patch.smartSelectedImageReason = `สุ่มจากคลัง GitHub หัวข้อ ${picked.topicLabel}${picked.fileName ? `: ${picked.fileName}` : ''}`;
           patch.smartConfigNote = `Smart Setup (GitHub) → ใช้สไตล์ Github สุ่มรูปจากคลังหัวข้อ ${picked.topicLabel}`;
@@ -4808,12 +4913,12 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                                       className="mt-0.5 flex-shrink-0 accent-amber-500"
                                     />
                                     {item.selectedHeadline !== h && (
-                                      <span className="text-xs text-gray-200 whitespace-pre-line leading-relaxed">{h}</span>
+                                      <span className="min-w-0 text-xs text-gray-200 whitespace-pre-line break-words leading-relaxed">{h}</span>
                                     )}
                                   </label>
                                   {item.selectedHeadline === h && (
                                     <textarea
-                                      className="w-full text-xs bg-black/40 text-amber-100 p-2 rounded border border-amber-500/30 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 min-h-[60px] ml-6 resize-none"
+                                      className="w-full text-xs bg-black/40 text-amber-100 p-2 rounded border border-amber-500/30 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 min-h-[60px] ml-6 resize-none break-words"
                                       style={{ width: 'calc(100% - 1.5rem)' }}
                                       value={h}
                                       onChange={(e) => {
