@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type TabId = 'home' | 'singleclip' | 'bulk' | 'financial' | 'stockclip' | 'news' | 'articlestock' | 'pagestock' | 'assets' | 'avatar' | 'clone' | 'automator' | 'lazada' | 'horoscope' | 'tracking' | 'radar' | 'cleaner' | 'scanner' | 'prompt' | 'autoeditor' | 'course' | 'canvas' | 'aipage' | 'fbtoken';
+export type TabId = 'home' | 'singleclip' | 'bulk' | 'financial' | 'stockclip' | 'news' | 'articlestock' | 'pagestock' | 'topgainers' | 'assets' | 'avatar' | 'clone' | 'automator' | 'lazada' | 'horoscope' | 'tracking' | 'radar' | 'cleaner' | 'scanner' | 'prompt' | 'autoeditor' | 'course' | 'canvas' | 'aipage' | 'fbtoken' | 'storyarchitect';
 
 interface NavGroup {
   label: string;
@@ -34,8 +34,10 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'avatar', icon: '👨‍🎨', label: 'อวาตาร์ PNGTuber', color: '#ec4899' },
       { id: 'horoscope', icon: '🔮', label: 'ดวงรายวัน', color: '#a855f7' },
       { id: 'prompt', icon: '📝', label: 'Video Prompt Generator', color: '#f43f5e' },
+      { id: 'storyarchitect', icon: '📚', label: 'AI Storyboard', color: '#4f46e5', featured: true },
       { id: 'aipage', icon: '🤖', label: 'สร้างContentลงเพจ', color: '#8b5cf6', featured: true },
       { id: 'pagestock', icon: '📮', label: 'ทำStockลงเพจ', color: '#f59e0b', featured: true },
+      { id: 'topgainers', icon: '📈', label: 'Top Gainers', color: '#22c55e', featured: true },
       { id: 'canvas', icon: '🎨', label: 'Canvas Editor', color: '#f472b6' },
       { id: 'course', icon: '🎓', label: 'สร้างคอร์สออนไลน์', color: '#10b981' },
     ],

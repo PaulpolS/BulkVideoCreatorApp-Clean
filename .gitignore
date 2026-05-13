@@ -1,5 +1,6 @@
 # Dependencies / builds
 node_modules/
+.venv*/
 dist/
 dist-ssr/
 *.local
@@ -12,6 +13,8 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+__pycache__/
+*.pyc
 
 # Runtime/generated app data (keep folders, never commit contents)
 public/app_data/*
@@ -38,6 +41,8 @@ videofootage/*
 *_export.csv
 page_stock_results_*.json
 page_stock_results_*.csv
+temp/
+content_factory_post.csv
 
 # Secrets / local API profiles
 public/app_data/api_profiles.json

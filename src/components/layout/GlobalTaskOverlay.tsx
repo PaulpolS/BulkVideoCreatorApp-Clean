@@ -5,8 +5,9 @@ export function GlobalTaskOverlay() {
   const { tasks, removeTask, clearFinished } = useBackgroundTasks();
   const [expanded, setExpanded] = React.useState(true);
 
-  const activeCount = tasks.filter(t => t.status === 'queued' || t.status === 'running').length;
-  const latest = [...tasks].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+  const safeTasks = Array.isArray(tasks) ? tasks : [];
+  const activeCount = safeTasks.filter(t => t.status === 'queued' || t.status === 'running').length;
+  const latest = [...safeTasks].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
 
   return (
     <div
@@ -42,60 +43,67 @@ export function GlobalTaskOverlay() {
         </button>
       </div>
 
-      {expanded && tasks.length > 0 && (
+      {expanded && safeTasks.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-2 px-4 pb-3 max-h-64 overflow-y-auto custom-scrollbar">
-          {tasks.map(task => (
-            <div
-              key={task.id}
-              className="rounded-lg border p-3 min-w-0"
-              style={{
-                backgroundColor: 'var(--bg-main)',
-                borderColor:
-                  task.status === 'error' ? '#ef4444' :
-                  task.status === 'completed' ? '#10b981' :
-                  task.status === 'cancelled' ? '#f59e0b' :
-                  task.status === 'running' ? '#3b82f6' : 'var(--border-color)',
-              }}
-            >
-              <div className="flex items-start gap-2">
-                <span
-                  className="mt-1 w-2 h-2 rounded-full flex-shrink-0"
-                  style={{
-                    backgroundColor:
-                      task.status === 'running' ? '#3b82f6' :
-                      task.status === 'queued' ? '#a855f7' :
-                      task.status === 'completed' ? '#10b981' :
-                      task.status === 'cancelled' ? '#f59e0b' : '#ef4444',
-                    animation: task.status === 'running' ? 'pulse 1.3s infinite' : undefined,
-                  }}
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <h4 className="font-bold text-xs truncate" style={{ color: 'var(--text-main)' }}>{task.title}</h4>
-                    <span className="text-[9px] uppercase font-black" style={{ color: 'var(--text-muted, #888)' }}>{task.status}</span>
-                  </div>
-                  <p className="text-[11px] mt-1 truncate" style={{ color: task.status === 'error' ? '#ef4444' : 'var(--text-muted, #888)' }}>{task.progress}</p>
-                </div>
-                <button
-                  onClick={() => removeTask(task.id)}
-                  className="w-6 h-6 rounded hover:bg-red-500/10 text-sm flex-shrink-0"
-                  style={{ color: task.status === 'queued' || task.status === 'running' ? '#ef4444' : 'var(--text-muted, #888)' }}
-                  title={task.status === 'queued' ? 'ลบคิว' : task.status === 'running' ? 'ขอยกเลิกงาน' : 'ปิด'}
-                >
-                  ×
-                </button>
-              </div>
-              {task.logs && task.logs.length > 1 && (
-                <div className="mt-2 pt-2 border-t max-h-40 overflow-y-auto custom-scrollbar space-y-1" style={{ borderColor: 'var(--border-color)' }}>
-                  {task.logs.slice(-12).map((log, idx) => (
-                    <div key={idx} className="text-[10px] leading-snug" style={{ color: 'var(--text-muted, #888)' }}>
-                      {log}
+          {safeTasks.map(task => {
+            const logs = Array.isArray(task.logs)
+              ? task.logs
+              : task.progress
+                ? [task.progress]
+                : [];
+            return (
+              <div
+                key={task.id}
+                className="rounded-lg border p-3 min-w-0"
+                style={{
+                  backgroundColor: 'var(--bg-main)',
+                  borderColor:
+                    task.status === 'error' ? '#ef4444' :
+                    task.status === 'completed' ? '#10b981' :
+                    task.status === 'cancelled' ? '#f59e0b' :
+                    task.status === 'running' ? '#3b82f6' : 'var(--border-color)',
+                }}
+              >
+                <div className="flex items-start gap-2">
+                  <span
+                    className="mt-1 w-2 h-2 rounded-full flex-shrink-0"
+                    style={{
+                      backgroundColor:
+                        task.status === 'running' ? '#3b82f6' :
+                        task.status === 'queued' ? '#a855f7' :
+                        task.status === 'completed' ? '#10b981' :
+                        task.status === 'cancelled' ? '#f59e0b' : '#ef4444',
+                      animation: task.status === 'running' ? 'pulse 1.3s infinite' : undefined,
+                    }}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-bold text-xs truncate" style={{ color: 'var(--text-main)' }}>{task.title || 'Background task'}</h4>
+                      <span className="text-[9px] uppercase font-black" style={{ color: 'var(--text-muted, #888)' }}>{task.status || 'running'}</span>
                     </div>
-                  ))}
+                    <p className="text-[11px] mt-1 truncate" style={{ color: task.status === 'error' ? '#ef4444' : 'var(--text-muted, #888)' }}>{task.progress || 'กำลังทำงาน...'}</p>
+                  </div>
+                  <button
+                    onClick={() => removeTask(task.id)}
+                    className="w-6 h-6 rounded hover:bg-red-500/10 text-sm flex-shrink-0"
+                    style={{ color: task.status === 'queued' || task.status === 'running' ? '#ef4444' : 'var(--text-muted, #888)' }}
+                    title={task.status === 'queued' ? 'ลบคิว' : task.status === 'running' ? 'ขอยกเลิกงาน' : 'ปิด'}
+                  >
+                    ×
+                  </button>
                 </div>
-              )}
-            </div>
-          ))}
+                {logs.length > 1 && (
+                  <div className="mt-2 pt-2 border-t max-h-40 overflow-y-auto custom-scrollbar space-y-1" style={{ borderColor: 'var(--border-color)' }}>
+                    {logs.slice(-12).map((log, idx) => (
+                      <div key={idx} className="text-[10px] leading-snug" style={{ color: 'var(--text-muted, #888)' }}>
+                        {log}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

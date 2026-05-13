@@ -2555,6 +2555,233 @@ const fileSaverPlugin = (): Plugin => ({
       });
     });
 
+    // === Top Gainers Content Factory — run Python workflow and surface results in UI ===
+    const TOP_GAINERS_CONFIG_CSV = path.resolve(__dirname, 'ข้อมูล/top_gainers_master_config.csv');
+    const TOP_GAINERS_TEMP_DIR = path.resolve(__dirname, 'temp');
+
+    const csvCell = (value: any) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+    const parseCsvRows = (text: string): string[][] => {
+      const rows: string[][] = [];
+      let row: string[] = [];
+      let cell = '';
+      let quoted = false;
+      for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        const next = text[i + 1];
+        if (quoted) {
+          if (ch === '"' && next === '"') { cell += '"'; i++; continue; }
+          if (ch === '"') { quoted = false; continue; }
+          cell += ch;
+          continue;
+        }
+        if (ch === '"') { quoted = true; continue; }
+        if (ch === ',') { row.push(cell); cell = ''; continue; }
+        if (ch === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; continue; }
+        if (ch === '\r') continue;
+        cell += ch;
+      }
+      if (cell || row.length) { row.push(cell); rows.push(row); }
+      return rows;
+    };
+
+    const writeTopGainersConfigCsv = (p2: string) => {
+      const dir = path.dirname(TOP_GAINERS_CONFIG_CSV);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const header = new Array(16).fill('').map(csvCell).join(',');
+      const second = new Array(16).fill('');
+      second[15] = p2;
+      fs.writeFileSync(TOP_GAINERS_CONFIG_CSV, `${header}\n${second.map(csvCell).join(',')}\n`, 'utf-8');
+    };
+
+    const readTopGainersConfigP2 = () => {
+      try {
+        if (!fs.existsSync(TOP_GAINERS_CONFIG_CSV)) return 'sector: Technology';
+        const rows = parseCsvRows(fs.readFileSync(TOP_GAINERS_CONFIG_CSV, 'utf-8').replace(/^\uFEFF/, ''));
+        return rows?.[1]?.[15] || 'sector: Technology';
+      } catch {
+        return 'sector: Technology';
+      }
+    };
+
+    const findLatestTopGainersDate = () => {
+      if (!fs.existsSync(TOP_GAINERS_TEMP_DIR)) return '';
+      return fs.readdirSync(TOP_GAINERS_TEMP_DIR, { withFileTypes: true })
+        .filter(entry => entry.isDirectory() && /^\d{4}-\d{2}-\d{2}$/.test(entry.name))
+        .map(entry => entry.name)
+        .sort()
+        .pop() || '';
+    };
+
+    const readTopGainersResults = (requestedDate?: string) => {
+      const runDate = requestedDate || findLatestTopGainersDate();
+      if (!runDate) return { date: '', outputDir: '', csvPath: '', configP2: readTopGainersConfigP2(), rows: [] as any[] };
+      const outputDir = path.join(TOP_GAINERS_TEMP_DIR, runDate);
+      const csvPath = path.join(outputDir, 'content_factory_post.csv');
+      if (!fs.existsSync(csvPath)) return { date: runDate, outputDir, csvPath: '', configP2: readTopGainersConfigP2(), rows: [] as any[] };
+      const parsed = parseCsvRows(fs.readFileSync(csvPath, 'utf-8').replace(/^\uFEFF/, ''));
+      const headers = parsed[0] || [];
+      const rows = parsed.slice(1).filter(r => r.some(Boolean)).map((values) => {
+        const item: any = {};
+        headers.forEach((header, i) => { item[header] = values[i] || ''; });
+        const symbol = String(item.Symbol || '').trim();
+        const imagePath = symbol ? path.join(outputDir, `${runDate}_${symbol}.png`) : '';
+        const relImagePath = imagePath && fs.existsSync(imagePath) ? path.relative(__dirname, imagePath) : '';
+        return {
+          date: item.Date || runDate,
+          symbol,
+          caption: item.Caption || '',
+          imageUrl: item.Image_URL || '',
+          configRef: item.Config_Ref || '',
+          localImagePath: relImagePath,
+          previewUrl: relImagePath ? `/api/top-gainers-image?file=${encodeURIComponent(relImagePath)}` : '',
+        };
+      });
+      return { date: runDate, outputDir, csvPath, configP2: readTopGainersConfigP2(), rows };
+    };
+
+    server.middlewares.use('/api/top-gainers-results', (req, res) => {
+      if (req.method !== 'GET') { res.statusCode = 405; res.end('Method not allowed'); return; }
+      try {
+        const params = new URLSearchParams(req.url?.split('?')[1] || '');
+        const data = readTopGainersResults(params.get('date') || undefined);
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ success: true, ...data }));
+      } catch (e: any) {
+        res.statusCode = 500;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ success: false, error: e.message }));
+      }
+    });
+
+    server.middlewares.use('/api/top-gainers-config', (req, res) => {
+      if (req.method === 'GET') {
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ success: true, p2: readTopGainersConfigP2(), path: TOP_GAINERS_CONFIG_CSV }));
+        return;
+      }
+      if (req.method !== 'POST') { res.statusCode = 405; res.end('Method not allowed'); return; }
+      let body = '';
+      req.on('data', (chunk: any) => { body += chunk.toString(); });
+      req.on('end', () => {
+        try {
+          const parsed = JSON.parse(body || '{}');
+          writeTopGainersConfigCsv(String(parsed.p2 || 'sector: Technology'));
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ success: true, p2: readTopGainersConfigP2(), path: TOP_GAINERS_CONFIG_CSV }));
+        } catch (e: any) {
+          res.statusCode = 500;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ success: false, error: e.message }));
+        }
+      });
+    });
+
+    server.middlewares.use('/api/top-gainers-image', (req, res) => {
+      if (req.method !== 'GET') { res.statusCode = 405; res.end('Method not allowed'); return; }
+      try {
+        const params = new URLSearchParams(req.url?.split('?')[1] || '');
+        const file = String(params.get('file') || '');
+        const filePath = path.resolve(__dirname, file);
+        if (!filePath.startsWith(TOP_GAINERS_TEMP_DIR) || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+          res.statusCode = 404;
+          res.end('Not found');
+          return;
+        }
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Cache-Control', 'no-cache');
+        fs.createReadStream(filePath).pipe(res);
+      } catch (e: any) {
+        res.statusCode = 500;
+        res.end(e.message || 'Image error');
+      }
+    });
+
+    server.middlewares.use('/api/top-gainers-run', (req, res) => {
+      if (req.method !== 'POST') { res.statusCode = 405; res.end('Method not allowed'); return; }
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+
+      const send = (obj: object) => {
+        if (!res.writableEnded) {
+          try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch {}
+        }
+      };
+
+      let body = '';
+      req.on('data', (chunk: any) => { body += chunk.toString(); });
+      req.on('end', () => {
+        try {
+          const parsed = JSON.parse(body || '{}');
+          const p2 = String(parsed.p2 || 'sector: Technology').trim() || 'sector: Technology';
+          const limit = Math.max(1, Math.min(20, Number(parsed.limit || 5)));
+          const scanCount = Math.max(limit, Math.min(500, Number(parsed.scanCount || 150)));
+          const dropboxFolder = String(parsed.dropboxFolder || '/Stock_Gainers_Content').trim() || '/Stock_Gainers_Content';
+          const skipDropbox = Boolean(parsed.skipDropbox);
+          writeTopGainersConfigCsv(p2);
+
+          const py = fs.existsSync(path.resolve(__dirname, '.venv-top-gainers/bin/python'))
+            ? path.resolve(__dirname, '.venv-top-gainers/bin/python')
+            : 'python3';
+          const script = path.resolve(__dirname, 'scripts/top_gainers_content_factory.py');
+          const mplDir = '/private/tmp/top_gainers_mpl';
+          if (!fs.existsSync(mplDir)) fs.mkdirSync(mplDir, { recursive: true });
+          const args = [
+            script,
+            '--spreadsheet', TOP_GAINERS_CONFIG_CSV,
+            '--limit', String(limit),
+            '--scan-count', String(scanCount),
+            '--dropbox-folder', dropboxFolder,
+          ];
+          if (skipDropbox) args.push('--skip-dropbox');
+
+          send({ type: 'log', text: `ใช้ P2: ${p2}` });
+          send({ type: 'log', text: `เริ่มสร้าง ${limit} หุ้น → ${dropboxFolder}${skipDropbox ? ' (ไม่อัป Dropbox)' : ''}` });
+          send({ type: 'log', text: `สแกน Yahoo candidates สูงสุด ${scanCount} ตัว` });
+
+          const { spawn } = require('child_process');
+          const env = {
+            ...process.env,
+            MPLCONFIGDIR: mplDir,
+            PATH: `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${process.env.PATH || ''}`,
+          };
+          const proc = spawn(py, args, { cwd: __dirname, stdio: ['ignore', 'pipe', 'pipe'], env });
+          let done = false;
+          const onChunk = (data: Buffer) => {
+            data.toString().split('\n').forEach((line) => {
+              if (line.trim()) send({ type: 'log', text: line.trim() });
+            });
+          };
+          proc.stdout.on('data', onChunk);
+          proc.stderr.on('data', onChunk);
+          proc.on('close', (code: number | null) => {
+            if (done) return;
+            done = true;
+            if (code === 0) {
+              send({ type: 'done', result: readTopGainersResults() });
+            } else {
+              send({ type: 'error', text: `Top Gainers process exited with code ${code ?? 'unknown'}` });
+            }
+            if (!res.writableEnded) res.end();
+          });
+          proc.on('error', (err: Error) => {
+            if (done) return;
+            done = true;
+            send({ type: 'error', text: err.message });
+            if (!res.writableEnded) res.end();
+          });
+          res.on('close', () => {
+            if (!done) {
+              try { proc.kill('SIGTERM'); } catch {}
+            }
+          });
+        } catch (e: any) {
+          send({ type: 'error', text: e.message });
+          if (!res.writableEnded) res.end();
+        }
+      });
+    });
+
     // === Article Cache — remember generated content per article ===
     server.middlewares.use('/api/article-cache', (req, res) => {
       const cacheFile = path.resolve(__dirname, 'public/app_data/article_cache.json');

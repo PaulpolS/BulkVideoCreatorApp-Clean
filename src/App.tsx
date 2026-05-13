@@ -30,12 +30,15 @@ import { CanvasEditorTab } from './components/canvas/CanvasEditorTab';
 import { ArticleStockTab } from './components/stock/ArticleStockTab';
 import { PageStockTab } from './components/stock/PageStockTab';
 import { StockClipTab } from './components/stock/StockClipTab';
+import { TopGainersFactoryTab } from './components/stock/TopGainersFactoryTab';
 import { FbTokenTab } from './components/fbtoken/FbTokenTab';
+import { StoryArchitectTab } from './components/StoryArchitectTab';
 
 const VALID_TAB_IDS: TabId[] = [
   'home', 'singleclip', 'bulk', 'financial', 'stockclip', 'news', 'articlestock', 'assets',
   'avatar', 'clone', 'automator', 'lazada', 'horoscope', 'tracking', 'radar',
-  'cleaner', 'scanner', 'prompt', 'autoeditor', 'course', 'canvas', 'aipage', 'pagestock', 'fbtoken',
+  'cleaner', 'scanner', 'prompt', 'autoeditor', 'course', 'canvas', 'aipage', 'pagestock', 'topgainers', 'fbtoken',
+  'storyarchitect',
 ];
 
 function App() {
@@ -154,7 +157,9 @@ function App() {
     aipage: '🤖 สร้างContentลงเพจ',
     articlestock: '📦 คลังบทความ',
     pagestock: '📮 ทำStockลงเพจ',
+    topgainers: '📈 Top Gainers Factory',
     fbtoken: '🔑 เฟสบุ๊ค Token Manager',
+    storyarchitect: '📚 AI Storyboard Architect',
   };
 
   return (
@@ -325,9 +330,19 @@ function App() {
               <PageStockTab />
             </div>
           )}
+          {visitedTabs.has('topgainers') && (
+            <div className={activeTab !== 'topgainers' ? 'hidden' : ''}>
+              <TopGainersFactoryTab />
+            </div>
+          )}
           {visitedTabs.has('fbtoken') && (
             <div className={activeTab !== 'fbtoken' ? 'hidden' : ''}>
               <FbTokenTab />
+            </div>
+          )}
+          {visitedTabs.has('storyarchitect') && (
+            <div className={activeTab !== 'storyarchitect' ? 'hidden' : ''}>
+              <StoryArchitectTab />
             </div>
           )}
         </main>
