@@ -271,7 +271,14 @@ export async function getOpenRouterKeyCandidates(): Promise<{ key: string; label
   const candidates: { key: string; label: string }[] = [];
   const addCandidate = (key: unknown, label: string) => {
     const clean = String(key ?? '').trim();
-    if (!clean || candidates.some(c => c.key === clean)) return;
+    if (
+      !clean ||
+      clean === 'undefined' ||
+      clean === 'null' ||
+      clean === '[object Object]' ||
+      !/^sk-or-/i.test(clean) ||
+      candidates.some(c => c.key === clean)
+    ) return;
     candidates.push({ key: clean, label });
   };
 

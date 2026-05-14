@@ -43,6 +43,14 @@ const KEYWORDS = [
   { label: 'OpenAI / GPT Tools', query: 'topic:openai', emoji: '💬' },
 ];
 
+function normalizeKeywordQueries(queries: string[]): string[] {
+  const allowed = new Set(KEYWORDS.map(k => k.query));
+  const unique = Array.from(new Set(queries.filter(q => allowed.has(q))));
+  if (unique.length === 0) return [KEYWORDS[0].query];
+  if (unique.length > 1 && unique.includes('')) return unique.filter(Boolean);
+  return unique;
+}
+
 type GithubDiscoveryModeId = 'trending' | 'fresh' | 'rising' | 'active' | 'helpWanted';
 
 const DISCOVERY_MODES: Array<{
@@ -205,8 +213,11 @@ const STOCK_VISUAL_TONES = [
 ];
 
 export function GithubFinderTab({ onSendToAIPage }: GithubFinderProps) {
-  const [selectedQuery, setSelectedQuery] = useState(KEYWORDS[0].query);
-  const selectedKw = KEYWORDS.find(k => k.query === selectedQuery);
+  const [selectedQueries, setSelectedQueries] = useState<string[]>([KEYWORDS[0].query]);
+  const selectedKeywords = normalizeKeywordQueries(selectedQueries)
+    .map(query => KEYWORDS.find(k => k.query === query))
+    .filter((k): k is typeof KEYWORDS[number] => Boolean(k));
+  const selectedKw = selectedKeywords[0] || KEYWORDS[0];
   const [selectedDiscoveryMode, setSelectedDiscoveryMode] = useState<GithubDiscoveryModeId>('trending');
   const [count, setCount] = useState('30');
   const topCount = Math.max(1, Math.min(GITHUB_TRENDS_MAX_LIMIT, parseInt(count || '30') || 30));
@@ -258,6 +269,17 @@ export function GithubFinderTab({ onSendToAIPage }: GithubFinderProps) {
     if (token) localStorage.setItem('github_api_token', token);
     else localStorage.removeItem('github_api_token');
   }, [githubToken]);
+
+  useEffect(() => {
+    const handleQuickKeyUpdate = (event: Event) => {
+      const detail = (event as CustomEvent<{ kind?: string; value?: string }>).detail;
+      if (detail?.kind === 'github') {
+        setGithubToken(detail.value || '');
+      }
+    };
+    window.addEventListener('api-quick-key-updated', handleQuickKeyUpdate);
+    return () => window.removeEventListener('api-quick-key-updated', handleQuickKeyUpdate);
+  }, []);
 
   const pickFootageFolder = async () => {
     try {
@@ -474,7 +496,22 @@ ${tonePlan}
     return fetchGithubReadme(fullName, githubToken.trim() || undefined);
   };
 
-  const buildDiscoveryOptions = (modeId: GithubDiscoveryModeId, topicQuery: string) => {
+  const toggleKeywordQuery = (query: string) => {
+    setSelectedQueries(prev => {
+      if (query === '') return [''];
+      const withoutBlank = prev.filter(q => q !== '');
+      const next = withoutBlank.includes(query)
+        ? withoutBlank.filter(q => q !== query)
+        : [...withoutBlank, query];
+      return normalizeKeywordQueries(next);
+    });
+  };
+
+  const setPrimaryKeywordQuery = (query: string) => {
+    setSelectedQueries(prev => normalizeKeywordQueries([query, ...prev.filter(q => q !== query)]));
+  };
+
+  const buildDiscoveryOptions = (modeId: GithubDiscoveryModeId, topicQuery: string, topicLabel?: string) => {
     const topic = topicQuery.trim();
     const withTopic = (base: string) => `${topic ? `${topic} ` : ''}${base}`.trim();
     const mode = DISCOVERY_MODES.find(m => m.id === modeId) || DISCOVERY_MODES[0];
@@ -486,7 +523,7 @@ ${tonePlan}
           ? { query: topic, days: 1, sort: 'stars' as const }
           : { query: '', days: 1 },
         note: topic
-          ? `โหมด ${mode.label}: ค้นในหัวข้อ ${selectedKw?.label || topic} จาก repo ที่ขยับใน 1 วัน`
+          ? `โหมด ${mode.label}: ค้นในหัวข้อ ${topicLabel || topic} จาก repo ที่ขยับใน 1 วัน`
           : `โหมด ${mode.label}: ดึงจาก GitHub Trending รายวันก่อน แล้วเติม repo ใหม่ให้ครบจำนวนถ้าหน้า Trending มีน้อย`,
       };
     }
@@ -547,29 +584,61 @@ ${tonePlan}
   };
 
   // ─── Search ─────────────────────────────────────────────────────────────────
-  const handleSearch = async (override?: { query?: string; count?: string; mode?: GithubDiscoveryModeId }) => {
-    const query = override?.query ?? selectedQuery;
+  const handleSearch = async (override?: { query?: string; queries?: string[]; count?: string; mode?: GithubDiscoveryModeId }) => {
+    const queries = normalizeKeywordQueries(override?.queries ?? (override?.query !== undefined ? [override.query] : selectedQueries));
     const countValue = override?.count ?? count;
     const modeId = override?.mode ?? selectedDiscoveryMode;
-    const kw = KEYWORDS.find(k => k.query === query) || KEYWORDS[0];
-    if (!kw) return;
+    const keywords = queries.map(query => KEYWORDS.find(k => k.query === query) || KEYWORDS[0]);
     const numCount = Math.max(1, Math.min(GITHUB_TRENDS_MAX_LIMIT, parseInt(countValue) || 30));
-    const discovery = buildDiscoveryOptions(modeId, kw.query);
     setIsLoading(true);
     setError('');
     setRepos([]);
     setSelectedIds(new Set());
     setGeneratedPosts([]);
-    setResultNote(discovery.note);
-    setLastQueryPreview(String(discovery.options.query || 'GitHub Trending daily'));
+    setResultNote(`กำลังค้นหา ${keywords.length} หัวข้อ หัวข้อละ ${numCount} repo...`);
+    setLastQueryPreview('');
     try {
-      const results = await fetchGithubTrendingRepos({
-        ...discovery.options,
-        limit: numCount,
-        candidateLimit: Math.max(numCount, 30),
-        token: githubToken.trim() || undefined,
-      });
-      setRepos(results);
+      const combined: GithubRepo[] = [];
+      const seen = new Set<number>();
+      const previews: string[] = [];
+      const notes: string[] = [];
+      const failures: string[] = [];
+
+      for (let i = 0; i < keywords.length; i++) {
+        const kw = keywords[i];
+        const discovery = buildDiscoveryOptions(modeId, kw.query, kw.label);
+        const preview = String(discovery.options.query || 'GitHub Trending daily');
+        previews.push(`${kw.emoji} ${kw.label}: ${preview}`);
+        notes.push(discovery.note);
+        setResultNote(`กำลังค้นหา ${i + 1}/${keywords.length}: ${kw.label}`);
+
+        try {
+          const results = await fetchGithubTrendingRepos({
+            ...discovery.options,
+            limit: numCount,
+            candidateLimit: Math.max(numCount, 30),
+            token: githubToken.trim() || undefined,
+          });
+
+          results.forEach(repo => {
+            if (seen.has(repo.id)) return;
+            seen.add(repo.id);
+            combined.push(repo);
+          });
+        } catch (err: any) {
+          failures.push(`${kw.label}: ${err?.message || 'ค้นหาไม่สำเร็จ'}`);
+        }
+      }
+
+      setRepos(combined);
+      setLastQueryPreview(previews.join(' | '));
+      const mode = DISCOVERY_MODES.find(m => m.id === modeId) || DISCOVERY_MODES[0];
+      const topicLabel = keywords.length === 1 ? keywords[0].label : `${keywords.length} หัวข้อ`;
+      const partialWarning = failures.length ? ` · ข้าม ${failures.length} หัวข้อที่มีปัญหา` : '';
+      setResultNote(`${mode.label}: ค้นหา ${topicLabel} หัวข้อละ ${numCount} repo ได้รวม ${combined.length} repo หลังตัดซ้ำ${partialWarning}`);
+      if (combined.length === 0 && failures.length) {
+        throw new Error(failures.slice(0, 3).join(' | '));
+      }
     } catch (err: any) {
       if (err.status === 403) setError('Rate limit — รอสักครู่แล้วลองใหม่ หรือใส่ GitHub token ในโมดูลภายหลังเพื่อเพิ่ม quota');
       else setError(err.message);
@@ -579,7 +648,7 @@ ${tonePlan}
   };
 
   const handleSearchTodayTop30 = () => {
-    setSelectedQuery('');
+    setSelectedQueries(['']);
     setSelectedDiscoveryMode('trending');
     const nextCount = count.trim() || '30';
     setCount(nextCount);
@@ -830,6 +899,9 @@ ${repo.html_url}"
 
   const selectedCount = selectedIds.size;
   const doneCount = generatedPosts.filter(p => p.status === 'done').length;
+  const selectedTopicCount = selectedKeywords.length;
+  const reposPerTopic = topCount;
+  const plannedRepoTotal = selectedTopicCount * reposPerTopic;
 
   const [sendLog, setSendLog] = useState('');
 
@@ -837,8 +909,8 @@ ${repo.html_url}"
     if (!onSendToAIPage) return;
     const selected = repos.filter(r => selectedIds.has(r.id));
     if (!selected.length) return alert('กรุณาเลือก repo ก่อน');
-    const kw = KEYWORDS.find(k => k.query === selectedQuery);
-    const topicLabel = kw?.query ? kw.label : 'GitHub';
+    const topicLabels = selectedKeywords.filter(k => k.query).map(k => k.label);
+    const topicLabel = topicLabels[0] || 'GitHub';
 
     setSendLog('⏳ กำลังดึง README ของ repo ที่เลือก...');
     const items = [];
@@ -864,7 +936,7 @@ ${readmeContent ? `📖 README (บางส่วน):
 ${readmeContent}` : ''}`,
         sourceUrl: r.html_url,
         title: r.full_name,
-        tags: Array.from(new Set(['github', topicLabel, ...(r.tags || [])])),
+        tags: Array.from(new Set(['github', ...topicLabels, topicLabel, ...(r.tags || [])])),
         images: gifImages,
         sourceType: 'github',
         domain: 'github.com',
@@ -929,19 +1001,69 @@ ${readmeContent}` : ''}`,
       </div>
 
       {/* ── Search controls ── */}
+      <div className="mb-4 rounded-xl border border-violet-500/20 bg-violet-500/5 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <div>
+            <div className="text-sm font-bold text-violet-200">เลือกหัวข้อที่จะค้นหา</div>
+            <div className="text-xs text-gray-400 mt-1">
+              เลือกได้หลายหัวข้อ ระบบจะค้นทีละหัวข้อแล้วรวมผลให้ พร้อมตัด repo ซ้ำอัตโนมัติ
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedQueries(KEYWORDS.filter(k => k.query).map(k => k.query))}
+              className="text-xs px-3 py-1.5 bg-violet-600/70 hover:bg-violet-500 text-white font-bold rounded-lg transition-all"
+            >
+              เลือกทุกหัวข้อ AI
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedQueries([''])}
+              className="text-xs px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 font-bold rounded-lg transition-all"
+            >
+              ล้าง/ไม่ระบุ
+            </button>
+          </div>
+        </div>
+
+        <div className="max-h-48 overflow-y-auto pr-1 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
+          {KEYWORDS.map(k => {
+            const active = selectedKeywords.some(selected => selected.query === k.query);
+            const isPrimary = selectedKw.query === k.query;
+            return (
+              <button
+                key={k.query || 'all'}
+                type="button"
+                onClick={() => toggleKeywordQuery(k.query)}
+                onDoubleClick={() => setPrimaryKeywordQuery(k.query)}
+                className={`text-left p-2.5 rounded-lg border transition-all ${
+                  active
+                    ? 'border-violet-400 bg-violet-500/20 text-white'
+                    : 'border-gray-700 bg-black/20 text-gray-300 hover:border-violet-500/50'
+                }`}
+                title="คลิกเพื่อเลือก/ยกเลิก ดับเบิลคลิกเพื่อตั้งเป็นหัวข้อหลักสำหรับรูป Footage"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-bold">{k.emoji} {k.label}</span>
+                  {active && <span className="text-[10px] text-violet-200">{isPrimary ? 'หลัก' : 'เลือก'}</span>}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="mt-3 text-xs text-gray-400">
+          เลือกอยู่ <span className="text-white font-bold">{selectedTopicCount}</span> หัวข้อ
+          <span className="mx-2">·</span>
+          หัวข้อหลักสำหรับรูป Footage: <span className="text-violet-200 font-bold">{selectedKw.emoji} {selectedKw.label}</span>
+        </div>
+      </div>
+
       <div className="flex gap-3 flex-wrap items-center mb-4">
-        <select
-          value={selectedQuery}
-          onChange={e => setSelectedQuery(e.target.value)}
-          className="input-field flex-1 min-w-[220px] text-sm"
-        >
-          {KEYWORDS.map(k => (
-            <option key={k.query} value={k.query}>{k.emoji} {k.label}</option>
-          ))}
-        </select>
 
         <div className="flex items-center gap-2 bg-gray-800/60 border border-gray-700 rounded-lg px-3 py-2">
-          <label className="text-xs text-gray-400 whitespace-nowrap">จำนวน</label>
+          <label className="text-xs text-gray-400 whitespace-nowrap">จำนวน repo ต่อหัวข้อ</label>
           <input
             type="number"
             value={count}
@@ -955,9 +1077,16 @@ ${readmeContent}` : ''}`,
               if (!count.trim()) setCount('30');
               else setCount(String(Math.max(1, Math.min(GITHUB_TRENDS_MAX_LIMIT, parseInt(count) || 30))));
             }}
-            className="w-16 bg-transparent text-sm font-bold text-white text-center outline-none"
+            className="w-20 bg-transparent text-sm font-bold text-white text-center outline-none"
             placeholder="30"
           />
+        </div>
+
+        <div className="px-4 py-2 rounded-lg border border-violet-500/30 bg-violet-500/10 text-xs text-violet-100">
+          <span className="font-bold">สรุป:</span>{' '}
+          {selectedTopicCount.toLocaleString()} หัวข้อ × {reposPerTopic.toLocaleString()} อัน/หัวข้อ ={' '}
+          <span className="text-white font-black">{plannedRepoTotal.toLocaleString()}</span> อัน
+          <span className="text-gray-400"> ก่อนตัด repo ซ้ำ</span>
         </div>
 
         <button
@@ -965,7 +1094,7 @@ ${readmeContent}` : ''}`,
           disabled={isLoading}
           className="px-5 py-2.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white text-sm font-bold rounded-lg transition-all flex items-center gap-2 whitespace-nowrap"
         >
-          {isLoading ? '⏳ กำลังค้นหา...' : '🔍 ค้นหา'}
+          {isLoading ? '⏳ กำลังค้นหา...' : `🔍 ค้นหา ${selectedTopicCount > 1 ? `${selectedTopicCount} หัวข้อ` : ''} (${plannedRepoTotal.toLocaleString()} อัน)`}
         </button>
       </div>
 
@@ -1055,7 +1184,7 @@ ${readmeContent}` : ''}`,
 
       {selectedKw && (
         <div className="mb-4 px-3 py-2 bg-violet-500/10 border border-violet-500/20 rounded-lg text-xs text-violet-300">
-          🔎 query: <span className="font-mono">{lastQueryPreview || (selectedKw.query || 'GitHub Trending daily')}</span>
+          🔎 query: <span className="font-mono">{lastQueryPreview || selectedKeywords.map(k => k.query || 'GitHub Trending daily').join(' | ')}</span>
           <span className="text-gray-400"> · {DISCOVERY_MODES.find(m => m.id === selectedDiscoveryMode)?.label}</span>
           {resultNote && <div className="mt-1 text-gray-400">{resultNote}</div>}
         </div>
@@ -1113,8 +1242,8 @@ ${readmeContent}` : ''}`,
                 {/* Subfolder dropdown — synced with selectedQuery */}
                 <div className="flex items-center gap-2">
                   <select
-                    value={selectedQuery}
-                    onChange={e => setSelectedQuery(e.target.value)}
+                    value={selectedKw.query}
+                    onChange={e => setPrimaryKeywordQuery(e.target.value)}
                     className="input-field flex-1 text-sm"
                   >
                     {subfolders.length > 0

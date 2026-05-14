@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { initApiSettings } from './hooks/useApiSettings';
 import ThemeSwitcher from './components/layout/ThemeSwitcher';
 import GlobalSettings from './components/layout/GlobalSettings';
+import { ApiKeyQuickBar } from './components/layout/ApiKeyQuickBar';
 import { GlobalTaskOverlay } from './components/layout/GlobalTaskOverlay';
 import { Sidebar, TabId } from './components/layout/Sidebar';
 import { DashboardHome } from './components/home/DashboardHome';
@@ -176,7 +177,8 @@ function App() {
         {/* Top Bar */}
         <header className="app-topbar">
           <h2 className="app-topbar-title">{TAB_TITLES[activeTab]}</h2>
-          <div className="flex items-center gap-3">
+          <div className="app-topbar-actions">
+            <ApiKeyQuickBar />
             <GlobalSettings />
             <ThemeSwitcher />
           </div>

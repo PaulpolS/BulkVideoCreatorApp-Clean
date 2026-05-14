@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { NumInput } from '../ui/NumInput';
 import { globalTaskStore } from '../../hooks/useBackgroundTasks';
 import { useHeadlinePacks } from '../../hooks/useHeadlinePacks';
@@ -109,6 +109,7 @@ const OPENROUTER_TIMEOUT_MS = 60_000;
 const LOCAL_API_TIMEOUT_MS = 30_000;
 const IMAGE_FETCH_TIMEOUT_MS = 20_000;
 const GH_FOOTAGE_FOLDER_KEY = 'gh_footage_folder';
+const BULK_WORKSPACE_KEY = 'aipage_bulk_article_workspace';
 const YOUTUBE_IMAGE_STYLE_ID = '__youtube_image_style__';
 const AI_NEWS_IMAGE_STYLE_ID = '__ai_news_image_style__';
 const GITHUB_IMAGE_STYLE_ID = '__github_image_style__';
@@ -280,7 +281,13 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
   const saveArticleCache = async (raw: string, patch: Record<string, any>) => {
     if (!raw?.trim()) return;
     const hash = articleKey(raw);
-    const data = { rawArticle: raw, ...patch, cachedAt: patch.cachedAt || new Date().toISOString() };
+    const {
+      imageUrl: _imageUrl,
+      localImageUrl: _localImageUrl,
+      dropboxUrl: _dropboxUrl,
+      ...safePatch
+    } = patch;
+    const data = { rawArticle: raw, ...safePatch, cachedAt: patch.cachedAt || new Date().toISOString() };
     setArticleCache(prev => ({ ...prev, [hash]: { ...(prev[hash] || {}), ...data } }));
     await fetch('/api/article-cache', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -299,6 +306,9 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
   const [bulkItems, setBulkItems] = useState<BulkArticleItem[]>([]);
   const [isBulkProcessing, setIsBulkProcessing] = useState(false);
   const [bulkProcessLog, setBulkProcessLog] = useState('');
+  const [recoverCacheLimit, setRecoverCacheLimit] = useState(100);
+  const [isRecoveringCache, setIsRecoveringCache] = useState(false);
+  const [isApplyingGithubDefaults, setIsApplyingGithubDefaults] = useState(false);
   const [newsImageLoadingIds, setNewsImageLoadingIds] = useState<Set<string>>(new Set());
   const [isSmartConfigRunning, setIsSmartConfigRunning] = useState(false);
   const [isPickingKeywords, setIsPickingKeywords] = useState(false);
@@ -321,6 +331,7 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
     cardImagePromptStyleId?: string;
   }>({});
   const consumedBulkSignatureRef = useRef('');
+  const bulkWorkspaceLoadedRef = useRef(false);
 
   const makeDefaultBulkItem = (overrides: Partial<BulkArticleItem> = {}): BulkArticleItem => ({
     id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
@@ -370,6 +381,21 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
     tags: [],
     ...overrides,
   });
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(BULK_WORKSPACE_KEY) || '[]');
+      if (!initialBulkItems?.length && Array.isArray(saved) && saved.length > 0) {
+        setBulkItems(saved.map(item => makeDefaultBulkItem(item)));
+      }
+    } catch {}
+    bulkWorkspaceLoadedRef.current = true;
+  }, []);
+
+  useEffect(() => {
+    if (!bulkWorkspaceLoadedRef.current) return;
+    localStorage.setItem(BULK_WORKSPACE_KEY, JSON.stringify(bulkItems.slice(0, 1000)));
+  }, [bulkItems]);
 
   useEffect(() => {
     if (initialBulkItems && initialBulkItems.length > 0) {
@@ -710,6 +736,8 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
   const callOpenRouter = async (messages: any[], model: string = textModel) => {
     const candidates = await getOpenRouterKeyCandidates();
     if (candidates.length === 0) throw new Error('กรุณาตั้งค่า OpenRouter API Key ในหน้าตั้งค่าระบบ');
+    const validCandidates = candidates.filter(candidate => /^sk-or-/i.test(String(candidate.key || '').trim()));
+    if (validCandidates.length === 0) throw new Error('ไม่พบ OpenRouter API Key ที่ถูกต้องในโปรไฟล์ กรุณาเปิด Global Settings แล้วใส่ key ที่ขึ้นต้นด้วย sk-or-');
 
     // ── ขั้นตอน: ลอง key แรก + model ที่ผู้ใช้เลือก ก่อนเสมอ ──
     // ถ้าเจอ error ชั่วคราว (Provider returned error, rate limit, timeout) → retry โมเดลเดิม 3 รอบ
@@ -720,7 +748,7 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
     let lastError = '';
 
     // ── Phase 1: ลอง key ทั้งหมดกับ MODEL ที่ผู้ใช้เลือก (retry transient errors) ──
-    for (const candidate of candidates) {
+    for (const candidate of validCandidates) {
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
           const res = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', {
@@ -740,6 +768,11 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
 
           const message = data.error?.message || `OpenRouter error ${res.status}`;
           lastError = `${candidate.label}: ${message}`;
+
+          if (/missing authentication|unauthorized|invalid api key|invalid credentials/i.test(message) || res.status === 401) {
+            console.warn(`[AIPage] ${candidate.label} key ใช้ไม่ได้หรือไม่ได้ถูกส่ง → ลอง key ถัดไป`);
+            break;
+          }
 
           // เครดิตหมดจริง → ข้าม key นี้ไปเลย ไม่ต้อง retry
           if (/insufficient credits|more credits|can only afford/i.test(message)) {
@@ -780,7 +813,7 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
       ? ['google/gemini-2.5-flash:free']
       : ['google/gemma-3-27b-it:free'];
 
-    for (const candidate of candidates) {
+    for (const candidate of validCandidates) {
       for (const fallbackModel of fallbacks) {
         if (fallbackModel === model) continue;
         try {
@@ -803,7 +836,11 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
       }
     }
 
-    throw new Error(lastError ? `ลอง OpenRouter key แล้ว ${candidates.length} ตัว แต่ยังไม่ผ่าน: ${lastError}` : 'OpenRouter API Error');
+    if (/missing authentication|unauthorized|invalid api key|invalid credentials/i.test(lastError)) {
+      throw new Error('OpenRouter API Key ในโปรไฟล์ใช้ไม่ได้หรือว่างอยู่ กรุณาเปิด Global Settings แล้วบันทึก key ใหม่');
+    }
+
+    throw new Error(lastError ? `ลอง OpenRouter key แล้ว ${validCandidates.length} ตัว แต่ยังไม่ผ่าน: ${lastError}` : 'OpenRouter API Error');
   };
 
   const handleAnalyzePrompt = async () => {
@@ -1572,20 +1609,6 @@ Return ONLY valid JSON format.`;
            loadSavedResults();
         } catch(e) { console.error('Failed to save result:', e); }
 
-        // Save to article cache — remember everything about this article
-        if (pendingTask.rawArticle?.trim()) {
-          saveArticleCache(pendingTask.rawArticle, {
-            sourceUrl: pendingTask.bulkSourceUrl || '',
-            generatedArticle: finalArticle,
-            commentPostText: pendingTask.commentPostText || '',
-            selectedHeadline: taskHeadline,
-            imageUrl: resultItem.imageUrl,
-            localImageUrl: resultItem.localImageUrl || '',
-            dropboxUrl: resultItem.dropboxUrl || '',
-          });
-        }
-
-      
       } catch (err: any) {
         globalTaskStore.updateTask(`aipage_${pendingTask.id}`, { progress: `❌ ข้อผิดพลาด: ${err.message}`, status: 'error' });
         setTasks(prev => prev.map(t => t.id === pendingTask.id ? { ...t, status: 'error', log: [...t.log, '❌ ข้อผิดพลาด: ' + err.message] } : t));
@@ -2083,6 +2106,180 @@ Return ONLY valid JSON format.`;
   const deselectAllBulk = () => setBulkItems(prev => prev.map(item => ({ ...item, isSelected: false })));
 
   const selectedBulkCount = bulkItems.filter(b => b.isSelected).length;
+  const recoverableCacheCount = useMemo(
+    () => {
+      const completedUrls = new Set(
+        savedResults
+          .map((result: any) => String(result?.sourceUrl || result?.sourceMeta?.sourceUrl || '').trim())
+          .filter(Boolean),
+      );
+      const completedHeadlines = new Set(
+        savedResults
+          .map((result: any) => String(result?.headline || result?.selectedHeadline || result?.sourceMeta?.selectedHeadline || '').trim())
+          .filter(Boolean),
+      );
+      return Object.values(articleCache).filter((entry: any) => {
+        if (!entry?.rawArticle || !entry?.generatedArticle) return false;
+        if (entry.imageUrl || entry.localImageUrl || entry.dropboxUrl) return false;
+        const sourceUrl = String(entry.sourceUrl || '').trim();
+        const headline = String(entry.selectedHeadline || '').trim();
+        if (sourceUrl && completedUrls.has(sourceUrl)) return false;
+        if (headline && completedHeadlines.has(headline)) return false;
+        return true;
+      }).length;
+    },
+    [articleCache, savedResults],
+  );
+
+  const isGithubBulkItem = (item: Partial<BulkArticleItem>) => {
+    const source = String(item.sourceType || '').toLowerCase();
+    const tags = (item.tags || []).join(' ').toLowerCase();
+    const haystack = `${item.sourceUrl || ''} ${item.rawArticle || ''}`.toLowerCase();
+    return source === 'github' || tags.includes('github') || /github\.com/i.test(haystack);
+  };
+
+  const randomGithubBadgeStyleId = () =>
+    GITHUB_BADGE_STYLES[Math.floor(Math.random() * GITHUB_BADGE_STYLES.length)]?.id || GITHUB_BADGE_STYLES[0].id;
+
+  const buildGithubReadyPatch = async (item: BulkArticleItem, notePrefix = 'กู้คืนจาก cache') => {
+    const headline = item.selectedHeadline || item.generatedHeadlines[0] || item.title || '';
+    const markedKeywords = pickImpactfulKeywords(headline, 2);
+    const fallbackKeywords = markedKeywords.length > 0 ? markedKeywords : getHeadlineKeywordCandidates(headline).slice(0, 2);
+    const patch: Partial<BulkArticleItem> = {
+      sourceType: item.sourceType || 'github',
+      cardImagePromptStyleId: GITHUB_IMAGE_STYLE_ID,
+      cardImageRatio: item.cardImageRatio || '1:1',
+      useAttachedImage: true,
+      decorateOriginalPhoto: true,
+      aiNewsBadgeStyleId: randomGithubBadgeStyleId(),
+      fontPaletteId: item.fontPaletteId || 'black-yellow-white',
+      markedKeywords: fallbackKeywords,
+      smartHeadlineNote: headline
+        ? buildThaiHeadlineSelectionNote(headline, fallbackKeywords, 1)
+        : item.smartHeadlineNote,
+    };
+
+    const itemForPick = { ...item, ...patch };
+    const picked = await pickRandomGithubStockImage(itemForPick);
+    if (picked.imageUrl) {
+      const images = [picked.imageUrl, ...(item.images || []).filter(img => img !== picked.imageUrl)];
+      patch.images = images;
+      patch.selectedImageUrl = picked.imageUrl;
+      patch.smartSelectedImageIndex = 0;
+      patch.smartSelectedImageReason = `สุ่มจากคลัง GitHub หัวข้อ ${picked.topicLabel}${picked.fileName ? `: ${picked.fileName}` : ''}`;
+      patch.smartConfigNote = `${notePrefix} → Github สุ่มรูปจากคลังหัวข้อ ${picked.topicLabel} + สุ่มกรอบซ้ายบน + มาร์กคำสำคัญ`;
+    } else {
+      patch.selectedImageUrl = item.selectedImageUrl || item.images?.[0] || '';
+      patch.smartSelectedImageReason = picked.error || 'ยังสุ่มรูป GitHub ไม่สำเร็จ';
+      patch.smartConfigNote = `${notePrefix} → ตั้งเป็น Github แล้ว แต่ยังไม่ได้รูปจากคลัง${picked.topicLabel ? `หัวข้อ ${picked.topicLabel}` : ''}${picked.error ? ` (${picked.error})` : ''}`;
+    }
+    return patch;
+  };
+
+  const applyGithubDefaultsToSelected = async () => {
+    const targets = bulkItems.filter(item => item.isSelected && isGithubBulkItem(item));
+    if (targets.length === 0) return alert('ไม่เจอรายการ GitHub ที่เลือกไว้');
+
+    setIsApplyingGithubDefaults(true);
+    try {
+      const patches: Record<string, Partial<BulkArticleItem>> = {};
+      for (let i = 0; i < targets.length; i++) {
+        const item = targets[i];
+        setSmartConfigLog(`🧩 (${i + 1}/${targets.length}) เติมค่า GitHub + สุ่มรูป/กรอบ/คำสำคัญ...`);
+        patches[item.id] = await buildGithubReadyPatch(item, 'เติมค่า GitHub');
+      }
+      setBulkItems(prev => prev.map(item => patches[item.id] ? { ...item, ...patches[item.id] } : item));
+      setBulkProcessLog(`🧩 เติมค่า GitHub ให้รายการที่เลือกแล้ว ${targets.length} รายการ: สุ่มรูปจากคลัง, สุ่มกรอบซ้ายบน, มาร์กคำสำคัญ`);
+      setSmartConfigLog('');
+    } catch (e: any) {
+      alert(`เติมค่า GitHub ไม่สำเร็จ: ${e.message || 'ไม่ทราบสาเหตุ'}`);
+    } finally {
+      setIsApplyingGithubDefaults(false);
+    }
+  };
+
+  const recoverCachedArticlesToBulk = async () => {
+    setIsRecoveringCache(true);
+    try {
+      let cache = articleCache;
+      if (Object.keys(cache).length === 0) {
+        const res = await fetch('/api/article-cache');
+        const data = await res.json();
+        if (data && typeof data === 'object') {
+          cache = data;
+          setArticleCache(data);
+        }
+      }
+
+      const limit = Math.max(1, Math.min(1000, Number(recoverCacheLimit) || 100));
+      const existingKeys = new Set(bulkItems.map(item => articleKey(item.rawArticle)));
+      const completedUrls = new Set(
+        savedResults
+          .map((result: any) => String(result?.sourceUrl || result?.sourceMeta?.sourceUrl || '').trim())
+          .filter(Boolean),
+      );
+      const completedHeadlines = new Set(
+        savedResults
+          .map((result: any) => String(result?.headline || result?.selectedHeadline || result?.sourceMeta?.selectedHeadline || '').trim())
+          .filter(Boolean),
+      );
+      const entriesToRecover = Object.values(cache)
+        .filter((entry: any) => entry?.rawArticle && entry?.generatedArticle)
+        .sort((a: any, b: any) =>
+          String(b.lastUpdatedAt || b.cachedAt || '').localeCompare(String(a.lastUpdatedAt || a.cachedAt || ''))
+        )
+        .filter((entry: any) => {
+          if (entry.imageUrl || entry.localImageUrl || entry.dropboxUrl) return false;
+          if (existingKeys.has(articleKey(entry.rawArticle))) return false;
+          const sourceUrl = String(entry.sourceUrl || '').trim();
+          const headline = String(entry.selectedHeadline || '').trim();
+          if (sourceUrl && completedUrls.has(sourceUrl)) return false;
+          if (headline && completedHeadlines.has(headline)) return false;
+          return true;
+        })
+        .slice(0, limit);
+
+      const recovered: BulkArticleItem[] = [];
+      for (let i = 0; i < entriesToRecover.length; i++) {
+        const entry: any = entriesToRecover[i];
+        const generatedHeadlines = Array.isArray(entry.generatedHeadlines)
+          ? entry.generatedHeadlines.filter(Boolean)
+          : [];
+        const selectedHeadline = String(entry.selectedHeadline || generatedHeadlines[0] || '').trim();
+        let item = makeDefaultBulkItem({
+          title: selectedHeadline || String(entry.sourceUrl || '').replace(/^https?:\/\//, '') || String(entry.rawArticle).slice(0, 80),
+          rawArticle: entry.rawArticle,
+          sourceUrl: entry.sourceUrl || '',
+          generatedArticle: entry.generatedArticle || '',
+          generatedCommentPost: entry.generatedCommentPost || entry.commentPostText || '',
+          generatedHeadlines,
+          selectedHeadline,
+          isSelected: true,
+          status: 'article-done',
+          sourceType: /github\.com/i.test(`${entry.sourceUrl || ''} ${entry.rawArticle || ''}`) ? 'github' : entry.sourceType || '',
+          tags: Array.from(new Set(['recovered-cache', ...(entry.tags || []), /github\.com/i.test(`${entry.sourceUrl || ''} ${entry.rawArticle || ''}`) ? 'github' : ''].filter(Boolean))),
+          smartConfigNote: `กู้คืนจาก cache เดิม ${entry.lastUpdatedAt || entry.cachedAt || ''}`.trim(),
+        });
+        if (isGithubBulkItem(item)) {
+          setBulkProcessLog(`♻️ กู้คืน ${i + 1}/${entriesToRecover.length}: เติมค่า GitHub และสุ่มรูปจากคลัง...`);
+          item = { ...item, ...(await buildGithubReadyPatch(item, 'กู้คืนจาก cache')) };
+        }
+        recovered.push(item);
+      }
+
+      if (recovered.length === 0) {
+        alert('ยังไม่เจอบทความใน cache ที่ยังไม่ได้อยู่ในกล่องงาน');
+        return;
+      }
+
+      setBulkItems(prev => [...recovered, ...prev]);
+      setBulkProcessLog(`♻️ กู้คืนบทความจาก cache กลับมา ${recovered.length} รายการ เลือกไว้ให้แล้ว พร้อมทยอยกดสร้างรูป`);
+    } catch (e: any) {
+      alert(`กู้คืนไม่สำเร็จ: ${e.message || 'ไม่ทราบสาเหตุ'}`);
+    } finally {
+      setIsRecoveringCache(false);
+    }
+  };
 
   const attachedPostStyles = writingStyles;
   const commentPostStyles = writingStyles;
@@ -4051,6 +4248,34 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
           </button>
         </div>
 
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-teal-500/25 bg-teal-500/10 p-3">
+          <div className="min-w-[220px] flex-1">
+            <div className="text-sm font-bold text-teal-200">♻️ กู้บทความที่เคยรันไว้</div>
+            <div className="text-xs text-gray-400 mt-1">
+              เหลือใน cache <span className="text-white font-bold">{recoverableCacheCount.toLocaleString()}</span> รายการที่ยังไม่อยู่ในผลลัพธ์/export แล้ว เอากลับมากดสร้างรูปต่อได้
+            </div>
+          </div>
+          <label className="flex items-center gap-2 rounded-lg border border-teal-500/25 bg-black/20 px-3 py-2">
+            <span className="text-xs text-gray-400 whitespace-nowrap">กู้ล่าสุด</span>
+            <input
+              type="number"
+              min={1}
+              max={1000}
+              value={recoverCacheLimit}
+              onChange={e => setRecoverCacheLimit(Math.max(1, Math.min(1000, Number(e.target.value) || 1)))}
+              className="w-20 bg-transparent text-center text-sm font-bold text-white outline-none"
+            />
+            <span className="text-xs text-gray-500">รายการ</span>
+          </label>
+          <button
+            onClick={recoverCachedArticlesToBulk}
+            disabled={isRecoveringCache || recoverableCacheCount === 0}
+            className="bg-teal-700 hover:bg-teal-600 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all border border-teal-400/30"
+          >
+            {isRecoveringCache ? '⏳ กำลังกู้...' : '♻️ กู้คืนเข้ากล่องงาน'}
+          </button>
+        </div>
+
         {bulkItems.length > 0 && (
           <>
             {/* Selection Controls */}
@@ -4246,6 +4471,15 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
                     </span>
                   )}
                 </div>
+
+                <button
+                  onClick={applyGithubDefaultsToSelected}
+                  disabled={isApplyingGithubDefaults || isSmartConfigRunning || isBulkProcessing}
+                  className="text-xs bg-sky-700/60 hover:bg-sky-600 text-sky-200 px-3 py-1.5 rounded-lg font-bold transition-all border border-sky-500/30 disabled:opacity-50"
+                  title="เติมค่าสำหรับรายการ GitHub ที่เลือก: สุ่มรูปจากคลัง GitHub, สุ่มกรอบซ้ายบน, และมาร์กคำสำคัญจากพาดหัว"
+                >
+                  {isApplyingGithubDefaults ? '⏳ เติมค่า GitHub...' : '🧩 เติมค่า GitHub ทุกอัน'}
+                </button>
 
                 {/* Restore cache for all selected */}
                 <button

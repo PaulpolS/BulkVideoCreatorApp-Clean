@@ -32,7 +32,7 @@ type StockMode = 'image-and-post' | 'image-only' | 'post-only';
 type ImageProvider = 'kie-gpt-image-2';
 type AspectRatio = 'auto' | '1:1' | '9:16' | '16:9' | '4:3' | '3:4';
 type ImageResolution = '1K' | '2K' | '4K';
-type PageStockBuilderTab = 'api' | 'prompt' | 'local-image-article' | 'clickbait' | 'csv-clickbait' | 'canvas';
+type PageStockBuilderTab = 'api' | 'prompt' | 'local-image-article' | 'clickbait' | 'csv-clickbait' | 'voiceover' | 'canvas';
 
 interface ApiProfile {
   id: string;
@@ -173,6 +173,22 @@ interface ClickbaitPostItem {
   createdAt: string;
 }
 
+type VoiceoverPresetId = 'senior-business' | 'senior-finance' | 'retirement-life' | 'calm-warning' | 'gentle-story';
+type VoiceoverLengthId = 'short-60' | 'standard-90' | 'long-120';
+
+interface VoiceoverScriptItem {
+  id: string;
+  topic: string;
+  script: string;
+  presetId: VoiceoverPresetId;
+  lengthId: VoiceoverLengthId;
+  estimatedSeconds: number;
+  targetChars: number;
+  status: 'done' | 'error';
+  error?: string;
+  createdAt: string;
+}
+
 const workflowNodes = (workflow as any).nodes ?? [];
 
 function extractPageConfigs(): PageConfig[] {
@@ -202,6 +218,61 @@ const MANUAL_TOPIC_MODEL_KEY = 'page_stock_manual_topic_model';
 const MANUAL_PROMPT_MODEL_KEY = 'page_stock_manual_prompt_model';
 const CLICKBAIT_POSTS_KEY = 'page_stock_clickbait_posts';
 const CLICKBAIT_INPUT_KEY = 'page_stock_clickbait_input';
+const VOICEOVER_INPUT_KEY = 'page_stock_voiceover_input';
+const VOICEOVER_RESULTS_KEY = 'page_stock_voiceover_results';
+const VOICEOVER_PRESET_KEY = 'page_stock_voiceover_preset';
+const VOICEOVER_LENGTH_KEY = 'page_stock_voiceover_length';
+const VOICEOVER_MODEL_KEY = 'page_stock_voiceover_model';
+
+const VOICEOVER_PRESETS: {
+  id: VoiceoverPresetId;
+  label: string;
+  description: string;
+  instruction: string;
+}[] = [
+  {
+    id: 'senior-business',
+    label: 'ผู้ใหญ่สอนบริหาร',
+    description: 'สุขุม ตรงประเด็น เหมือนที่ปรึกษาธุรกิจรุ่นใหญ่',
+    instruction: 'บุคลิกผู้พูดเป็นผู้ชายสูงอายุที่มีประสบการณ์บริหารธุรกิจมานาน พูดนิ่ง สุขุม ใช้คำง่าย มีน้ำหนัก เน้นหลักคิดการตัดสินใจ วินัย การจัดคน การจัดเวลา และบทเรียนจากประสบการณ์จริง',
+  },
+  {
+    id: 'senior-finance',
+    label: 'ผู้ใหญ่สอนการเงิน',
+    description: 'สอนเงินแบบเข้าใจง่าย รอบคอบ ไม่ขายฝัน',
+    instruction: 'บุคลิกผู้พูดเป็นผู้ชายสูงอายุที่สอนการเงินส่วนบุคคลด้วยน้ำเสียงอบอุ่น รอบคอบ ไม่โอ้อวด เน้นความเสี่ยง เงินสำรอง หนี้ สินทรัพย์ วินัยระยะยาว และไม่ชวนลงทุนแบบหวือหวา',
+  },
+  {
+    id: 'retirement-life',
+    label: 'ชีวิตวัยเกษียณ',
+    description: 'เล่าชีวิตหลังเกษียณแบบอบอุ่น ใช้ได้จริง',
+    instruction: 'บุคลิกผู้พูดเป็นผู้ชายสูงอายุที่ผ่านชีวิตมามาก พูดเรื่องวัยเกษียณ สุขภาพ ใจ เงิน ครอบครัว เวลา และการใช้ชีวิตให้สงบ มีคุณค่า ไม่ประชด ไม่ดราม่าหนัก',
+  },
+  {
+    id: 'calm-warning',
+    label: 'เตือนสติแบบนุ่มลึก',
+    description: 'เริ่มด้วยข้อคิดชวนสะดุ้ง แต่ไม่ขู่เกินจริง',
+    instruction: 'บุคลิกผู้พูดเป็นผู้ชายสูงอายุที่เตือนสติอย่างนุ่มลึก เปิดด้วยประโยคที่ทำให้หยุดคิด แล้วค่อย ๆ อธิบายด้วยเหตุผล ใช้ถ้อยคำเรียบง่าย จริงใจ และให้ทางออกท้ายคลิป',
+  },
+  {
+    id: 'gentle-story',
+    label: 'เล่าเรื่องสอนใจ',
+    description: 'ใช้เรื่องเล่าสั้น ๆ แล้วสรุปเป็นบทเรียน',
+    instruction: 'บุคลิกผู้พูดเป็นผู้ชายสูงอายุที่เล่าเรื่องสั้นจากประสบการณ์หรือเหตุการณ์สมมติแบบสมจริง แล้วเชื่อมเป็นบทเรียนเรื่องงาน เงิน ชีวิต หรือครอบครัว น้ำเสียงอบอุ่นเหมือนผู้ใหญ่เล่าให้ลูกหลานฟัง',
+  },
+];
+
+const VOICEOVER_LENGTHS: {
+  id: VoiceoverLengthId;
+  label: string;
+  description: string;
+  targetChars: number;
+  estimatedSeconds: number;
+}[] = [
+  { id: 'short-60', label: 'ประมาณ 1 นาที', description: 'ราว 650-800 ตัวอักษร เหมาะกับคลิปสั้นตรงประเด็น', targetChars: 760, estimatedSeconds: 60 },
+  { id: 'standard-90', label: 'ประมาณ 1.5 นาที', description: 'ราว 950-1,150 ตัวอักษร เล่าได้ครบขึ้น', targetChars: 1080, estimatedSeconds: 90 },
+  { id: 'long-120', label: 'ประมาณ 2 นาที', description: 'ราว 1,300-1,550 ตัวอักษร มีเรื่องเล่าและบทสรุป', targetChars: 1450, estimatedSeconds: 120 },
+];
 
 const LOCAL_IMAGE_ARTICLE_MODELS = [
   { id: 'google/gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite · ถูกสุด', note: '$0.10 / $0.40 ต่อ 1M token' },
@@ -1031,6 +1102,89 @@ function cleanAiPostPreamble(text: string) {
   return output.trim();
 }
 
+function cleanVoiceoverScript(text: string) {
+  let output = cleanAiPostPreamble(text)
+    .replace(/^```(?:text|thai)?/i, '')
+    .replace(/```$/i, '')
+    .replace(/\*\*/g, '')
+    .replace(/^\s*(?:หัวข้อ|ชื่อคลิป|บทพูด|สคริปต์|voiceover script|script)\s*[:：-].*$/gim, '')
+    .replace(/^\s*(?:hook|intro|body|outro|cta|ช่วงเปิด|ช่วงกลาง|ช่วงปิด)\s*[:：-]\s*/gim, '')
+    .replace(/^\s*[-*•]\s+/gm, '')
+    .replace(/\[(?:pause|หยุด|เว้น|หายใจ|ยิ้ม|มองกล้อง|gesture|ท่าทาง)[^\]]*\]/gi, '')
+    .replace(/\((?:pause|หยุด|เว้น|หายใจ|ยิ้ม|มองกล้อง|gesture|ท่าทาง)[^)]*\)/gi, '')
+    .replace(/#{1,6}\s*/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  const lines = output
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line && !/^(?:แน่นอน|ได้เลย|นี่คือ|ต่อไปนี้|สคริปต์นี้)/i.test(line));
+
+  output = lines.join('\n').replace(/^["'“”]+|["'“”]+$/g, '').trim();
+  return output;
+}
+
+function getVoiceoverPreset(id: VoiceoverPresetId) {
+  return VOICEOVER_PRESETS.find(preset => preset.id === id) || VOICEOVER_PRESETS[0];
+}
+
+function getVoiceoverLength(id: VoiceoverLengthId) {
+  return VOICEOVER_LENGTHS.find(length => length.id === id) || VOICEOVER_LENGTHS[0];
+}
+
+function buildVoiceoverPrompt(topic: string, presetId: VoiceoverPresetId, lengthId: VoiceoverLengthId) {
+  const preset = getVoiceoverPreset(presetId);
+  const length = getVoiceoverLength(lengthId);
+  const minChars = Math.round(length.targetChars * 0.86);
+  const maxChars = Math.round(length.targetChars * 1.12);
+
+  return `เขียนบทพูดภาษาไทยสำหรับ Voiceover ให้ Avatar พูด 1 บท
+
+หัวข้อ:
+${topic}
+
+บุคลิกและแนวทาง:
+${preset.instruction}
+
+ความยาวเป้าหมาย:
+- ${length.label}
+- ประมาณ ${length.estimatedSeconds} วินาที
+- ความยาวตัวอักษรไทยรวมเว้นวรรคประมาณ ${minChars}-${maxChars} ตัวอักษร
+
+กฎสำคัญมาก:
+1. ตอบเป็นบทพูดล้วนเท่านั้น เอาไปใส่ระบบ Voiceover ได้ทันที
+2. ห้ามมีหัวข้อ ห้ามมี markdown ห้าม bullet ห้ามเลขข้อ ห้าม emoji ห้าม hashtag
+3. ห้ามใส่คำกำกับท่าทาง เช่น [pause], (หยุด), มองกล้อง, เสียงเบา
+4. ห้ามขึ้นต้นด้วยคำว่า "แน่นอน", "ได้เลย", "นี่คือ", "สคริปต์นี้"
+5. ใช้ภาษาพูดธรรมชาติแบบผู้ชายสูงอายุ พูดกับคนดูโดยตรง มีคำว่า "ผม" ได้ แต่ไม่ต้องแนะนำตัว
+6. โครงสร้างควรมี hook เปิดคลิป, เนื้อหาสอน 2-3 ประเด็น, ตัวอย่างสั้น ๆ, และสรุปปิดท้ายที่น่าจำ
+7. หลีกเลี่ยงคำสัญญาเกินจริง โดยเฉพาะเรื่องเงินและการลงทุน
+8. ห้ามบอกว่าเป็นคำแนะนำทางการเงินแบบเป็นทางการ ให้พูดเป็นหลักคิดทั่วไป
+
+ส่งกลับเฉพาะบทพูดจริง ไม่มีคำอธิบายอื่น`;
+}
+
+function createFallbackVoiceoverScript(topic: string, presetId: VoiceoverPresetId, lengthId: VoiceoverLengthId) {
+  const length = getVoiceoverLength(lengthId);
+  const preset = getVoiceoverPreset(presetId);
+  const base = [
+    `เรื่อง "${topic}" ถ้าฟังผ่าน ๆ มันอาจดูเหมือนเรื่องธรรมดา แต่ในชีวิตจริง หลายคนพลาดตรงนี้ซ้ำแล้วซ้ำอีก`,
+    `ผมอยากให้มองแบบนี้ก่อน ทุกเรื่องที่เกี่ยวกับงาน เงิน หรือชีวิตวัยเกษียณ ไม่ได้ชนะกันที่ความเร็วอย่างเดียว แต่มักชนะกันที่ความสม่ำเสมอและการตัดสินใจที่ไม่ทำร้ายตัวเองในระยะยาว`,
+    `ถ้าเป็นเรื่องบริหาร เราต้องถามตัวเองว่า สิ่งที่ทำอยู่ช่วยให้ระบบดีขึ้นจริงไหม หรือแค่ทำให้เราดูยุ่งมากขึ้น ถ้าเป็นเรื่องการเงิน เราต้องถามว่าเงินก้อนนี้ช่วยเพิ่มความมั่นคงไหม หรือแค่ซื้อความสบายใจชั่วคราว`,
+    `คนที่ผ่านชีวิตมาพอสมควรจะรู้ว่า ความผิดพลาดเล็ก ๆ ที่ปล่อยไว้นาน มักกลายเป็นภาระใหญ่ในวันที่เราไม่มีแรงแก้แล้ว เพราะฉะนั้นสิ่งที่ควรทำคือเริ่มจัดระเบียบตั้งแต่วันนี้ เริ่มจากเรื่องเล็กที่สุดที่เราคุมได้`,
+    `จำไว้นะครับ ชีวิตที่ดีไม่จำเป็นต้องหวือหวาเสมอไป แค่เรารู้ว่าอะไรสำคัญ อะไรควรหยุด และอะไรควรทำต่ออย่างมีวินัย แค่นี้อนาคตก็เบาลงมากแล้ว`,
+  ];
+  const short = [base[0], base[1], base[4]];
+  const standard = [base[0], base[1], base[2], base[4]];
+  const long = base;
+  const script = length.id === 'short-60' ? short : length.id === 'standard-90' ? standard : long;
+  const intro = preset.id === 'gentle-story'
+    ? `ผมเคยเห็นคนจำนวนไม่น้อย ที่เข้าใจเรื่อง "${topic}" ช้าไปนิดเดียว แต่ต้องใช้เวลาหลายปีเพื่อแก้ผลลัพธ์ของมัน`
+    : script[0];
+  return cleanVoiceoverScript([intro, ...script.slice(1)].join('\n\n'));
+}
+
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1454,6 +1608,21 @@ export function PageStockTab() {
   const [csvCbProgress, setCsvCbProgress] = useState('');
   const [csvCbCopied, setCsvCbCopied] = useState(false);
   const [csvCbPasteMode, setCsvCbPasteMode] = useState(false);
+  const [voiceoverInput, setVoiceoverInput] = useState(() => localStorage.getItem(VOICEOVER_INPUT_KEY) || '');
+  const [voiceoverPreset, setVoiceoverPreset] = useState<VoiceoverPresetId>(() => (localStorage.getItem(VOICEOVER_PRESET_KEY) as VoiceoverPresetId) || 'senior-business');
+  const [voiceoverLength, setVoiceoverLength] = useState<VoiceoverLengthId>(() => (localStorage.getItem(VOICEOVER_LENGTH_KEY) as VoiceoverLengthId) || 'short-60');
+  const [voiceoverModel, setVoiceoverModel] = useState(() => localStorage.getItem(VOICEOVER_MODEL_KEY) || 'google/gemini-2.5-flash-lite');
+  const [voiceoverResults, setVoiceoverResults] = useState<VoiceoverScriptItem[]>(() => {
+    try {
+      const data = JSON.parse(localStorage.getItem(VOICEOVER_RESULTS_KEY) || '[]');
+      return Array.isArray(data) ? data : [];
+    } catch {
+      return [];
+    }
+  });
+  const [voiceoverRunning, setVoiceoverRunning] = useState(false);
+  const [voiceoverCopied, setVoiceoverCopied] = useState(false);
+  const [voiceoverProgress, setVoiceoverProgress] = useState('');
   const [settings, setSettings] = useState<OutputSettings>(() => {
     try {
       return { ...DEFAULT_OUTPUT_SETTINGS, ...JSON.parse(localStorage.getItem(OUTPUT_SETTINGS_KEY) || '{}') };
@@ -1553,6 +1722,13 @@ export function PageStockTab() {
   const canvasSelectedCount = useMemo(
     () => canvasImages.filter(image => image.selected).length,
     [canvasImages],
+  );
+  const voiceoverTopics = useMemo(() => getTopics(voiceoverInput), [voiceoverInput]);
+  const selectedVoiceoverPreset = useMemo(() => getVoiceoverPreset(voiceoverPreset), [voiceoverPreset]);
+  const selectedVoiceoverLength = useMemo(() => getVoiceoverLength(voiceoverLength), [voiceoverLength]);
+  const voiceoverCopyText = useMemo(
+    () => voiceoverResults.map(item => item.script.trim()).filter(Boolean).join('\n\n----------\n\n'),
+    [voiceoverResults],
   );
 
   const openRouterKey = getActiveOpenRouterKey();
@@ -1714,6 +1890,26 @@ export function PageStockTab() {
   useEffect(() => {
     localStorage.setItem(CLICKBAIT_POSTS_KEY, JSON.stringify(clickbaitPosts));
   }, [clickbaitPosts]);
+
+  useEffect(() => {
+    localStorage.setItem(VOICEOVER_INPUT_KEY, voiceoverInput);
+  }, [voiceoverInput]);
+
+  useEffect(() => {
+    localStorage.setItem(VOICEOVER_PRESET_KEY, voiceoverPreset);
+  }, [voiceoverPreset]);
+
+  useEffect(() => {
+    localStorage.setItem(VOICEOVER_LENGTH_KEY, voiceoverLength);
+  }, [voiceoverLength]);
+
+  useEffect(() => {
+    localStorage.setItem(VOICEOVER_MODEL_KEY, voiceoverModel);
+  }, [voiceoverModel]);
+
+  useEffect(() => {
+    localStorage.setItem(VOICEOVER_RESULTS_KEY, JSON.stringify(voiceoverResults));
+  }, [voiceoverResults]);
 
   useEffect(() => {
     if (!selectedPage) return;
@@ -2912,6 +3108,102 @@ ${NO_AI_PREAMBLE_RULE}
     URL.revokeObjectURL(link.href);
   };
 
+  const runVoiceoverGenerator = async () => {
+    const uniqueTopics = Array.from(new Set(voiceoverTopics));
+    if (uniqueTopics.length === 0 || voiceoverRunning) return;
+    setVoiceoverRunning(true);
+    setVoiceoverProgress(`เตรียมเขียน ${uniqueTopics.length} บท`);
+    const generated: VoiceoverScriptItem[] = [];
+
+    for (let index = 0; index < uniqueTopics.length; index++) {
+      const topic = uniqueTopics[index];
+      setVoiceoverProgress(`กำลังเขียน ${index + 1}/${uniqueTopics.length}: ${topic.slice(0, 48)}`);
+      try {
+        const raw = hasOpenRouterKey
+          ? await askOpenRouter(buildVoiceoverPrompt(topic, voiceoverPreset, voiceoverLength), undefined, Math.min(2600, Math.max(900, selectedVoiceoverLength.targetChars * 2)), voiceoverModel)
+          : createFallbackVoiceoverScript(topic, voiceoverPreset, voiceoverLength);
+        const script = cleanVoiceoverScript(raw);
+        generated.push({
+          id: `voiceover-${Date.now()}-${index}`,
+          topic,
+          script,
+          presetId: voiceoverPreset,
+          lengthId: voiceoverLength,
+          estimatedSeconds: selectedVoiceoverLength.estimatedSeconds,
+          targetChars: selectedVoiceoverLength.targetChars,
+          status: 'done',
+          createdAt: new Date().toISOString(),
+        });
+      } catch (error: any) {
+        const fallback = createFallbackVoiceoverScript(topic, voiceoverPreset, voiceoverLength);
+        generated.push({
+          id: `voiceover-${Date.now()}-${index}`,
+          topic,
+          script: fallback,
+          presetId: voiceoverPreset,
+          lengthId: voiceoverLength,
+          estimatedSeconds: selectedVoiceoverLength.estimatedSeconds,
+          targetChars: selectedVoiceoverLength.targetChars,
+          status: 'error',
+          error: error?.message || String(error),
+          createdAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    setVoiceoverResults(prev => [...generated, ...prev]);
+    setVoiceoverProgress(`เขียนเสร็จ ${generated.length} บท`);
+    setVoiceoverRunning(false);
+  };
+
+  const updateVoiceoverScript = (id: string, patch: Partial<VoiceoverScriptItem>) => {
+    setVoiceoverResults(prev => prev.map(item => item.id === id ? { ...item, ...patch } : item));
+  };
+
+  const copyVoiceoverScript = async (script: string) => {
+    const clean = cleanVoiceoverScript(script);
+    if (!clean) return;
+    await navigator.clipboard.writeText(clean);
+    setVoiceoverCopied(true);
+    window.setTimeout(() => setVoiceoverCopied(false), 1500);
+  };
+
+  const copyAllVoiceoverScripts = async () => {
+    if (!voiceoverCopyText) return;
+    await navigator.clipboard.writeText(voiceoverCopyText);
+    setVoiceoverCopied(true);
+    window.setTimeout(() => setVoiceoverCopied(false), 1500);
+  };
+
+  const downloadVoiceoverCsv = () => {
+    if (voiceoverResults.length === 0) return;
+    const headers = ['id', 'topic', 'script', 'preset', 'length', 'estimated_seconds', 'target_chars', 'status', 'error', 'created_at'];
+    const csv = [
+      headers.join(','),
+      ...voiceoverResults.map(item => {
+        const row: Record<string, string | number> = {
+          id: item.id,
+          topic: item.topic,
+          script: item.script,
+          preset: getVoiceoverPreset(item.presetId).label,
+          length: getVoiceoverLength(item.lengthId).label,
+          estimated_seconds: item.estimatedSeconds,
+          target_chars: item.targetChars,
+          status: item.status,
+          error: item.error || '',
+          created_at: item.createdAt,
+        };
+        return headers.map(header => csvEscape(row[header])).join(',');
+      }),
+    ].join('\n');
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `avatar-voiceover-scripts-${Date.now()}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
+
   const clickbaitTopics = clickbaitInput
     .split('\n')
     .map(item => item.trim())
@@ -3899,6 +4191,15 @@ ${NO_AI_PREAMBLE_RULE}
         </button>
         <button
           type="button"
+          className={builderTab === 'voiceover' ? 'active' : ''}
+          onClick={() => setBuilderTab('voiceover')}
+          role="tab"
+          aria-selected={builderTab === 'voiceover'}
+        >
+          Avatar Voiceover
+        </button>
+        <button
+          type="button"
           className={builderTab === 'canvas' ? 'active' : ''}
           onClick={() => setBuilderTab('canvas')}
           role="tab"
@@ -4868,6 +5169,129 @@ ${NO_AI_PREAMBLE_RULE}
                         />
                       </label>
                     ))}
+                  </article>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      ) : builderTab === 'voiceover' ? (
+        <section className="page-stock-panel page-stock-manual-prompt">
+          <div className="page-stock-panel-head">
+            <h2>Avatar Voiceover Script</h2>
+            <span>{voiceoverResults.length} บท · {selectedVoiceoverLength.label}</span>
+          </div>
+          <div className="page-stock-manual-grid">
+            <div className="page-stock-manual-card">
+              <h3>1. หัวข้อและแนวผู้พูด</h3>
+              <p>ใส่หัวข้อที่อยากให้ Avatar พูด บรรทัดละ 1 หัวข้อ ผลลัพธ์จะเป็นบทพูดล้วน ไม่มีหัวข้อ ไม่มี markdown พร้อมเอาไป Voiceover</p>
+              <label>
+                <span>หัวข้อ Voiceover</span>
+                <textarea
+                  className="page-stock-textarea"
+                  value={voiceoverInput}
+                  onChange={event => setVoiceoverInput(event.target.value)}
+                  rows={8}
+                  placeholder={'เช่น\nทำไมคนเกษียณไม่ควรฝากชีวิตไว้กับรายได้ทางเดียว\n3 เรื่องที่เจ้าของธุรกิจควรจัดระบบก่อนอายุ 60\nเงินสำรองสำคัญกว่ากำไรในวันที่ตลาดไม่แน่นอน'}
+                />
+              </label>
+              <label>
+                <span>โมเดลเขียน Script</span>
+                <select className="page-stock-manual-input" value={voiceoverModel} onChange={event => setVoiceoverModel(event.target.value)}>
+                  {LOCAL_IMAGE_ARTICLE_MODELS.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
+                </select>
+                <small>{LOCAL_IMAGE_ARTICLE_MODELS.find(model => model.id === voiceoverModel)?.note || voiceoverModel}</small>
+              </label>
+              <div className="page-stock-manual-actions">
+                <button className="page-stock-primary" disabled={voiceoverTopics.length === 0 || voiceoverRunning} onClick={runVoiceoverGenerator}>
+                  {voiceoverRunning ? 'กำลังเขียน...' : `เขียน Script ${voiceoverTopics.length || ''} บท`}
+                </button>
+                <button disabled={!voiceoverInput.trim() || voiceoverRunning} onClick={() => setVoiceoverInput('')}>ล้างหัวข้อ</button>
+              </div>
+              {voiceoverProgress && <div className="page-stock-brain-box"><strong>{voiceoverProgress}</strong></div>}
+              {!hasOpenRouterKey && (
+                <p>ยังไม่พบ OpenRouter key ระบบจะใช้ template local ให้ก่อน ถ้าใส่ key แล้วจะได้บทพูดหลากหลายและเข้าหัวข้อกว่า</p>
+              )}
+            </div>
+
+            <div className="page-stock-manual-card">
+              <h3>2. เลือกโทนและความยาว</h3>
+              <label>
+                <span>แนวผู้พูด</span>
+                <select className="page-stock-manual-input" value={voiceoverPreset} onChange={event => setVoiceoverPreset(event.target.value as VoiceoverPresetId)}>
+                  {VOICEOVER_PRESETS.map(preset => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+                </select>
+                <small>{selectedVoiceoverPreset.description}</small>
+              </label>
+              <div className="page-stock-voiceover-presets">
+                {VOICEOVER_PRESETS.map(preset => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    className={voiceoverPreset === preset.id ? 'active' : ''}
+                    onClick={() => setVoiceoverPreset(preset.id)}
+                  >
+                    <strong>{preset.label}</strong>
+                    <span>{preset.description}</span>
+                  </button>
+                ))}
+              </div>
+              <label>
+                <span>ระดับความยาว</span>
+                <select className="page-stock-manual-input" value={voiceoverLength} onChange={event => setVoiceoverLength(event.target.value as VoiceoverLengthId)}>
+                  {VOICEOVER_LENGTHS.map(length => <option key={length.id} value={length.id}>{length.label}</option>)}
+                </select>
+                <small>{selectedVoiceoverLength.description}</small>
+              </label>
+              <div className="page-stock-voiceover-lengths">
+                {VOICEOVER_LENGTHS.map(length => (
+                  <button
+                    key={length.id}
+                    type="button"
+                    className={voiceoverLength === length.id ? 'active' : ''}
+                    onClick={() => setVoiceoverLength(length.id)}
+                  >
+                    <strong>{length.label}</strong>
+                    <span>{length.description}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="page-stock-manual-card page-stock-manual-wide">
+              <div className="page-stock-manual-headline">
+                <h3>3. บทพูดพร้อมคัดลอก</h3>
+                <span>{voiceoverCopyText.length.toLocaleString()} ตัวอักษรรวม</span>
+              </div>
+              <div className="page-stock-manual-actions">
+                <button disabled={!voiceoverCopyText} onClick={copyAllVoiceoverScripts}>
+                  {voiceoverCopied ? 'คัดลอกแล้ว' : 'คัดลอก Script ทั้งหมด'}
+                </button>
+                <button disabled={voiceoverResults.length === 0} onClick={downloadVoiceoverCsv}>Export CSV</button>
+                <button className="page-stock-danger" disabled={voiceoverResults.length === 0} onClick={() => setVoiceoverResults([])}>ล้างผลลัพธ์</button>
+              </div>
+              <div className="page-stock-result-list page-stock-prompt-results" style={{ maxHeight: 680, overflow: 'auto' }}>
+                {voiceoverResults.length === 0 ? (
+                  <em>ใส่หัวข้อ เลือกโทน/ความยาว แล้วกดเขียน Script ผลลัพธ์จะขึ้นตรงนี้</em>
+                ) : voiceoverResults.map(item => (
+                  <article key={item.id}>
+                    <div className="page-stock-panel-head">
+                      <div>
+                        <h4>{item.topic}</h4>
+                        <small>{getVoiceoverPreset(item.presetId).label} · {getVoiceoverLength(item.lengthId).label} · {item.script.length.toLocaleString()} ตัวอักษร</small>
+                      </div>
+                      <div className="page-stock-manual-actions">
+                        <button onClick={() => copyVoiceoverScript(item.script)}>{voiceoverCopied ? 'คัดลอกแล้ว' : 'คัดลอกบทนี้'}</button>
+                        <button className="page-stock-danger" onClick={() => setVoiceoverResults(prev => prev.filter(script => script.id !== item.id))}>ลบ</button>
+                      </div>
+                    </div>
+                    {item.error && <p>AI error: {item.error} · ใช้ fallback local ให้แล้ว</p>}
+                    <textarea
+                      className="page-stock-textarea page-stock-voiceover-output"
+                      value={item.script}
+                      onChange={event => updateVoiceoverScript(item.id, { script: cleanVoiceoverScript(event.target.value) })}
+                      rows={12}
+                    />
                   </article>
                 ))}
               </div>
