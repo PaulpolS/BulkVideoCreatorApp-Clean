@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { AlertCircle, Bot, Camera, Check, ClipboardList, Copy, Film, Play, ShieldCheck } from 'lucide-react';
+import { AlertCircle, Bot, Camera, Check, ClipboardList, Copy, Film, ImagePlus, Play, ShieldCheck } from 'lucide-react';
 import { getOpenRouterKeyCandidates } from '../hooks/useApiSettings';
 import { buildStoryboardExportText, buildStoryboardScenes, StoryboardScene } from '../lib/prompt-engine';
 
@@ -21,6 +21,8 @@ const STORYBOARD_MODEL_FALLBACKS = [
   'openai/gpt-4o-mini',
   'google/gemini-2.5-flash',
 ];
+
+const MAX_VISUAL_REFERENCES = 6;
 
 interface CopyButtonProps {
   text: string;
@@ -156,6 +158,30 @@ function extractJsonPayload(text: string) {
   }
 }
 
+function readImageFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('อ่านไฟล์รูปไม่สำเร็จ'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('โหลดรูปไม่สำเร็จ'));
+      img.onload = () => {
+        const maxSide = 1280;
+        const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return reject(new Error('เตรียมรูปไม่สำเร็จ'));
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.86));
+      };
+      img.src = String(reader.result || '');
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function normalizeAiScenes(payload: unknown, sceneCount: number): StoryboardScene[] {
   const rawScenes = Array.isArray((payload as { scenes?: unknown[] })?.scenes)
     ? (payload as { scenes: unknown[] }).scenes
@@ -189,11 +215,14 @@ function normalizeAiScenes(payload: unknown, sceneCount: number): StoryboardScen
   return scenes.slice(0, sceneCount);
 }
 
-function buildAiStoryboardPrompt(storyContext: string, sceneCount: number) {
+function buildAiStoryboardPrompt(storyContext: string, sceneCount: number, visualReferenceCount: number) {
+  const hasVisualReference = visualReferenceCount > 0;
   return `คุณคือ AI Storyboard Architect สำหรับงาน Image-to-Video / Google Flow
 
 โจทย์เรื่อง:
 ${storyContext}
+
+${hasVisualReference ? `มีภาพ scene/reference แนบมา ${visualReferenceCount} รูป ให้ดู pattern ร่วมของภาพทั้งหมดเป็น visual guide สำหรับ mood, environment type, lighting, lens feel, camera distance, composition, prop density, color palette, and cinematic direction เท่านั้น ห้ามคัดลอกตัวละคร/บุคคล/โลโก้/ข้อความจากภาพ และห้ามให้ภาพ reference ไปเปลี่ยน identity ของตัวละครหลัก ถ้าภาพแต่ละใบต่างกัน ให้สกัดเป็น style bible ที่เข้ากับ story context ไม่ใช่รวมทุกอย่างแบบรก` : ''}
 
 สร้าง storyboard จำนวน ${sceneCount} scenes โดยแต่ละ scene ยาว 8 วินาที และ 1 scene ต้องมี:
 - imagePrompt: prompt รูป 1 รูปสำหรับใช้เป็นภาพตั้งต้นของ scene นั้น
@@ -207,8 +236,9 @@ ${storyContext}
 5. ใช้คำว่า "the referenced character" เมื่อพูดถึงตัวละครหลัก
 6. โฟกัส behavior, blocking, location, props, atmosphere, camera, action, physics, timing, continuity
 7. imagePrompt ต้องเป็นภาพตั้งต้นที่ชัดเจนพอให้ videoMotionPrompt ขยับต่อได้ และต้องต่อเนื่องระหว่าง scene
-8. ไม่มี text on screen, ไม่มี watermark, ไม่มี subtitle
-9. ห้ามตอบ markdown ห้ามอธิบายเพิ่ม
+8. ${hasVisualReference ? 'ให้อิงภาษาภาพจาก reference image เพื่อกำหนดฉากและวิธีเขียน prompt: location texture, lighting direction, camera framing, depth, mood, prop logic, color mood' : 'ใช้รายละเอียดฉากจาก story context และออกแบบ visual language ให้เหมาะกับเรื่อง'}
+9. ไม่มี text on screen, ไม่มี watermark, ไม่มี subtitle
+10. ห้ามตอบ markdown ห้ามอธิบายเพิ่ม
 
 ตอบกลับเป็น JSON เท่านั้น ตาม schema นี้:
 {
@@ -224,7 +254,7 @@ ${storyContext}
 }`;
 }
 
-async function callOpenRouterStoryboard(storyContext: string, sceneCount: number, model: string) {
+async function callOpenRouterStoryboard(storyContext: string, sceneCount: number, model: string, visualReferenceDataUrls: string[] = []) {
   const candidates = await getOpenRouterKeyCandidates();
   if (candidates.length === 0) throw new Error('ไม่พบ OpenRouter API Key — กรุณาตั้งค่า API Key ก่อน');
 
@@ -232,7 +262,7 @@ async function callOpenRouterStoryboard(storyContext: string, sceneCount: number
     model,
     ...STORYBOARD_MODEL_FALLBACKS,
   ].filter(Boolean)));
-  const prompt = buildAiStoryboardPrompt(storyContext, sceneCount);
+  const prompt = buildAiStoryboardPrompt(storyContext, sceneCount, visualReferenceDataUrls.length);
   const triedErrors: string[] = [];
   let creditErrors = 0;
   let timeoutErrors = 0;
@@ -250,7 +280,15 @@ async function callOpenRouterStoryboard(storyContext: string, sceneCount: number
           },
           body: JSON.stringify({
             model: modelId,
-            messages: [{ role: 'user', content: prompt }],
+            messages: [{
+              role: 'user',
+              content: visualReferenceDataUrls.length > 0
+                ? [
+                    { type: 'text', text: prompt },
+                    ...visualReferenceDataUrls.map(url => ({ type: 'image_url', image_url: { url } })),
+                  ]
+                : prompt,
+            }],
             temperature: 0.7,
             max_tokens: Math.min(5200, Math.max(1200, sceneCount * 430)),
             response_format: { type: 'json_object' },
@@ -310,6 +348,7 @@ export function StoryboardModule() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [lastModelUsed, setLastModelUsed] = useState('');
+  const [visualReferences, setVisualReferences] = useState<Array<{ id: string; name: string; dataUrl: string }>>([]);
 
   const exportText = buildStoryboardExportText(scenes);
   const imageBatchText = scenes
@@ -337,7 +376,12 @@ export function StoryboardModule() {
     setErrorMsg('');
     setHasBuilt(false);
     try {
-      const result = await callOpenRouterStoryboard(storyContext.trim(), normalizedSceneCount, model);
+      const result = await callOpenRouterStoryboard(
+        storyContext.trim(),
+        normalizedSceneCount,
+        model,
+        visualReferences.map(reference => reference.dataUrl),
+      );
       setScenes(result.scenes);
       setLastModelUsed(result.model);
       setHasBuilt(true);
@@ -355,6 +399,40 @@ export function StoryboardModule() {
     setLastModelUsed('Template fallback');
     setErrorMsg('');
     setHasBuilt(true);
+  };
+
+  const handleVisualReferenceUpload = async (files?: FileList | null) => {
+    const selectedFiles = Array.from(files || []);
+    if (selectedFiles.length === 0) return;
+    const imageFiles = selectedFiles.filter(file => file.type.startsWith('image/'));
+    if (imageFiles.length === 0) {
+      setErrorMsg('กรุณาเลือกไฟล์รูปภาพสำหรับ Scene REF');
+      return;
+    }
+    const freeSlots = MAX_VISUAL_REFERENCES - visualReferences.length;
+    if (freeSlots <= 0) {
+      setErrorMsg(`แนบรูป Scene REF ได้สูงสุด ${MAX_VISUAL_REFERENCES} รูป`);
+      return;
+    }
+    try {
+      setErrorMsg('');
+      const filesToAdd = imageFiles.slice(0, freeSlots);
+      const nextReferences = await Promise.all(
+        filesToAdd.map(async (file, index) => ({
+          id: `${Date.now()}-${index}-${file.name}`,
+          name: file.name,
+          dataUrl: await readImageFileAsDataUrl(file),
+        })),
+      );
+      setVisualReferences(current => [...current, ...nextReferences].slice(0, MAX_VISUAL_REFERENCES));
+      if (selectedFiles.length !== imageFiles.length) {
+        setErrorMsg('ข้ามไฟล์ที่ไม่ใช่รูปภาพแล้ว แนบเฉพาะไฟล์รูปให้เรียบร้อย');
+      } else if (imageFiles.length > filesToAdd.length) {
+        setErrorMsg(`แนบได้สูงสุด ${MAX_VISUAL_REFERENCES} รูป ตอนนี้เพิ่มเท่าที่มีช่องว่างให้แล้ว`);
+      }
+    } catch (error: any) {
+      setErrorMsg(error?.message || 'อ่านรูป Scene REF ไม่สำเร็จ');
+    }
   };
 
   return (
@@ -380,6 +458,59 @@ export function StoryboardModule() {
           className="sa-input mt-2 min-h-[220px] w-full resize-y p-4 text-sm leading-6"
           placeholder="เล่า context นิทานสั้นเป็นภาษาไทย"
         />
+
+        <label className="sa-label mt-4 block text-sm font-bold">
+          Scene / Style REF image
+        </label>
+        <label className="mt-2 flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--border-color)] bg-black/10 px-4 py-3 text-sm font-bold transition hover:border-[var(--accent)]">
+          <ImagePlus className="h-4 w-4 text-[var(--accent)]" />
+          {visualReferences.length > 0
+            ? `เพิ่มรูป REF ฉาก/สไตล์ (${visualReferences.length}/${MAX_VISUAL_REFERENCES})`
+            : 'แนบรูป REF ได้หลายรูป เพื่ออิงฉาก/แสง/กล้อง'}
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={event => {
+              handleVisualReferenceUpload(event.target.files);
+              event.currentTarget.value = '';
+            }}
+          />
+        </label>
+        {visualReferences.length > 0 && (
+          <div className="mt-3 rounded-xl border border-[var(--border-color)] bg-black/10 p-3">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <p className="sa-muted text-xs leading-5">
+                ใช้ทุกภาพเป็น visual guide สำหรับฉาก, mood, lighting, composition, camera feel ไม่ใช้คุมตัวละคร
+              </p>
+              <button
+                type="button"
+                onClick={() => setVisualReferences([])}
+                className="sa-secondary-button px-3 py-2 text-xs"
+              >
+                ลบทั้งหมด
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {visualReferences.map(reference => (
+                <div key={reference.id} className="rounded-lg border border-[var(--border-color)] bg-black/20 p-2">
+                  <img src={reference.dataUrl} alt="" className="h-20 w-full rounded-md object-cover" />
+                  <div className="mt-2 flex items-center gap-2">
+                    <p className="min-w-0 flex-1 truncate text-xs font-bold">{reference.name}</p>
+                    <button
+                      type="button"
+                      onClick={() => setVisualReferences(current => current.filter(item => item.id !== reference.id))}
+                      className="sa-secondary-button px-2 py-1 text-[11px]"
+                    >
+                      ลบ
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <label className="sa-label mt-4 block text-sm font-bold" htmlFor="scene-count">
           Number of scenes
