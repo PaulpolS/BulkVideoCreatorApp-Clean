@@ -1448,6 +1448,7 @@ const fileSaverPlugin = (): Plugin => ({
         const sourceFolder = String(payload.sourceFolder || '').trim();
         const outputFolder = String(payload.outputFolder || '').trim();
         const targetSeconds = toFinite(payload.targetSeconds, 45, 1, 60 * 60);
+        const requestedOutputCount = Math.floor(toFinite(payload.outputCount, 0, 0, 1000));
         const width = Math.round(toFinite(payload.width, 1080, 320, 7680));
         const height = Math.round(toFinite(payload.height, 1920, 320, 7680));
         const usedKeys = new Set<string>(Array.isArray(payload.usedKeys) ? payload.usedKeys.map((v: any) => String(v)) : []);
@@ -1516,93 +1517,123 @@ const fileSaverPlugin = (): Plugin => ({
           return;
         }
 
-        const selected: Array<any> = [];
-        let remaining = targetSeconds;
-        const freshClips = shuffle(clips.filter((clip: any) => !historyBase.has(clip.key)));
-        const selectedKeysThisRun = new Set<string>();
-        const addSegment = (clip: any, index: number, candidatePool: any[], fromReuse: boolean) => {
-          const remainingAfterThis = candidatePool.slice(index + 1).reduce((sum: number, item: any) => sum + item.duration, 0);
-          const mustTake = fromReuse ? 0.5 : Math.max(0.5, remaining - remainingAfterThis);
-          const naturalTake = remaining <= 8 ? remaining : 3 + Math.random() * 5;
-          const wanted = Math.max(mustTake, naturalTake);
-          const segDuration = Math.min(clip.duration, remaining, Math.max(0.5, wanted));
-          const maxStart = Math.max(0, clip.duration - segDuration);
-          const start = maxStart > 0 ? Math.random() * maxStart : 0;
-          selected.push({
-            ...clip,
-            start: Number(start.toFixed(2)),
-            segmentDuration: Number(segDuration.toFixed(2)),
-            fromReuse,
-          });
-          selectedKeysThisRun.add(clip.key);
-          remaining -= segDuration;
-        };
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const tempDir = path.join(outputFolder, `.random_assembly_${Date.now()}`);
+        const scriptPath = path.join('/tmp', `random_clip_assembly_${Date.now()}.sh`);
+        const vf = `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p`;
+        const nextHistory = new Set<string>(historyBase);
+        const jobs: Array<{ outputPath: string; selected: any[] }> = [];
+        const maxOutputs = requestedOutputCount > 0 ? requestedOutputCount : Math.max(1, clips.length);
 
-        for (let index = 0; index < freshClips.length; index++) {
-          if (remaining <= 0.05) break;
-          addSegment(freshClips[index], index, freshClips, false);
-        }
-
-        let refillPass = 0;
-        while (remaining > 0.05 && refillPass < 2000) {
-          const unusedInThisOutput = clips.filter((clip: any) => !selectedKeysThisRun.has(clip.key));
-          const refillPool = shuffle(unusedInThisOutput.length > 0 ? unusedInThisOutput : clips);
-          if (refillPass === 0) {
-            send({ type: 'log', text: `คลิปใหม่ไม่พอเติม ${targetSeconds}s จึงสุ่มคลิปที่เคยใช้แล้วมาเติมท้ายงาน` });
+        while (jobs.length < maxOutputs) {
+          if (requestedOutputCount === 0 && jobs.length > 0 && nextHistory.size >= clips.length) break;
+          if (requestedOutputCount > 0 && jobs.length > 0 && nextHistory.size >= clips.length) {
+            nextHistory.clear();
+            send({ type: 'log', text: `ใช้ครบทุกไฟล์แล้ว เริ่มรอบใหม่เพื่อสร้างไฟล์ที่ ${jobs.length + 1}` });
           }
-          for (let index = 0; index < refillPool.length; index++) {
+
+          const selected: Array<any> = [];
+          const selectedKeysThisOutput = new Set<string>();
+          let remaining = targetSeconds;
+          const freshClips = shuffle(clips.filter((clip: any) => !nextHistory.has(clip.key)));
+          if (freshClips.length === 0) break;
+
+          const addSegment = (clip: any, fromReuse: boolean) => {
+            const naturalTake = remaining <= 8 ? remaining : 3 + Math.random() * 5;
+            const segDuration = Math.min(clip.duration, remaining, Math.max(0.5, naturalTake));
+            const maxStart = Math.max(0, clip.duration - segDuration);
+            const start = maxStart > 0 ? Math.random() * maxStart : 0;
+            selected.push({
+              ...clip,
+              start: Number(start.toFixed(2)),
+              segmentDuration: Number(segDuration.toFixed(2)),
+              fromReuse,
+              outputIndex: jobs.length + 1,
+            });
+            selectedKeysThisOutput.add(clip.key);
+            remaining -= segDuration;
+          };
+
+          for (const clip of freshClips) {
             if (remaining <= 0.05) break;
-            addSegment(refillPool[index], index, refillPool, true);
+            addSegment(clip, false);
+            nextHistory.add(clip.key);
           }
-          refillPass++;
+
+          let refillPass = 0;
+          while (remaining > 0.05 && refillPass < 2000) {
+            const unusedInThisOutput = clips.filter((clip: any) => !selectedKeysThisOutput.has(clip.key));
+            const refillPool = shuffle(unusedInThisOutput.length > 0 ? unusedInThisOutput : clips);
+            if (refillPass === 0) {
+              send({ type: 'log', text: `ไฟล์ที่ ${jobs.length + 1}: คลิปใหม่ไม่พอเติม ${targetSeconds}s จึงสุ่มคลิปที่เคยใช้แล้วมาเติมท้ายงาน` });
+            }
+            for (const clip of refillPool) {
+              if (remaining <= 0.05) break;
+              addSegment(clip, true);
+            }
+            refillPass++;
+          }
+
+          if (remaining > 0.25 || selected.length === 0) {
+            send({ type: 'error', text: `สร้างไฟล์ที่ ${jobs.length + 1} ไม่ครบ ${targetSeconds} วินาที ลองเพิ่มคลิปในโฟลเดอร์` });
+            res.end();
+            return;
+          }
+
+          const outputSuffix = requestedOutputCount === 1
+            ? ''
+            : `_${String(jobs.length + 1).padStart(2, '0')}`;
+          jobs.push({
+            outputPath: path.join(outputFolder, `${outputBase}_${stamp}${outputSuffix}.mp4`),
+            selected,
+          });
         }
 
-        if (remaining > 0.25) {
-          send({ type: 'error', text: `คลิปใหม่ที่เหลือยังไม่พอสำหรับ ${targetSeconds} วินาที (ทำได้ประมาณ ${Math.floor(targetSeconds - remaining)} วินาที) ลองเพิ่มคลิปหรือล้างประวัติ` });
+        if (jobs.length === 0) {
+          send({ type: 'error', text: 'ไม่มีคลิปใหม่พอให้สร้างงาน ลองล้างประวัติหรือเพิ่มคลิปในโฟลเดอร์' });
           res.end();
           return;
         }
 
-        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const tempDir = path.join(outputFolder, `.random_assembly_${Date.now()}`);
-        const outputPath = path.join(outputFolder, `${outputBase}_${stamp}.mp4`);
-        const scriptPath = path.join('/tmp', `random_clip_assembly_${Date.now()}.sh`);
-        const segmentPaths = selected.map((_: any, index: number) => path.join(tempDir, `seg_${String(index + 1).padStart(3, '0')}.mp4`));
-        const listPath = path.join(tempDir, 'concat_list.txt');
-        const vf = `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p`;
         const scriptLines = [
           '#!/bin/bash',
           'set -euo pipefail',
           'export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"',
           `TMP_DIR=${sh(tempDir)}`,
           'mkdir -p "$TMP_DIR"',
-          `echo "เริ่มต่อคลิป ${selected.length} ชิ้น -> ${targetSeconds}s"`,
+          `echo "เริ่มสร้าง ${jobs.length} ไฟล์ ไฟล์ละประมาณ ${targetSeconds}s"`,
         ];
 
-        selected.forEach((clip, index) => {
-          scriptLines.push(`echo "[${index + 1}/${selected.length}] ${clip.file} @ ${clip.start}s + ${clip.segmentDuration}s"`);
-          scriptLines.push([
-            'ffmpeg', '-y',
-            '-ss', sh(String(clip.start)),
-            '-t', sh(String(clip.segmentDuration)),
-            '-i', sh(clip.filePath),
-            '-map', '0:v:0',
-            '-an',
-            '-vf', sh(vf),
-            '-c:v', 'libx264',
-            '-preset', 'veryfast',
-            '-crf', '20',
-            '-movflags', '+faststart',
-            sh(segmentPaths[index]),
-          ].join(' '));
+        jobs.forEach((job, jobIndex) => {
+          const jobNo = String(jobIndex + 1).padStart(3, '0');
+          const segmentPaths = job.selected.map((_: any, index: number) => path.join(tempDir, `job_${jobNo}_seg_${String(index + 1).padStart(3, '0')}.mp4`));
+          const listPath = path.join(tempDir, `job_${jobNo}_concat_list.txt`);
+          scriptLines.push(`echo "=== Output ${jobIndex + 1}/${jobs.length}: ${path.basename(job.outputPath)} ==="`);
+          job.selected.forEach((clip, index) => {
+            scriptLines.push(`echo "[${jobIndex + 1}.${index + 1}/${job.selected.length}] ${clip.file} @ ${clip.start}s + ${clip.segmentDuration}s${clip.fromReuse ? ' (reuse)' : ''}"`);
+            scriptLines.push([
+              'ffmpeg', '-y',
+              '-ss', sh(String(clip.start)),
+              '-t', sh(String(clip.segmentDuration)),
+              '-i', sh(clip.filePath),
+              '-map', '0:v:0',
+              '-an',
+              '-vf', sh(vf),
+              '-c:v', 'libx264',
+              '-preset', 'veryfast',
+              '-crf', '20',
+              '-movflags', '+faststart',
+              sh(segmentPaths[index]),
+            ].join(' '));
+          });
+          scriptLines.push(`cat > ${sh(listPath)} <<'EOF'`);
+          segmentPaths.forEach(segmentPath => scriptLines.push(`file ${sh(segmentPath)}`));
+          scriptLines.push('EOF');
+          scriptLines.push(`ffmpeg -y -f concat -safe 0 -i ${sh(listPath)} -c copy ${sh(job.outputPath)}`);
+          scriptLines.push(`echo "เสร็จแล้ว: ${job.outputPath}"`);
         });
 
-        scriptLines.push(`cat > ${sh(listPath)} <<'EOF'`);
-        segmentPaths.forEach(segmentPath => scriptLines.push(`file ${sh(segmentPath)}`));
-        scriptLines.push('EOF');
-        scriptLines.push(`ffmpeg -y -f concat -safe 0 -i ${sh(listPath)} -c copy ${sh(outputPath)}`);
         scriptLines.push('rm -rf "$TMP_DIR"');
-        scriptLines.push(`echo "เสร็จแล้ว: ${outputPath}"`);
 
         try {
           fs.writeFileSync(scriptPath, scriptLines.join('\n'), { mode: 0o755 });
@@ -1612,26 +1643,30 @@ const fileSaverPlugin = (): Plugin => ({
           return;
         }
 
-        const used = selected.map(clip => clip.key);
-        const nextHistory = new Set<string>(historyBase);
-        selected.forEach(clip => { if (!clip.fromReuse) nextHistory.add(clip.key); });
         if (nextHistory.size >= clips.length) {
           clips.forEach((clip: any) => nextHistory.add(clip.key));
         }
+        const outputPaths = jobs.map(job => job.outputPath);
+        const flatSelected = jobs.flatMap(job => job.selected.map(clip => ({ ...clip, outputFilename: path.basename(job.outputPath) })));
+        const used = flatSelected.map(clip => clip.key);
         send({
           type: 'plan',
-          outputPath,
+          outputPath: outputPaths[0],
+          outputPaths,
+          outputCount: jobs.length,
           usedKeys: used,
           historyKeys: Array.from(nextHistory),
           cycleReset,
           cycleCompleted: nextHistory.size >= clips.length,
-          clips: selected.map(clip => ({
+          clips: flatSelected.map(clip => ({
             filename: clip.file,
             key: clip.key,
             start: clip.start,
             duration: clip.segmentDuration,
             sourceDuration: Number(clip.duration.toFixed(2)),
             fromReuse: Boolean(clip.fromReuse),
+            outputIndex: clip.outputIndex,
+            outputFilename: clip.outputFilename,
           })),
         });
 
@@ -1652,7 +1687,7 @@ const fileSaverPlugin = (): Plugin => ({
           if (finished) return;
           finished = true;
           cleanup();
-          if (code === 0) send({ type: 'done', outputPath, usedKeys: used, historyKeys: Array.from(nextHistory), cycleReset, cycleCompleted: nextHistory.size >= clips.length });
+          if (code === 0) send({ type: 'done', outputPath: outputPaths[0], outputPaths, outputCount: jobs.length, usedKeys: used, historyKeys: Array.from(nextHistory), cycleReset, cycleCompleted: nextHistory.size >= clips.length });
           else send({ type: 'error', text: code != null ? `ffmpeg exited (code ${code}) — ดู log ด้านบน` : 'Process stopped' });
           if (!res.writableEnded) res.end();
         });
