@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowDownTrayIcon,
   ArrowPathIcon,
   ChartBarSquareIcon,
   ClipboardDocumentIcon,
@@ -8,6 +9,15 @@ import {
   LinkIcon,
   PlayIcon,
 } from '@heroicons/react/24/outline';
+
+type RunMode = 'gainers' | 'losers' | 'low_pe' | 'trending';
+
+const MODE_OPTIONS: { value: RunMode; label: string; desc: string }[] = [
+  { value: 'gainers',  label: '📈 ราคาพุ่ง',    desc: 'Top Day Gainers' },
+  { value: 'losers',   label: '📉 ราคาลด',      desc: 'Top Day Losers' },
+  { value: 'low_pe',   label: '💎 P/E ต่ำ',     desc: 'Undervalued Large Caps' },
+  { value: 'trending', label: '🔥 น่าจับตา',    desc: 'Most Active + News' },
+];
 
 interface TopGainersResult {
   date: string;
@@ -52,7 +62,10 @@ export function TopGainersFactoryTab() {
   const [scanCount, setScanCount] = useState(150);
   const [dropboxFolder, setDropboxFolder] = useState(DEFAULT_DROPBOX);
   const [skipDropbox, setSkipDropbox] = useState(false);
+  const [mode, setMode] = useState<RunMode>('gainers');
+  const [saveFolder, setSaveFolder] = useState('');
   const [isRunning, setIsRunning] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [logLines, setLogLines] = useState<string[]>([]);
   const [results, setResults] = useState<TopGainersPayload | null>(null);
   const [error, setError] = useState('');
@@ -95,6 +108,43 @@ export function TopGainersFactoryTab() {
     setLogLines(prev => [...prev, line].slice(-300));
   };
 
+  const pickFolder = async () => {
+    try {
+      const res = await fetch('/api/pick-folder');
+      const data = await res.json();
+      if (data.success && data.dir) setSaveFolder(data.dir);
+    } catch (e: any) {
+      setError(e.message || 'เลือก Folder ไม่สำเร็จ');
+    }
+  };
+
+  const exportToFolder = async () => {
+    if (!saveFolder || !results?.rows?.length) return;
+    setIsExporting(true);
+    setError('');
+    try {
+      const res = await fetch('/api/top-gainers-export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          destDir: saveFolder,
+          rows: results.rows.map(r => ({
+            symbol: r.symbol,
+            caption: r.caption,
+            localImagePath: r.localImagePath,
+          })),
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Export ไม่สำเร็จ');
+      appendLog(`✅ Export สำเร็จ → ${data.exportDir} (${data.count} รายการ)`);
+    } catch (e: any) {
+      setError(e.message || 'Export ไม่สำเร็จ');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const runFactory = async () => {
     setIsRunning(true);
     setError('');
@@ -105,7 +155,7 @@ export function TopGainersFactoryTab() {
       const res = await fetch('/api/top-gainers-run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ p2, limit, scanCount, dropboxFolder, skipDropbox }),
+        body: JSON.stringify({ p2, limit, scanCount, dropboxFolder, skipDropbox, mode }),
       });
 
       const reader = res.body?.getReader();
@@ -219,6 +269,15 @@ export function TopGainersFactoryTab() {
                 Copy CSV Path
               </button>
             )}
+            <button
+              onClick={exportToFolder}
+              disabled={!hasResults || !saveFolder || isExporting || isRunning}
+              title={!saveFolder ? 'เลือก Export Folder ในแผงด้านซ้ายก่อน' : undefined}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold disabled:opacity-40"
+            >
+              {isExporting ? <ArrowPathIcon className="w-4 h-4 animate-spin" /> : <ArrowDownTrayIcon className="w-4 h-4" />}
+              Export ลงเครื่อง
+            </button>
           </div>
         </div>
       </section>
@@ -228,6 +287,27 @@ export function TopGainersFactoryTab() {
           className="border rounded-lg p-5 space-y-4"
           style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)' }}
         >
+          <div>
+            <label className="block text-sm font-bold mb-2">โหมดการสแกน</label>
+            <div className="grid grid-cols-2 gap-2">
+              {MODE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setMode(opt.value)}
+                  className={`flex flex-col items-start px-3 py-2 rounded-lg border text-left transition-colors ${
+                    mode === opt.value
+                      ? 'border-emerald-500 bg-emerald-500/15 text-emerald-300'
+                      : 'border-transparent bg-black/20'
+                  }`}
+                  style={mode !== opt.value ? { borderColor: 'var(--border-color)' } : {}}
+                >
+                  <span className="text-sm font-semibold">{opt.label}</span>
+                  <span className="text-xs opacity-60">{opt.desc}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div>
             <label className="block text-sm font-bold mb-2">Cell P2</label>
             <select
@@ -310,6 +390,28 @@ export function TopGainersFactoryTab() {
               className="w-full rounded-lg border px-3 py-2 bg-transparent"
               style={{ borderColor: 'var(--border-color)' }}
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold mb-2">Export Folder (บันทึกไฟล์ลงเครื่อง)</label>
+            <div className="flex gap-2">
+              <div
+                className="flex-1 rounded-lg border px-3 py-2 text-sm truncate"
+                style={{ borderColor: 'var(--border-color)', color: saveFolder ? 'var(--text-main)' : 'var(--text-secondary, #94a3b8)' }}
+                title={saveFolder}
+              >
+                {saveFolder || 'ยังไม่ได้เลือก Folder'}
+              </div>
+              <button
+                onClick={pickFolder}
+                disabled={isRunning}
+                className="shrink-0 inline-flex items-center gap-1 px-3 py-2 rounded-lg border text-sm font-semibold disabled:opacity-50"
+                style={{ borderColor: 'var(--border-color)' }}
+              >
+                <FolderOpenIcon className="w-4 h-4" />
+                เลือก
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3 pt-1">

@@ -23,9 +23,42 @@ const bgmModules = import.meta.glob('/public/BG_music/*.{mp3,wav,m4a,aac}', { ea
 const BG_MUSIC_OPTIONS = Object.keys(bgmModules).map(path => path.split('/').pop() || '');
 const ABSOLUTE_BGM_DIR = "/Users/macos/Desktop/ทดสอบว่าทำได้มั้ย/BulkVideoCreatorApp/public/BG_music";
 
+type EditorMode = 'jumpcut' | 'assembly';
+
+type AssemblyClipPlan = {
+  filename: string;
+  key: string;
+  start: number;
+  duration: number;
+  sourceDuration?: number;
+  fromReuse?: boolean;
+  outputIndex?: number;
+  outputFilename?: string;
+};
+
+const loadStringArray = (key: string): string[] => {
+  try {
+    const raw = localStorage.getItem(key);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter(v => typeof v === 'string') : [];
+  } catch {
+    return [];
+  }
+};
+
 export const SingleClipEditorTab: React.FC = () => {
+  const [activeMode, setActiveMode] = useState<EditorMode>('jumpcut');
   const [clipPath, setClipPath] = useState('/Users/macos/Desktop/Done/example.mp4');
   const [outputPath, setOutputPath] = useState('/Users/macos/Desktop/Done/example_output.mp4');
+  const [assemblySourceFolder, setAssemblySourceFolder] = useState(() => localStorage.getItem('singleclip_assembly_source') || '');
+  const [assemblyOutputFolder, setAssemblyOutputFolder] = useState(() => localStorage.getItem('singleclip_assembly_output') || '');
+  const [assemblyTargetSeconds, setAssemblyTargetSeconds] = useState(45);
+  const [assemblyOutputCount, setAssemblyOutputCount] = useState(0);
+  const [assemblyOutputName, setAssemblyOutputName] = useState('random_cut');
+  const [assemblyWidth, setAssemblyWidth] = useState(1080);
+  const [assemblyHeight, setAssemblyHeight] = useState(1920);
+  const [assemblyUsedKeys, setAssemblyUsedKeys] = useState<string[]>(() => loadStringArray('singleclip_assembly_used_keys'));
+  const [assemblyLastPlan, setAssemblyLastPlan] = useState<AssemblyClipPlan[]>([]);
   
   // Scene 1
   const [s1Start, setS1Start] = useState(0.0);
@@ -68,6 +101,14 @@ export const SingleClipEditorTab: React.FC = () => {
   useEffect(() => {
     if (logEndRef.current) logEndRef.current.scrollIntoView({ behavior: 'smooth' });
   }, [runLog]);
+
+  useEffect(() => {
+    localStorage.setItem('singleclip_assembly_source', assemblySourceFolder);
+  }, [assemblySourceFolder]);
+
+  useEffect(() => {
+    localStorage.setItem('singleclip_assembly_output', assemblyOutputFolder);
+  }, [assemblyOutputFolder]);
 
   const handleTemplateChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const key = e.target.value;
@@ -277,6 +318,126 @@ export const SingleClipEditorTab: React.FC = () => {
     }
   };
 
+  const handlePickAssemblyFolder = async (kind: 'source' | 'output') => {
+    const prompt = kind === 'source'
+      ? 'เลือกโฟลเดอร์คลิปต้นทางสำหรับสุ่มมาต่อ'
+      : 'เลือกโฟลเดอร์ปลายทางสำหรับบันทึกคลิปที่ต่อเสร็จ';
+    const res = await fetch('/api/pick-folder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+    });
+    const data = await res.json();
+    if (!data.success) return;
+    if (kind === 'source') setAssemblySourceFolder(data.dir);
+    else setAssemblyOutputFolder(data.dir);
+  };
+
+  const clearAssemblyHistory = () => {
+    if (!window.confirm('ล้างประวัติคลิปที่เคยสุ่มใช้แล้วใช่ไหม? รอบต่อไปจะสุ่มจากคลิปทั้งหมดได้อีกครั้ง')) return;
+    setAssemblyUsedKeys([]);
+    localStorage.removeItem('singleclip_assembly_used_keys');
+    setRunLog(prev => [...prev.slice(-99), '[INFO] ล้างประวัติคลิปที่เคยใช้แล้ว']);
+  };
+
+  const handleRunAssembly = async () => {
+    if (!assemblySourceFolder || !assemblyOutputFolder) return alert('กรุณาเลือกโฟลเดอร์ต้นทางและปลายทางก่อน');
+    if (!Number.isFinite(assemblyTargetSeconds) || assemblyTargetSeconds <= 0) return alert('กรุณาใส่ความยาวคลิปมากกว่า 0 วินาที');
+
+    setIsRunning(true);
+    setRunLog([]);
+    setRunStatus('running');
+    setAssemblyLastPlan([]);
+
+    let aborted = false;
+    const controller = new AbortController();
+    abortRef.current = () => {
+      aborted = true;
+      controller.abort();
+    };
+
+    try {
+      const response = await fetch('/api/build-random-clip-assembly', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceFolder: assemblySourceFolder,
+          outputFolder: assemblyOutputFolder,
+          targetSeconds: assemblyTargetSeconds,
+          outputCount: assemblyOutputCount,
+          outputName: assemblyOutputName,
+          width: assemblyWidth,
+          height: assemblyHeight,
+          usedKeys: assemblyUsedKeys,
+        }),
+        signal: controller.signal,
+      });
+
+      if (!response.body) throw new Error('No response body');
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const payload = JSON.parse(line.slice(6));
+            if (payload.type === 'log') {
+              setRunLog(prev => [...prev.slice(-99), payload.text]);
+            } else if (payload.type === 'plan') {
+              setAssemblyLastPlan(Array.isArray(payload.clips) ? payload.clips : []);
+              const reuseCount = Array.isArray(payload.clips) ? payload.clips.filter((clip: AssemblyClipPlan) => clip.fromReuse).length : 0;
+              const notes = [
+                `[PLAN] สร้าง ${payload.outputCount || 1} ไฟล์ · ใช้ ${payload.clips?.length || 0} ชิ้น`,
+                payload.cycleReset ? 'เริ่มรอบใหม่แล้ว' : '',
+                reuseCount > 0 ? `เติมซ้ำ ${reuseCount} คลิป` : '',
+              ].filter(Boolean).join(' · ');
+              setRunLog(prev => [...prev.slice(-99), notes]);
+            } else if (payload.type === 'done') {
+              if (Array.isArray(payload.historyKeys)) {
+                setAssemblyUsedKeys(payload.historyKeys);
+                localStorage.setItem('singleclip_assembly_used_keys', JSON.stringify(payload.historyKeys));
+              } else if (Array.isArray(payload.usedKeys)) {
+                setAssemblyUsedKeys(prev => {
+                  const next = Array.from(new Set([...prev, ...payload.usedKeys]));
+                  localStorage.setItem('singleclip_assembly_used_keys', JSON.stringify(next));
+                  return next;
+                });
+              }
+              if (Array.isArray(payload.outputPaths)) {
+                setRunLog(prev => [...prev.slice(-99), `[DONE] สร้าง ${payload.outputPaths.length} ไฟล์`, ...payload.outputPaths.slice(0, 8).map((p: string) => `  ${p}`)]);
+              } else if (payload.outputPath) {
+                setRunLog(prev => [...prev.slice(-99), `[DONE] ${payload.outputPath}`]);
+              }
+              setRunStatus('done');
+              setIsRunning(false);
+            } else if (payload.type === 'error') {
+              setRunLog(prev => [...prev.slice(-99), '[ERROR] ' + payload.text]);
+              setRunStatus('error');
+              setIsRunning(false);
+            }
+          } catch {}
+        }
+      }
+    } catch (e: any) {
+      if (!aborted) {
+        setRunLog(prev => [...prev, '[ERROR] ' + e.message]);
+        setRunStatus('error');
+      } else {
+        setRunLog(prev => [...prev, '[ หยุดการทำงาน ]']);
+        setRunStatus('idle');
+      }
+      setIsRunning(false);
+    }
+  };
+
   const handleStop = () => {
     if (abortRef.current) {
       abortRef.current();
@@ -299,12 +460,14 @@ export const SingleClipEditorTab: React.FC = () => {
           🎬 โหมดตัดต่อคลิปเดียว (Single Clip Editor)
         </h1>
         <div className="flex gap-2 items-center">
-          <button
-            onClick={handleGenerateScript}
-            className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg shadow transition-colors text-sm"
-          >
-            💾 สร้างสคริปต์ .command
-          </button>
+          {activeMode === 'jumpcut' && (
+            <button
+              onClick={handleGenerateScript}
+              className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg shadow transition-colors text-sm"
+            >
+              💾 สร้างสคริปต์ .command
+            </button>
+          )}
           {runStatus === 'done' ? (
             <button
               onClick={() => { setRunStatus('idle'); setRunLog([]); }}
@@ -321,15 +484,146 @@ export const SingleClipEditorTab: React.FC = () => {
             </button>
           ) : (
             <button
-              onClick={handleRun}
+              onClick={activeMode === 'jumpcut' ? handleRun : handleRunAssembly}
               className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg shadow transition-colors"
             >
-              ▶ ตัดต่อเลย!
+              {activeMode === 'jumpcut' ? '▶ ตัดต่อเลย!' : '▶ สุ่มต่อคลิปเลย!'}
             </button>
           )}
         </div>
       </div>
 
+      <div className="mb-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <button
+          onClick={() => { setActiveMode('jumpcut'); setRunStatus('idle'); setRunLog([]); }}
+          className={`text-left rounded-xl border p-4 transition-all ${activeMode === 'jumpcut' ? 'border-indigo-400 bg-indigo-500/15 text-white shadow-lg shadow-indigo-900/20' : 'border-gray-700 bg-gray-900/60 text-gray-300 hover:border-gray-500'}`}
+        >
+          <div className="font-bold text-lg">✂️ Jump Cut เดิม</div>
+          <div className="text-sm text-gray-400 mt-1">ตัดทุกคลิปในโฟลเดอร์ด้วยสูตร Scene 1 + Scene 2</div>
+        </button>
+        <button
+          onClick={() => { setActiveMode('assembly'); setRunStatus('idle'); setRunLog([]); }}
+          className={`text-left rounded-xl border p-4 transition-all ${activeMode === 'assembly' ? 'border-emerald-400 bg-emerald-500/15 text-white shadow-lg shadow-emerald-900/20' : 'border-gray-700 bg-gray-900/60 text-gray-300 hover:border-gray-500'}`}
+        >
+          <div className="font-bold text-lg">🎲 สุ่มต่อคลิปตามเวลา</div>
+          <div className="text-sm text-gray-400 mt-1">สุ่มหยิบคลิปไม่ซ้ำจากโฟลเดอร์ แล้วต่อให้ได้ความยาวที่ต้องการ</div>
+        </button>
+      </div>
+
+      {activeMode === 'assembly' ? (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="space-y-6">
+            <Card>
+              <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700 font-bold text-lg">📂 โฟลเดอร์สำหรับสุ่มต่อคลิป</div>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm mb-2">โฟลเดอร์คลิปต้นทาง</label>
+                  <div className="flex gap-2 items-center">
+                    <button
+                      onClick={() => handlePickAssemblyFolder('source')}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-lg transition-all whitespace-nowrap"
+                    >
+                      📁 เลือกต้นทาง
+                    </button>
+                    <span className="font-mono text-xs text-gray-400 truncate flex-1 bg-gray-800/60 rounded px-2 py-2 border border-gray-700">
+                      {assemblySourceFolder || 'ยังไม่ได้เลือก...'}
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm mb-2">โฟลเดอร์ปลายทาง</label>
+                  <div className="flex gap-2 items-center">
+                    <button
+                      onClick={() => handlePickAssemblyFolder('output')}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-lg transition-all whitespace-nowrap"
+                    >
+                      📁 เลือกปลายทาง
+                    </button>
+                    <span className="font-mono text-xs text-gray-400 truncate flex-1 bg-gray-800/60 rounded px-2 py-2 border border-gray-700">
+                      {assemblyOutputFolder || 'ยังไม่ได้เลือก...'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </Card>
+
+            <Card>
+              <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700 font-bold text-lg">⏱️ ตั้งค่าคลิปปลายทาง</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm mb-1">ความยาวที่ต้องการ (วินาที)</label>
+                  <NumInput min={1} step={1} value={assemblyTargetSeconds} onChange={setAssemblyTargetSeconds} className="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700" />
+                </div>
+                <div>
+                  <label className="block text-sm mb-1">จำนวนคลิป Output</label>
+                  <NumInput min={0} step={1} value={assemblyOutputCount} onChange={setAssemblyOutputCount} className="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700" />
+                  <div className="mt-1 text-xs text-gray-500">ใส่ 0 = สร้างอัตโนมัติจนใช้คลิปย่อยครบโฟลเดอร์</div>
+                </div>
+                <div>
+                  <label className="block text-sm mb-1">ชื่อไฟล์ Output</label>
+                  <input
+                    value={assemblyOutputName}
+                    onChange={e => setAssemblyOutputName(e.target.value)}
+                    className="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700"
+                    placeholder="random_cut"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm mb-1">ความกว้าง</label>
+                  <NumInput min={320} step={10} value={assemblyWidth} onChange={setAssemblyWidth} className="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700" />
+                </div>
+                <div>
+                  <label className="block text-sm mb-1">ความสูง</label>
+                  <NumInput min={320} step={10} value={assemblyHeight} onChange={setAssemblyHeight} className="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700" />
+                </div>
+              </div>
+              <div className="mt-4 rounded-lg border border-emerald-700/60 bg-emerald-950/30 p-3 text-sm text-emerald-100">
+                ระบบจะวนใช้คลิปใหม่ให้ครบทุกไฟล์ก่อน ตอนนี้ใช้ไปแล้ว {assemblyUsedKeys.length} ไฟล์ ถ้าท้ายคลิปยาวไม่พอ จะยอมสุ่มคลิปที่เคยใช้แล้วมาเติมให้ครบเวลา
+              </div>
+              <button
+                onClick={clearAssemblyHistory}
+                className="mt-3 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm font-bold rounded-lg transition-all"
+              >
+                ♻️ ล้างประวัติคลิปที่เคยใช้แล้ว
+              </button>
+            </Card>
+          </div>
+
+          <div className="space-y-6">
+            <Card>
+              <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700 font-bold text-lg">🧩 แผนคลิปที่สุ่มล่าสุด</div>
+              {assemblyLastPlan.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-gray-700 bg-gray-950/40 p-8 text-center text-gray-400">
+                  กด “สุ่มต่อคลิปเลย!” แล้วรายการคลิปที่ถูกเลือกจะแสดงตรงนี้
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-[440px] overflow-y-auto pr-1">
+                  {assemblyLastPlan.map((clip, index) => (
+                    <div key={`${clip.key}-${index}`} className="rounded-lg border border-gray-700 bg-gray-900/60 p-3">
+                      <div className="flex items-center gap-2 text-sm">
+                        <span className="font-bold text-emerald-300">ไฟล์ {clip.outputIndex || 1} · #{index + 1}</span>
+                        <span className="font-mono truncate">{clip.filename}</span>
+                      </div>
+                      <div className="mt-1 text-xs text-gray-400">
+                        เริ่ม {clip.start.toFixed(2)}s · ใช้ {clip.duration.toFixed(2)}s
+                        {clip.sourceDuration ? ` · ต้นฉบับ ${clip.sourceDuration.toFixed(2)}s` : ''}
+                        {clip.fromReuse ? ' · เติมซ้ำ' : ''}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+
+            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 text-sm text-yellow-800 dark:text-yellow-200">
+              <strong>💡 วิธีใช้:</strong><br />
+              1. เลือกโฟลเดอร์ต้นทางที่มีคลิปหลายไฟล์ และเลือกโฟลเดอร์ปลายทาง<br />
+              2. ใส่ความยาว เช่น 45 วินาที และตั้งจำนวน Output เป็น 0 ถ้าต้องการให้ใช้คลิปย่อยจนหมดโฟลเดอร์<br />
+              3. ระบบจะสร้างหลายไฟล์ต่อรอบ ใช้คลิปใหม่ให้ครบก่อน ถ้าคลิปท้ายยังขาดเวลา จะยอมสุ่มคลิปซ้ำมาเติมให้เต็ม
+            </div>
+          </div>
+        </div>
+      ) : (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Left Column */}
         <div className="space-y-6">
@@ -522,6 +816,7 @@ export const SingleClipEditorTab: React.FC = () => {
           </div>
         </div>
       </div>
+      )}
 
       {/* Log Panel */}
       {runLog.length > 0 && (

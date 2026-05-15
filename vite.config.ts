@@ -40,6 +40,46 @@ function getAipageDataDir(): string {
   return path.resolve(__dirname, 'public/app_data');
 }
 
+function parseCsvRows(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let quoted = false;
+  const clean = String(text || '').replace(/^\uFEFF/, '');
+  for (let i = 0; i < clean.length; i++) {
+    const char = clean[i];
+    const next = clean[i + 1];
+    if (quoted) {
+      if (char === '"' && next === '"') {
+        cell += '"';
+        i++;
+      } else if (char === '"') {
+        quoted = false;
+      } else {
+        cell += char;
+      }
+    } else if (char === '"') {
+      quoted = true;
+    } else if (char === ',') {
+      row.push(cell);
+      cell = '';
+    } else if (char === '\n') {
+      if (cell.endsWith('\r')) cell = cell.slice(0, -1);
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+    } else {
+      cell += char;
+    }
+  }
+  if (cell || row.length) {
+    row.push(cell);
+    rows.push(row);
+  }
+  return rows;
+}
+
 const CELEBRITY_TEACHINGS_DIR = path.resolve(__dirname, 'public/app_data/celebrity_teachings');
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
 
@@ -1371,6 +1411,262 @@ const fileSaverPlugin = (): Plugin => ({
       });
     });
 
+    // === Randomly assemble unique clips until target duration ===
+    server.middlewares.use('/api/build-random-clip-assembly', (req, res) => {
+      if (req.method !== 'POST') { res.statusCode = 405; res.end(''); return; }
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      const { spawn, spawnSync } = require('child_process');
+      const VIDEO_EXTS = ['.mp4', '.mov', '.avi', '.mkv', '.m4v', '.webm'];
+      const send = (obj: object) => {
+        if (!res.writableEnded) {
+          try { res.write('data: ' + JSON.stringify(obj) + '\n\n'); } catch {}
+        }
+      };
+      const sh = (value: string) => `'${String(value).replace(/'/g, `'\\''`)}'`;
+      const toFinite = (value: any, fallback: number, min: number, max: number) => {
+        const n = Number(value);
+        if (!Number.isFinite(n)) return fallback;
+        return Math.min(max, Math.max(min, n));
+      };
+      const shuffle = <T,>(items: T[]) => {
+        const next = [...items];
+        for (let i = next.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [next[i], next[j]] = [next[j], next[i]];
+        }
+        return next;
+      };
+
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', () => {
+        let payload: any = {};
+        try { payload = JSON.parse(body || '{}'); } catch {}
+
+        const sourceFolder = String(payload.sourceFolder || '').trim();
+        const outputFolder = String(payload.outputFolder || '').trim();
+        const targetSeconds = toFinite(payload.targetSeconds, 45, 1, 60 * 60);
+        const width = Math.round(toFinite(payload.width, 1080, 320, 7680));
+        const height = Math.round(toFinite(payload.height, 1920, 320, 7680));
+        const usedKeys = new Set<string>(Array.isArray(payload.usedKeys) ? payload.usedKeys.map((v: any) => String(v)) : []);
+        const outputBase = String(payload.outputName || 'random_cut')
+          .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+          .replace(/\s+/g, '_')
+          .replace(/^_+|_+$/g, '')
+          .slice(0, 80) || 'random_cut';
+
+        if (!sourceFolder || !fs.existsSync(sourceFolder) || !fs.statSync(sourceFolder).isDirectory()) {
+          send({ type: 'error', text: 'ไม่พบโฟลเดอร์คลิปต้นทาง' });
+          res.end();
+          return;
+        }
+
+        try { fs.mkdirSync(outputFolder, { recursive: true }); } catch (e: any) {
+          send({ type: 'error', text: 'สร้างโฟลเดอร์ปลายทางไม่ได้: ' + e.message });
+          res.end();
+          return;
+        }
+
+        const env = { ...process.env, PATH: `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${process.env.PATH || ''}` };
+        const files = fs.readdirSync(sourceFolder)
+          .filter((file: string) => VIDEO_EXTS.includes(path.extname(file).toLowerCase()))
+          .map((file: string) => {
+            const filePath = path.join(sourceFolder, file);
+            const stat = fs.statSync(filePath);
+            const key = `${sourceFolder}::${file}`;
+            return { file, filePath, key, mtimeMs: stat.mtimeMs, size: stat.size };
+          });
+
+        if (files.length === 0) {
+          send({ type: 'error', text: 'ไม่พบไฟล์วิดีโอในโฟลเดอร์ต้นทาง' });
+          res.end();
+          return;
+        }
+
+        const currentFileKeys = new Set(files.map((item: any) => item.key));
+        const carriedUsedKeys = new Set<string>([...usedKeys].filter(key => currentFileKeys.has(key)));
+        const cycleReset = carriedUsedKeys.size >= files.length;
+        const historyBase = cycleReset ? new Set<string>() : carriedUsedKeys;
+        const freshFileCount = files.filter((item: any) => !historyBase.has(item.key)).length;
+
+        send({
+          type: 'log',
+          text: cycleReset
+            ? `ใช้ครบทุกไฟล์แล้ว เริ่มรอบใหม่จาก ${files.length} ไฟล์ กำลังอ่านความยาว...`
+            : `เหลือคลิปใหม่ในรอบนี้ ${freshFileCount}/${files.length} ไฟล์ กำลังอ่านความยาว...`,
+        });
+
+        const clips = files.flatMap((item: any) => {
+          const probe = spawnSync('ffprobe', [
+            '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            item.filePath,
+          ], { encoding: 'utf8', env, timeout: 20000 });
+          const duration = Number(String(probe.stdout || '').trim());
+          if (!Number.isFinite(duration) || duration < 1) return [];
+          return [{ ...item, duration }];
+        });
+
+        if (clips.length === 0) {
+          send({ type: 'error', text: 'อ่านความยาวคลิปไม่ได้ ตรวจว่าเครื่องมี ffprobe/ffmpeg และไฟล์วิดีโอเปิดได้' });
+          res.end();
+          return;
+        }
+
+        const selected: Array<any> = [];
+        let remaining = targetSeconds;
+        const freshClips = shuffle(clips.filter((clip: any) => !historyBase.has(clip.key)));
+        const selectedKeysThisRun = new Set<string>();
+        const addSegment = (clip: any, index: number, candidatePool: any[], fromReuse: boolean) => {
+          const remainingAfterThis = candidatePool.slice(index + 1).reduce((sum: number, item: any) => sum + item.duration, 0);
+          const mustTake = fromReuse ? 0.5 : Math.max(0.5, remaining - remainingAfterThis);
+          const naturalTake = remaining <= 8 ? remaining : 3 + Math.random() * 5;
+          const wanted = Math.max(mustTake, naturalTake);
+          const segDuration = Math.min(clip.duration, remaining, Math.max(0.5, wanted));
+          const maxStart = Math.max(0, clip.duration - segDuration);
+          const start = maxStart > 0 ? Math.random() * maxStart : 0;
+          selected.push({
+            ...clip,
+            start: Number(start.toFixed(2)),
+            segmentDuration: Number(segDuration.toFixed(2)),
+            fromReuse,
+          });
+          selectedKeysThisRun.add(clip.key);
+          remaining -= segDuration;
+        };
+
+        for (let index = 0; index < freshClips.length; index++) {
+          if (remaining <= 0.05) break;
+          addSegment(freshClips[index], index, freshClips, false);
+        }
+
+        let refillPass = 0;
+        while (remaining > 0.05 && refillPass < 2000) {
+          const unusedInThisOutput = clips.filter((clip: any) => !selectedKeysThisRun.has(clip.key));
+          const refillPool = shuffle(unusedInThisOutput.length > 0 ? unusedInThisOutput : clips);
+          if (refillPass === 0) {
+            send({ type: 'log', text: `คลิปใหม่ไม่พอเติม ${targetSeconds}s จึงสุ่มคลิปที่เคยใช้แล้วมาเติมท้ายงาน` });
+          }
+          for (let index = 0; index < refillPool.length; index++) {
+            if (remaining <= 0.05) break;
+            addSegment(refillPool[index], index, refillPool, true);
+          }
+          refillPass++;
+        }
+
+        if (remaining > 0.25) {
+          send({ type: 'error', text: `คลิปใหม่ที่เหลือยังไม่พอสำหรับ ${targetSeconds} วินาที (ทำได้ประมาณ ${Math.floor(targetSeconds - remaining)} วินาที) ลองเพิ่มคลิปหรือล้างประวัติ` });
+          res.end();
+          return;
+        }
+
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const tempDir = path.join(outputFolder, `.random_assembly_${Date.now()}`);
+        const outputPath = path.join(outputFolder, `${outputBase}_${stamp}.mp4`);
+        const scriptPath = path.join('/tmp', `random_clip_assembly_${Date.now()}.sh`);
+        const segmentPaths = selected.map((_: any, index: number) => path.join(tempDir, `seg_${String(index + 1).padStart(3, '0')}.mp4`));
+        const listPath = path.join(tempDir, 'concat_list.txt');
+        const vf = `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p`;
+        const scriptLines = [
+          '#!/bin/bash',
+          'set -euo pipefail',
+          'export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"',
+          `TMP_DIR=${sh(tempDir)}`,
+          'mkdir -p "$TMP_DIR"',
+          `echo "เริ่มต่อคลิป ${selected.length} ชิ้น -> ${targetSeconds}s"`,
+        ];
+
+        selected.forEach((clip, index) => {
+          scriptLines.push(`echo "[${index + 1}/${selected.length}] ${clip.file} @ ${clip.start}s + ${clip.segmentDuration}s"`);
+          scriptLines.push([
+            'ffmpeg', '-y',
+            '-ss', sh(String(clip.start)),
+            '-t', sh(String(clip.segmentDuration)),
+            '-i', sh(clip.filePath),
+            '-map', '0:v:0',
+            '-an',
+            '-vf', sh(vf),
+            '-c:v', 'libx264',
+            '-preset', 'veryfast',
+            '-crf', '20',
+            '-movflags', '+faststart',
+            sh(segmentPaths[index]),
+          ].join(' '));
+        });
+
+        scriptLines.push(`cat > ${sh(listPath)} <<'EOF'`);
+        segmentPaths.forEach(segmentPath => scriptLines.push(`file ${sh(segmentPath)}`));
+        scriptLines.push('EOF');
+        scriptLines.push(`ffmpeg -y -f concat -safe 0 -i ${sh(listPath)} -c copy ${sh(outputPath)}`);
+        scriptLines.push('rm -rf "$TMP_DIR"');
+        scriptLines.push(`echo "เสร็จแล้ว: ${outputPath}"`);
+
+        try {
+          fs.writeFileSync(scriptPath, scriptLines.join('\n'), { mode: 0o755 });
+        } catch (e: any) {
+          send({ type: 'error', text: 'เขียนไฟล์สคริปต์ชั่วคราวไม่ได้: ' + e.message });
+          res.end();
+          return;
+        }
+
+        const used = selected.map(clip => clip.key);
+        const nextHistory = new Set<string>(historyBase);
+        selected.forEach(clip => { if (!clip.fromReuse) nextHistory.add(clip.key); });
+        if (nextHistory.size >= clips.length) {
+          clips.forEach((clip: any) => nextHistory.add(clip.key));
+        }
+        send({
+          type: 'plan',
+          outputPath,
+          usedKeys: used,
+          historyKeys: Array.from(nextHistory),
+          cycleReset,
+          cycleCompleted: nextHistory.size >= clips.length,
+          clips: selected.map(clip => ({
+            filename: clip.file,
+            key: clip.key,
+            start: clip.start,
+            duration: clip.segmentDuration,
+            sourceDuration: Number(clip.duration.toFixed(2)),
+            fromReuse: Boolean(clip.fromReuse),
+          })),
+        });
+
+        const proc = spawn('bash', [scriptPath], { stdio: ['ignore', 'pipe', 'pipe'], env });
+        let finished = false;
+        const cleanup = () => { try { fs.unlinkSync(scriptPath); } catch {} };
+        proc.stdout.on('data', (data: Buffer) => {
+          for (const line of data.toString().split('\n')) {
+            if (line.trim()) send({ type: 'log', text: line });
+          }
+        });
+        proc.stderr.on('data', (data: Buffer) => {
+          for (const line of data.toString().split('\n')) {
+            if (line.trim()) send({ type: 'log', text: line });
+          }
+        });
+        proc.on('close', (code: number | null) => {
+          if (finished) return;
+          finished = true;
+          cleanup();
+          if (code === 0) send({ type: 'done', outputPath, usedKeys: used, historyKeys: Array.from(nextHistory), cycleReset, cycleCompleted: nextHistory.size >= clips.length });
+          else send({ type: 'error', text: code != null ? `ffmpeg exited (code ${code}) — ดู log ด้านบน` : 'Process stopped' });
+          if (!res.writableEnded) res.end();
+        });
+        proc.on('error', (err: Error) => {
+          if (finished) return;
+          finished = true;
+          cleanup();
+          send({ type: 'error', text: err.message });
+          if (!res.writableEnded) res.end();
+        });
+        res.on('close', () => { if (!finished) { proc.kill(); cleanup(); } });
+      });
+    });
+
     // === List image files in a folder (png, jpg, jpeg, gif, webp) ===
     server.middlewares.use('/api/list-folder-images', (req, res) => {
       if (req.method !== 'POST') { res.statusCode = 405; res.end(''); return; }
@@ -1983,6 +2279,31 @@ const fileSaverPlugin = (): Plugin => ({
       } catch (e: any) { res.statusCode = 500; res.end(JSON.stringify({ error: e.message })); }
     });
 
+    server.middlewares.use('/api/aipage-export-refs', (_req, res) => {
+      try {
+        const csvPath = path.join(getAipageDataDir(), 'aipage_n8n_export.csv');
+        const urls: string[] = [];
+        const headlines: string[] = [];
+        if (fs.existsSync(csvPath)) {
+          const rows = parseCsvRows(fs.readFileSync(csvPath, 'utf-8'));
+          const headers = rows[0] || [];
+          const sourceUrlIndex = headers.indexOf('source_url');
+          const headlineIndex = headers.indexOf('headline');
+          for (const row of rows.slice(1)) {
+            const sourceUrl = sourceUrlIndex >= 0 ? String(row[sourceUrlIndex] || '').trim() : '';
+            const headline = headlineIndex >= 0 ? String(row[headlineIndex] || '').trim() : '';
+            if (sourceUrl && !urls.includes(sourceUrl)) urls.push(sourceUrl);
+            if (headline && !headlines.includes(headline)) headlines.push(headline);
+          }
+        }
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ success: true, csvPath, urls, headlines, count: Math.max(urls.length, headlines.length) }));
+      } catch (e: any) {
+        res.statusCode = 500;
+        res.end(JSON.stringify({ success: false, error: e.message }));
+      }
+    });
+
     // === AI Page Post Results (stored in user-configured data dir) ===
     server.middlewares.use('/api/aipage-results', (req, res) => {
       const aipageDir = getAipageDataDir();
@@ -2138,6 +2459,27 @@ const fileSaverPlugin = (): Plugin => ({
               const csvContent = '\uFEFF' + csvBody;
               const csvPath = path.join(getAipageDataDir(), 'aipage_n8n_export.csv');
               fs.writeFileSync(csvPath, csvContent);
+              try {
+                const cacheFile = path.resolve(__dirname, 'public/app_data/article_cache.json');
+                if (fs.existsSync(cacheFile)) {
+                  const cache: Record<string, any> = JSON.parse(fs.readFileSync(cacheFile, 'utf-8'));
+                  const exportedAt = new Date().toISOString();
+                  const exportedUrls = new Set(exportResults.map((p: any) => String(p.sourceUrl || p.sourceMeta?.sourceUrl || '').trim()).filter(Boolean));
+                  const exportedHeadlines = new Set(exportResults.map((p: any) => String(p.headline || p.selectedHeadline || p.sourceMeta?.selectedHeadline || '').trim()).filter(Boolean));
+                  let changed = false;
+                  for (const [hash, entry] of Object.entries(cache)) {
+                    const sourceUrl = String((entry as any)?.sourceUrl || '').trim();
+                    const headline = String((entry as any)?.selectedHeadline || '').trim();
+                    if ((sourceUrl && exportedUrls.has(sourceUrl)) || (headline && exportedHeadlines.has(headline))) {
+                      cache[hash] = { ...(entry as any), exportedCsvAt: exportedAt, resultSavedAt: (entry as any)?.resultSavedAt || exportedAt };
+                      changed = true;
+                    }
+                  }
+                  if (changed) fs.writeFileSync(cacheFile, JSON.stringify(cache, null, 2), 'utf-8');
+                }
+              } catch (e) {
+                console.warn('[aipage-results] mark exported article cache failed:', e);
+              }
               res.setHeader('Content-Type', 'application/json');
               res.end(JSON.stringify({
                 success: true,
@@ -2718,6 +3060,8 @@ const fileSaverPlugin = (): Plugin => ({
           const scanCount = Math.max(limit, Math.min(500, Number(parsed.scanCount || 150)));
           const dropboxFolder = String(parsed.dropboxFolder || '/Stock_Gainers_Content').trim() || '/Stock_Gainers_Content';
           const skipDropbox = Boolean(parsed.skipDropbox);
+          const VALID_MODES = ['gainers', 'losers', 'low_pe', 'trending'];
+          const mode = VALID_MODES.includes(parsed.mode) ? parsed.mode : 'gainers';
           writeTopGainersConfigCsv(p2);
 
           const py = fs.existsSync(path.resolve(__dirname, '.venv-top-gainers/bin/python'))
@@ -2732,10 +3076,12 @@ const fileSaverPlugin = (): Plugin => ({
             '--limit', String(limit),
             '--scan-count', String(scanCount),
             '--dropbox-folder', dropboxFolder,
+            '--mode', mode,
           ];
           if (skipDropbox) args.push('--skip-dropbox');
 
           send({ type: 'log', text: `ใช้ P2: ${p2}` });
+          send({ type: 'log', text: `โหมด: ${mode}` });
           send({ type: 'log', text: `เริ่มสร้าง ${limit} หุ้น → ${dropboxFolder}${skipDropbox ? ' (ไม่อัป Dropbox)' : ''}` });
           send({ type: 'log', text: `สแกน Yahoo candidates สูงสุด ${scanCount} ตัว` });
 
@@ -2778,6 +3124,50 @@ const fileSaverPlugin = (): Plugin => ({
         } catch (e: any) {
           send({ type: 'error', text: e.message });
           if (!res.writableEnded) res.end();
+        }
+      });
+    });
+
+    // === Top Gainers Export — copy images + write .txt captions into a named folder ===
+    server.middlewares.use('/api/top-gainers-export', (req, res) => {
+      if (req.method !== 'POST') { res.statusCode = 405; res.end('Method not allowed'); return; }
+      let body = '';
+      req.on('data', (chunk: any) => { body += chunk.toString(); });
+      req.on('end', () => {
+        try {
+          const { destDir, rows } = JSON.parse(body || '{}');
+          if (!destDir || !Array.isArray(rows) || rows.length === 0) {
+            res.statusCode = 400;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ success: false, error: 'destDir and rows are required' }));
+            return;
+          }
+          const now = new Date();
+          const pad = (n: number) => String(n).padStart(2, '0');
+          const folderName = `topGainer_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+          const exportDir = path.join(destDir, folderName);
+          fs.mkdirSync(exportDir, { recursive: true });
+
+          const exported: string[] = [];
+          for (const row of rows as { symbol: string; caption: string; localImagePath: string }[]) {
+            if (!row.symbol) continue;
+            const safeSym = row.symbol.replace(/[^a-zA-Z0-9._-]/g, '_');
+            if (row.localImagePath && fs.existsSync(row.localImagePath)) {
+              const ext = path.extname(row.localImagePath) || '.png';
+              fs.copyFileSync(row.localImagePath, path.join(exportDir, `${safeSym}${ext}`));
+            }
+            if (row.caption) {
+              fs.writeFileSync(path.join(exportDir, `${safeSym}.txt`), row.caption, 'utf-8');
+            }
+            exported.push(row.symbol);
+          }
+
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ success: true, exportDir, folderName, count: exported.length }));
+        } catch (e: any) {
+          res.statusCode = 500;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ success: false, error: e.message }));
         }
       });
     });

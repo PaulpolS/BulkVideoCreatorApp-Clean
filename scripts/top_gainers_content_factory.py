@@ -67,6 +67,7 @@ class StockItem:
     caption: str = ""
     image_path: Path | None = None
     dropbox_url: str = ""
+    pe_ratio: float = 0.0
 
 
 def load_dotenv_if_available() -> None:
@@ -186,15 +187,19 @@ def requests_session():
     return session
 
 
-def fetch_yahoo_day_gainers(count: int) -> list[dict[str, Any]]:
+def fetch_yahoo_screener(scr_id: str, count: int) -> list[dict[str, Any]]:
     session = requests_session()
     url = "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved"
-    params = {"scrIds": "day_gainers", "count": max(count, 25)}
+    params = {"scrIds": scr_id, "count": max(count, 25)}
     res = session.get(url, params=params, timeout=20)
     res.raise_for_status()
     payload = res.json()
     quotes = payload.get("finance", {}).get("result", [{}])[0].get("quotes", [])
     return quotes if isinstance(quotes, list) else []
+
+
+def fetch_yahoo_day_gainers(count: int) -> list[dict[str, Any]]:
+    return fetch_yahoo_screener("day_gainers", count)
 
 
 def fetch_history_and_info(symbol: str) -> StockItem:
@@ -223,6 +228,8 @@ def fetch_history_and_info(symbol: str) -> StockItem:
 
     website = str(info.get("website") or "")
     domain = domain_from_url(website)
+    pe_raw = info.get("trailingPE") or info.get("forwardPE")
+    pe_ratio = float(pe_raw) if pe_raw is not None else 0.0
     return StockItem(
         symbol=symbol.upper(),
         company_name=str(info.get("shortName") or info.get("longName") or symbol.upper()),
@@ -233,6 +240,7 @@ def fetch_history_and_info(symbol: str) -> StockItem:
         website=website,
         domain=domain,
         ohlc=hist,
+        pe_ratio=pe_ratio,
     )
 
 
@@ -275,6 +283,82 @@ def get_stock_universe(config: dict[str, Any], limit: int, scan_count: int) -> l
         except Exception as exc:
             print(f"[WARN] Skip {symbol}: {exc}", file=sys.stderr)
     return sorted(items, key=lambda i: i.pct_change, reverse=True)[:limit]
+
+
+def _screen_stocks_from_quotes(quotes: list[dict[str, Any]], limit: int,
+                               sector_filter: str = "", sort_key=None, reverse: bool = True) -> list[StockItem]:
+    symbols = [str(q.get("symbol", "")).upper() for q in quotes if q.get("symbol")]
+    items: list[StockItem] = []
+    for symbol in symbols:
+        try:
+            item = fetch_history_and_info(symbol)
+            if sector_filter and sector_filter not in item.sector.lower():
+                continue
+            items.append(item)
+            if len(items) >= limit:
+                break
+        except Exception as exc:
+            print(f"[WARN] Skip {symbol}: {exc}", file=sys.stderr)
+    if sort_key:
+        items = sorted(items, key=sort_key, reverse=reverse)
+    return items[:limit]
+
+
+def _screen_low_pe(limit: int, scan_count: int, pe_threshold: float = 20.0) -> list[StockItem]:
+    # Try the undervalued screener first; fall back to most_actives
+    quotes = fetch_yahoo_screener("undervalued_large_caps", max(scan_count, limit * 20))
+    if not quotes:
+        quotes = fetch_yahoo_screener("most_actives", max(scan_count, limit * 20))
+    if not quotes:
+        raise RuntimeError("Yahoo screener returned no candidates for low P/E screening.")
+
+    symbols = [str(q.get("symbol", "")).upper() for q in quotes if q.get("symbol")]
+    print(f"[INFO] Low P/E screening: {len(symbols)} candidates, PE threshold < {pe_threshold}")
+    items: list[StockItem] = []
+    all_pe_items: list[StockItem] = []
+    for symbol in symbols:
+        try:
+            item = fetch_history_and_info(symbol)
+            if item.pe_ratio > 0:
+                all_pe_items.append(item)
+            if item.pe_ratio > 0 and item.pe_ratio < pe_threshold:
+                items.append(item)
+                if len(items) >= limit:
+                    break
+        except Exception as exc:
+            print(f"[WARN] Skip {symbol}: {exc}", file=sys.stderr)
+
+    # If threshold too strict, relax and use lowest available PE
+    if not items and all_pe_items:
+        print(f"[WARN] No stocks with PE < {pe_threshold}; using {len(all_pe_items)} lowest-PE available", file=sys.stderr)
+        items = sorted(all_pe_items, key=lambda i: i.pe_ratio)[:limit]
+
+    return items[:limit]
+
+
+def get_stock_universe_by_mode(config: dict[str, Any], limit: int, scan_count: int, mode: str) -> list[StockItem]:
+    """Route to the correct screener based on mode."""
+    if mode == "losers":
+        quotes = fetch_yahoo_screener("day_losers", max(scan_count, limit * 20))
+        if not quotes:
+            raise RuntimeError("Yahoo day_losers screener returned no results.")
+        print(f"[INFO] Day losers scanned: {len(quotes)} candidates")
+        return _screen_stocks_from_quotes(quotes, limit,
+                                          sort_key=lambda i: i.pct_change, reverse=False)
+
+    if mode == "low_pe":
+        return _screen_low_pe(limit, scan_count)
+
+    if mode == "trending":
+        quotes = fetch_yahoo_screener("most_actives", max(scan_count, limit * 20))
+        if not quotes:
+            raise RuntimeError("Yahoo most_actives screener returned no results.")
+        print(f"[INFO] Most actives scanned: {len(quotes)} candidates")
+        return _screen_stocks_from_quotes(quotes, limit,
+                                          sort_key=lambda i: i.volume, reverse=True)
+
+    # Default: gainers (existing behavior, respects sector/symbol P2 config)
+    return get_stock_universe(config, limit, scan_count)
 
 
 def domain_from_url(url: str) -> str:
@@ -336,14 +420,23 @@ def summarize_ohlc(item: StockItem) -> str:
     return "\n".join(rows)
 
 
-def generate_caption(item: StockItem, creds: AppCreds, model: str) -> str:
+def generate_caption(item: StockItem, creds: AppCreds, model: str, mode: str = "gainers") -> str:
     news_block = "\n".join(f"- {h}" for h in item.news) or "- No major headline found"
+    mode_instruction = {
+        "gainers": "วิเคราะห์ว่าทำไมหุ้นตัวนี้ราคาพุ่งขึ้นสูงวันนี้ เน้นโมเมนตัมและแรงซื้อ",
+        "losers":  "วิเคราะห์ว่าทำไมหุ้นตัวนี้ราคาร่วงลงมา บอกว่าผู้ลงทุนควรระวังหรือน่าซื้อที่จุดนี้หรือไม่",
+        "low_pe":  f"เน้นวิเคราะห์ว่าหุ้นตัวนี้มี P/E ต่ำ ({item.pe_ratio:.1f}x) และน่าสนใจในเชิง Value Investing อย่างไร",
+        "trending": "วิเคราะห์ว่าทำไมหุ้นตัวนี้ถึงมีปริมาณซื้อขายสูงมาก และมีข่าวอะไรน่าจับตาวันนี้",
+    }.get(mode, "วิเคราะห์ว่าทำไมหุ้นตัวนี้ถึงน่าสนใจวันนี้")
+
+    pe_line = f"P/E Ratio: {item.pe_ratio:.2f}x\n" if item.pe_ratio > 0 else ""
     prompt = (
-        "Analyze this stock's daily performance and news. Write a short, engaging 2-3 sentence "
-        "summary in Thai explaining why it is interesting today. Tone: Professional, exciting, "
+        f"Analyze this stock. {mode_instruction}\n"
+        "Write a short, engaging 2-3 sentence summary in Thai. Tone: Professional, exciting, "
         "and highly engaging for a financial Facebook page.\n\n"
         f"Symbol: {item.symbol}\nCompany: {item.company_name}\n"
-        f"Price: {item.price:.2f}\n% Change: {item.pct_change:.2f}%\nVolume: {item.volume}\n"
+        f"Price: {item.price:.2f}\n% Change: {item.pct_change:.2f}%\nVolume: {item.volume:,}\n"
+        f"{pe_line}"
         f"OHLC last 30 trading days:\n{summarize_ohlc(item)}\n\nNews:\n{news_block}\n\n"
         "Return only Thai caption text. Include 1-3 finance/social emojis naturally."
     )
@@ -373,6 +466,25 @@ def generate_caption(item: StockItem, creds: AppCreds, model: str) -> str:
             print(f"[WARN] OpenAI caption failed for {item.symbol}: {exc}", file=sys.stderr)
 
     headline = item.news[0] if item.news else "ตลาดกำลังจับตาโมเมนตัมของหุ้นตัวนี้"
+    if mode == "losers":
+        return (
+            f"⚠️ {item.symbol} วันนี้ราคาร่วงลง {abs(item.pct_change):.2f}% "
+            f"มาอยู่ที่ {item.price:.2f} ดอลลาร์ ด้วยวอลุ่ม {item.volume:,} หุ้น "
+            f"ข่าว \"{headline}\" อาจเป็นปัจจัย นักลงทุนควรติดตามสถานการณ์อย่างใกล้ชิด 📉"
+        )
+    if mode == "low_pe":
+        pe_str = f"P/E {item.pe_ratio:.1f}x" if item.pe_ratio > 0 else "P/E ต่ำ"
+        return (
+            f"💰 {item.symbol} น่าสนใจในเชิง Value Investing ด้วย{pe_str} "
+            f"ราคาปัจจุบัน {item.price:.2f} ดอลลาร์ เปลี่ยนแปลง {item.pct_change:+.2f}% "
+            f"ข่าว \"{headline}\" เป็นปัจจัยที่ควรติดตาม 📊"
+        )
+    if mode == "trending":
+        return (
+            f"🔥 {item.symbol} มีปริมาณซื้อขายพุ่งสูงถึง {item.volume:,} หุ้นวันนี้ "
+            f"ราคาเปลี่ยนแปลง {item.pct_change:+.2f}% มาอยู่ที่ {item.price:.2f} ดอลลาร์ "
+            f"ข่าว \"{headline}\" ทำให้เป็นหุ้นที่ต้องจับตาเป็นพิเศษ 👀"
+        )
     return (
         f"🚀 {item.symbol} วันนี้โดดเด่นด้วยแรงซื้อหนุนให้ราคาปรับขึ้น {item.pct_change:.2f}% "
         f"มาปิดใกล้ {item.price:.2f} ดอลลาร์ พร้อมวอลุ่ม {item.volume:,} หุ้น "
@@ -675,9 +787,10 @@ def run(args: argparse.Namespace) -> int:
     chart_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"[INFO] P2 Config_Ref: {config_ref or '(empty)'}")
+    print(f"[INFO] Mode: {args.mode}")
     print(f"[INFO] Output folder: {output_dir}")
 
-    items = get_stock_universe(config, args.limit, args.scan_count)
+    items = get_stock_universe_by_mode(config, args.limit, args.scan_count, args.mode)
     if not items:
         raise RuntimeError("No stocks to process. Check P2 symbols/sector or the Yahoo screener response.")
 
@@ -686,7 +799,7 @@ def run(args: argparse.Namespace) -> int:
     for index, item in enumerate(items, start=1):
         print(f"[INFO] ({index}/{len(items)}) Processing {item.symbol} {item.company_name}")
         item.news = fetch_news(item, creds)
-        item.caption = generate_caption(item, creds, args.model)
+        item.caption = generate_caption(item, creds, args.model, args.mode)
         chart_path = generate_chart(item, chart_dir / f"{safe_file_part(item.symbol)}_chart.png")
         logo_bytes = fetch_logo(item)
         image_path = output_dir / f"{run_date}_{safe_file_part(item.symbol)}.png"
@@ -732,6 +845,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-dropbox", action="store_true", help="Generate local files and CSV without uploading.")
     parser.add_argument("--require-dropbox", action="store_true", help="Fail if Dropbox upload cannot complete.")
     parser.add_argument("--pause-seconds", type=float, default=0.5, help="Delay between stocks to be gentle with APIs.")
+    parser.add_argument("--mode", default="gainers",
+                        choices=["gainers", "losers", "low_pe", "trending"],
+                        help="Screening mode: gainers=top gainers, losers=top losers, low_pe=low P/E value stocks, trending=most active/news-heavy")
     return parser
 
 

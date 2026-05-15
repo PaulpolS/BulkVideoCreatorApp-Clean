@@ -25,6 +25,7 @@ interface GenerationTask {
   bulkHeadline?: string;
   bulkPromptJson?: string;
   bulkSourceUrl?: string;
+  bulkRawArticle?: string;
   localYoutubeOverlay?: {
     overlayKind?: 'youtube' | 'ai-news' | 'github';
     channelName?: string;
@@ -277,6 +278,7 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
 
   // Article Cache — remember generated content per article
   const [articleCache, setArticleCache] = useState<Record<string, any>>({});
+  const [exportedCsvRefs, setExportedCsvRefs] = useState<{ urls: string[]; headlines: string[] }>({ urls: [], headlines: [] });
   const articleKey = (raw: string) => raw.trim().replace(/\s+/g, ' ').slice(0, 250);
   const saveArticleCache = async (raw: string, patch: Record<string, any>) => {
     if (!raw?.trim()) return;
@@ -496,6 +498,7 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
     loadSavedLogos();
     loadFolders();
     loadSavedResults();
+    loadExportedCsvRefs();
     fetch('/api/aipage-storage-config').then(r => r.json()).then(d => { if (d.dir) setAipageDataDir(d.dir); }).catch(() => {});
     // Load article cache
     fetch('/api/article-cache').then(r => r.json()).then(data => {
@@ -1606,6 +1609,16 @@ Return ONLY valid JSON format.`;
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ action: 'add', item: resultItem })
            });
+           if (pendingTask.bulkRawArticle) {
+              await saveArticleCache(pendingTask.bulkRawArticle, {
+                 sourceUrl: resultItem.sourceUrl,
+                 selectedHeadline: taskHeadline,
+                 resultId: resultItem.id,
+                 resultSavedAt: resultItem.createdAt,
+                 imageCompletedAt: resultItem.createdAt,
+                 resultHasImage: !!resultItem.imageUrl,
+              });
+           }
            loadSavedResults();
         } catch(e) { console.error('Failed to save result:', e); }
 
@@ -1862,7 +1875,10 @@ Return ONLY valid JSON format.`;
         body: JSON.stringify({ action: 'export-csv', ids: selected.map((item: any) => item.id) }),
       });
       const csvData = await csvRes.json();
-      if (csvData.success) setDropboxUploadLog(`✅ อัปโหลดครบ ${done} รายการ + บันทึก CSV: ${csvData.csvPath}`);
+      if (csvData.success) {
+        await loadExportedCsvRefs();
+        setDropboxUploadLog(`✅ อัปโหลดครบ ${done} รายการ + บันทึก CSV: ${csvData.csvPath}`);
+      }
     } catch (e: any) {
       setDropboxUploadLog(`❌ ${e.message}`);
       alert(`อัปโหลดไม่สำเร็จ: ${e.message}`);
@@ -1881,6 +1897,7 @@ Return ONLY valid JSON format.`;
     });
     const data = await res.json();
     if (data.success) {
+      await loadExportedCsvRefs();
       setDropboxUploadLog(`✅ บันทึก CSV แล้ว: ${data.csvPath}`);
       const csvText = data.csvContent || '';
       const blobUrl = csvText
@@ -1967,6 +1984,19 @@ Return ONLY valid JSON format.`;
           setSavedResults(results);
         }
      } catch(e) { console.error('Failed to load saved results:', e); }
+  };
+
+  const loadExportedCsvRefs = async () => {
+     try {
+        const res = await fetch('/api/aipage-export-refs');
+        const data = await res.json();
+        if (data.success) {
+          setExportedCsvRefs({
+            urls: Array.isArray(data.urls) ? data.urls : [],
+            headlines: Array.isArray(data.headlines) ? data.headlines : [],
+          });
+        }
+     } catch(e) { console.error('Failed to load exported CSV refs:', e); }
   };
 
   const deleteSavedResult = async (id: string) => {
@@ -2108,19 +2138,24 @@ Return ONLY valid JSON format.`;
   const selectedBulkCount = bulkItems.filter(b => b.isSelected).length;
   const recoverableCacheCount = useMemo(
     () => {
+      const existingKeys = new Set(bulkItems.map(item => articleKey(item.rawArticle)));
       const completedUrls = new Set(
-        savedResults
-          .map((result: any) => String(result?.sourceUrl || result?.sourceMeta?.sourceUrl || '').trim())
-          .filter(Boolean),
+        [
+          ...savedResults.map((result: any) => String(result?.sourceUrl || result?.sourceMeta?.sourceUrl || '').trim()),
+          ...exportedCsvRefs.urls.map(url => String(url || '').trim()),
+        ].filter(Boolean),
       );
       const completedHeadlines = new Set(
-        savedResults
-          .map((result: any) => String(result?.headline || result?.selectedHeadline || result?.sourceMeta?.selectedHeadline || '').trim())
-          .filter(Boolean),
+        [
+          ...savedResults.map((result: any) => String(result?.headline || result?.selectedHeadline || result?.sourceMeta?.selectedHeadline || '').trim()),
+          ...exportedCsvRefs.headlines.map(headline => String(headline || '').trim()),
+        ].filter(Boolean),
       );
       return Object.values(articleCache).filter((entry: any) => {
         if (!entry?.rawArticle || !entry?.generatedArticle) return false;
         if (entry.imageUrl || entry.localImageUrl || entry.dropboxUrl) return false;
+        if (entry.imageCompletedAt || entry.resultSavedAt || entry.exportedCsvAt) return false;
+        if (existingKeys.has(articleKey(entry.rawArticle))) return false;
         const sourceUrl = String(entry.sourceUrl || '').trim();
         const headline = String(entry.selectedHeadline || '').trim();
         if (sourceUrl && completedUrls.has(sourceUrl)) return false;
@@ -2128,7 +2163,7 @@ Return ONLY valid JSON format.`;
         return true;
       }).length;
     },
-    [articleCache, savedResults],
+    [articleCache, savedResults, exportedCsvRefs, bulkItems],
   );
 
   const isGithubBulkItem = (item: Partial<BulkArticleItem>) => {
@@ -2214,14 +2249,16 @@ Return ONLY valid JSON format.`;
       const limit = Math.max(1, Math.min(1000, Number(recoverCacheLimit) || 100));
       const existingKeys = new Set(bulkItems.map(item => articleKey(item.rawArticle)));
       const completedUrls = new Set(
-        savedResults
-          .map((result: any) => String(result?.sourceUrl || result?.sourceMeta?.sourceUrl || '').trim())
-          .filter(Boolean),
+        [
+          ...savedResults.map((result: any) => String(result?.sourceUrl || result?.sourceMeta?.sourceUrl || '').trim()),
+          ...exportedCsvRefs.urls.map(url => String(url || '').trim()),
+        ].filter(Boolean),
       );
       const completedHeadlines = new Set(
-        savedResults
-          .map((result: any) => String(result?.headline || result?.selectedHeadline || result?.sourceMeta?.selectedHeadline || '').trim())
-          .filter(Boolean),
+        [
+          ...savedResults.map((result: any) => String(result?.headline || result?.selectedHeadline || result?.sourceMeta?.selectedHeadline || '').trim()),
+          ...exportedCsvRefs.headlines.map(headline => String(headline || '').trim()),
+        ].filter(Boolean),
       );
       const entriesToRecover = Object.values(cache)
         .filter((entry: any) => entry?.rawArticle && entry?.generatedArticle)
@@ -2230,6 +2267,7 @@ Return ONLY valid JSON format.`;
         )
         .filter((entry: any) => {
           if (entry.imageUrl || entry.localImageUrl || entry.dropboxUrl) return false;
+          if (entry.imageCompletedAt || entry.resultSavedAt || entry.exportedCsvAt) return false;
           if (existingKeys.has(articleKey(entry.rawArticle))) return false;
           const sourceUrl = String(entry.sourceUrl || '').trim();
           const headline = String(entry.selectedHeadline || '').trim();
@@ -3178,6 +3216,7 @@ Return only the final Thai text in the required format.`;
         bulkHeadline: item.selectedHeadline,
         bulkPromptJson: cleanJson,
         bulkSourceUrl: item.sourceUrl,
+        bulkRawArticle: item.rawArticle,
         localYoutubeOverlay: isOverlayStyle && item.decorateOriginalPhoto ? {
           overlayKind: isGithubImageStyle ? 'github' : isAiNewsImageStyle ? 'ai-news' : 'youtube',
           channelName: item.channelName?.trim() || '',
@@ -4254,6 +4293,11 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
             <div className="text-xs text-gray-400 mt-1">
               เหลือใน cache <span className="text-white font-bold">{recoverableCacheCount.toLocaleString()}</span> รายการที่ยังไม่อยู่ในผลลัพธ์/export แล้ว เอากลับมากดสร้างรูปต่อได้
             </div>
+            {exportedCsvRefs.urls.length > 0 && (
+              <div className="text-[11px] text-teal-300 mt-1">
+                อ่าน export CSV แล้ว {exportedCsvRefs.urls.length.toLocaleString()} รายการ จะไม่กู้ซ้ำ
+              </div>
+            )}
           </div>
           <label className="flex items-center gap-2 rounded-lg border border-teal-500/25 bg-black/20 px-3 py-2">
             <span className="text-xs text-gray-400 whitespace-nowrap">กู้ล่าสุด</span>
