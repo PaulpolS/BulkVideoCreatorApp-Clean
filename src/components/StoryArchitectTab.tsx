@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { BookOpen, Clapperboard, PenTool, Sparkles } from 'lucide-react';
+import { BookOpen, Clapperboard, Images, PenTool, Sparkles } from 'lucide-react';
 import { CharacterModule } from './CharacterModule';
+import { MagicalPetPlayModule } from './MagicalPetPlayModule';
 import { StoryboardModule } from './StoryboardModule';
 
-type StoryArchitectView = 'character' | 'storyboard';
+type StoryArchitectView = 'character' | 'storyboard' | 'refStoryboard' | 'magicPet';
 
 const VIEWS: {
   id: StoryArchitectView;
@@ -22,6 +23,18 @@ const VIEWS: {
     label: 'Storyboard Generator',
     description: 'Step 2',
     icon: <Clapperboard className="h-4 w-4" />,
+  },
+  {
+    id: 'refStoryboard',
+    label: 'REF Storyboard',
+    description: 'Step 2 Pro',
+    icon: <Images className="h-4 w-4" />,
+  },
+  {
+    id: 'magicPet',
+    label: 'Magical Pet POV',
+    description: 'Play Clips',
+    icon: <Sparkles className="h-4 w-4" />,
   },
 ];
 
@@ -46,7 +59,7 @@ export function StoryArchitectTab() {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
               {VIEWS.map(view => {
                 const active = activeView === view.id;
                 return (
@@ -86,11 +99,17 @@ export function StoryArchitectTab() {
           </div>
           <div className="sa-panel p-4">
             <h2 className="sa-title text-sm font-bold">Character Safety</h2>
-            <p className="sa-muted mt-1 text-xs leading-5">Storyboard prompt ไม่บรรยายรูปลักษณ์ เพื่อให้ reference image เป็นตัวคุมตัวละครหลัก</p>
+            <p className="sa-muted mt-1 text-xs leading-5">แท็บ REF Storyboard แยก Character REF หลักออกจาก Shot/Style REF ส่วน Magical Pet POV ทำช็อตเล่นกับสัตว์วิเศษจากมือถือ</p>
           </div>
         </section>
 
-        {activeView === 'character' ? <CharacterModule /> : <StoryboardModule />}
+        {activeView === 'character'
+          ? <CharacterModule />
+          : activeView === 'magicPet'
+            ? <MagicalPetPlayModule />
+          : activeView === 'refStoryboard'
+            ? <StoryboardModule splitReferenceMode />
+            : <StoryboardModule />}
       </div>
     </div>
   );

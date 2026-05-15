@@ -24,6 +24,12 @@ const STORYBOARD_MODEL_FALLBACKS = [
 
 const MAX_VISUAL_REFERENCES = 6;
 
+type UploadedReference = {
+  id: string;
+  name: string;
+  dataUrl: string;
+};
+
 interface CopyButtonProps {
   text: string;
   label?: string;
@@ -182,6 +188,26 @@ function readImageFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
+function sanitizeCharacterReferenceLeaks(text: string) {
+  return text
+    .replace(/POV shot from the referenced character's perspective/gi, 'POV shot from a human camera operator\'s mobile phone perspective')
+    .replace(/from the referenced character's perspective/gi, 'from a human camera operator\'s mobile phone perspective')
+    .replace(/the referenced character's hands are visible/gi, 'a human camera operator\'s hands are visible')
+    .replace(/the referenced character's hand is visible/gi, 'a human camera operator\'s hand is visible')
+    .replace(/the referenced character's hands/gi, 'a human camera operator\'s hands')
+    .replace(/the referenced character's hand/gi, 'a human camera operator\'s hand')
+    .replace(/the referenced character's legs are visible/gi, 'a human camera operator\'s legs are visible')
+    .replace(/the referenced character's legs/gi, 'a human camera operator\'s legs')
+    .replace(/\b(?:a|the)\s+(?:small|tiny|little|playful|friendly|curious|sleepy|green|black|dark|grey|gray|fluffy|shimmering|horned|winged|agile|powerful|cute|mischievous|young|intricate|wispy|feathery|subtle|relaxed|content)\s+(?:dragon|creature|monster|beast)\b/gi, 'the referenced character')
+    .replace(/\b(?:a|the)\s+(?:dragon|creature|monster|beast)\b/gi, 'the referenced character')
+    .replace(/\b(?:dragon|creature|monster|beast)'s\b/gi, 'the referenced character\'s')
+    .replace(/\bdragon\b/gi, 'the referenced character')
+    .replace(/\bscales\b/gi, 'surface texture')
+    .replace(/\bsmall horns\b/gi, 'silhouette details')
+    .replace(/\bwispy mane\b/gi, 'soft silhouette detail')
+    .replace(/\bfeathery mane\b/gi, 'soft silhouette detail');
+}
+
 function normalizeAiScenes(payload: unknown, sceneCount: number): StoryboardScene[] {
   const rawScenes = Array.isArray((payload as { scenes?: unknown[] })?.scenes)
     ? (payload as { scenes: unknown[] }).scenes
@@ -202,8 +228,8 @@ function normalizeAiScenes(payload: unknown, sceneCount: number): StoryboardScen
       sceneNumber,
       timecode: String(scene.timecode || `${startSecond}-${endSecond}s`),
       thaiScript: String(scene.thaiScript || '').trim(),
-      imagePrompt: String(scene.imagePrompt || legacyScene.startImagePrompt || '').trim(),
-      videoMotionPrompt: String(scene.videoMotionPrompt || '').trim(),
+      imagePrompt: sanitizeCharacterReferenceLeaks(String(scene.imagePrompt || legacyScene.startImagePrompt || '').trim()),
+      videoMotionPrompt: sanitizeCharacterReferenceLeaks(String(scene.videoMotionPrompt || '').trim()),
     };
   }).filter(scene =>
     scene.thaiScript &&
@@ -215,14 +241,22 @@ function normalizeAiScenes(payload: unknown, sceneCount: number): StoryboardScen
   return scenes.slice(0, sceneCount);
 }
 
-function buildAiStoryboardPrompt(storyContext: string, sceneCount: number, visualReferenceCount: number) {
-  const hasVisualReference = visualReferenceCount > 0;
+function buildAiStoryboardPrompt(
+  storyContext: string,
+  sceneCount: number,
+  characterReferenceCount: number,
+  styleReferenceCount: number,
+) {
+  const hasCharacterReference = characterReferenceCount > 0;
+  const hasStyleReference = styleReferenceCount > 0;
   return `คุณคือ AI Storyboard Architect สำหรับงาน Image-to-Video / Google Flow
 
 โจทย์เรื่อง:
 ${storyContext}
 
-${hasVisualReference ? `มีภาพ scene/reference แนบมา ${visualReferenceCount} รูป ให้ดู pattern ร่วมของภาพทั้งหมดเป็น visual guide สำหรับ mood, environment type, lighting, lens feel, camera distance, composition, prop density, color palette, and cinematic direction เท่านั้น ห้ามคัดลอกตัวละคร/บุคคล/โลโก้/ข้อความจากภาพ และห้ามให้ภาพ reference ไปเปลี่ยน identity ของตัวละครหลัก ถ้าภาพแต่ละใบต่างกัน ให้สกัดเป็น style bible ที่เข้ากับ story context ไม่ใช่รวมทุกอย่างแบบรก` : ''}
+${hasCharacterReference ? `มี Character REF หลักแนบมา ${characterReferenceCount} รูป ชุดนี้คือ identity หลักและ subject หลักเท่านั้น ให้เรียกตัวละคร/สิ่งมีชีวิต/วัตถุหลักในรูปนี้ว่า "the referenced character" ในทุก prompt ห้ามสร้างตัวละครหลักตัวใหม่ ห้ามเปลี่ยน species/สี/รูปร่าง/รายละเอียดกายภาพเอง และห้ามเอา subject จากรูป Shot/Scene/Style REF มาแทนตัวละครหลัก` : ''}
+
+${hasStyleReference ? `มี Shot / Scene / Style REF แนบมา ${styleReferenceCount} รูป ชุดนี้ใช้ดูเฉพาะภาษาภาพ: POV/camera angle, framing, lens feel, lighting, room/location mood, activity pattern, prop placement, handheld/mobile-phone realism เท่านั้น ห้ามเอาตัวละคร/สัตว์/สิ่งมีชีวิต/สีตัวละครจากรูปชุดนี้มาเป็น subject หลัก ถ้ารูป style แสดงมือคนเล่นกับสิ่งมีชีวิต ให้แปลงเป็น "a human hand/person interacts with the referenced character"` : ''}
 
 สร้าง storyboard จำนวน ${sceneCount} scenes โดยแต่ละ scene ยาว 8 วินาที และ 1 scene ต้องมี:
 - imagePrompt: prompt รูป 1 รูปสำหรับใช้เป็นภาพตั้งต้นของ scene นั้น
@@ -232,13 +266,21 @@ ${hasVisualReference ? `มีภาพ scene/reference แนบมา ${visual
 1. คิดเนื้อเรื่องจริงจากโจทย์ ไม่ใช้ข้อความ generic และห้ามวนแพทเทิร์นซ้ำ ๆ
 2. thaiScript ต้องเป็นบท/คำบรรยายภาษาไทยที่เล่าเรื่องต่อเนื่อง มีเหตุการณ์เฉพาะของเรื่องนั้น
 3. imagePrompt และ videoMotionPrompt ต้องเป็นภาษาอังกฤษ พร้อมนำไปใช้กับ image-to-video ได้ทันที
-4. ห้ามบรรยายรูปลักษณ์ตัวละครโดยตรง เช่น เสื้อผ้า หน้า ผม รูปร่าง สายพันธุ์ อายุ สี ลักษณะกายวิภาค เพราะจะใช้ uploaded character reference image เป็นตัวคุม identity
-5. ใช้คำว่า "the referenced character" เมื่อพูดถึงตัวละครหลัก
-6. โฟกัส behavior, blocking, location, props, atmosphere, camera, action, physics, timing, continuity
-7. imagePrompt ต้องเป็นภาพตั้งต้นที่ชัดเจนพอให้ videoMotionPrompt ขยับต่อได้ และต้องต่อเนื่องระหว่าง scene
-8. ${hasVisualReference ? 'ให้อิงภาษาภาพจาก reference image เพื่อกำหนดฉากและวิธีเขียน prompt: location texture, lighting direction, camera framing, depth, mood, prop logic, color mood' : 'ใช้รายละเอียดฉากจาก story context และออกแบบ visual language ให้เหมาะกับเรื่อง'}
-9. ไม่มี text on screen, ไม่มี watermark, ไม่มี subtitle
-10. ห้ามตอบ markdown ห้ามอธิบายเพิ่ม
+4. ${hasCharacterReference ? 'Character REF หลักเป็นตัวคุม identity ให้ใช้คำว่า "the referenced character" แทนการบรรยายรูปลักษณ์ละเอียดของ subject ในภาพ' : 'ห้ามบรรยายรูปลักษณ์ตัวละครโดยตรง เช่น เสื้อผ้า หน้า ผม รูปร่าง สายพันธุ์ อายุ สี ลักษณะกายวิภาค เพราะจะใช้ uploaded character reference image เป็นตัวคุม identity'}
+5. "the referenced character" หมายถึง subject หลักจาก Character REF หลักเท่านั้น
+6. ใช้คำว่า "the referenced character" เมื่อพูดถึงตัวละครหลัก ห้ามตั้งชื่อตัวละครใหม่หรือเปลี่ยนเป็น creature/animal/dragon/monster อื่น
+7. ถ้าต้องการมุม POV/mobile phone ให้ถือว่าเป็น POV ของคนถ่าย/มนุษย์ผู้ดูแล/กล้องมือถือ ไม่ใช่ POV ของ the referenced character เว้นแต่ story context สั่งตรง ๆ ว่าเป็นมุมมองของตัวละครหลัก
+8. ห้ามเขียน "the referenced character's hand", "the referenced character's legs", หรือส่วนร่างกายของตัวละครหลักเป็นเจ้าของกล้อง ถ้า scene ต้องมีมือ/ขาในเฟรม ให้ใช้ "a human hand", "a person's hand", "the camera operator's hand" แทน
+9. โฟกัส behavior, blocking, location, props, atmosphere, camera, action, physics, timing, continuity
+10. imagePrompt ต้องเป็นภาพตั้งต้นที่ชัดเจนพอให้ videoMotionPrompt ขยับต่อได้ และต้องต่อเนื่องระหว่าง scene
+11. ${hasStyleReference ? 'ให้อิง Shot / Scene / Style REF เฉพาะภาษาภาพและกิจกรรม แต่ subject หลักต้องมาจาก Character REF เท่านั้น' : 'ใช้รายละเอียดฉากจาก story context และออกแบบ visual language ให้เหมาะกับเรื่อง'}
+12. ไม่มี text on screen, ไม่มี watermark, ไม่มี subtitle
+13. ห้ามตอบ markdown ห้ามอธิบายเพิ่ม
+14. imagePrompt และ videoMotionPrompt ควรอ่านง่าย: ระบุฉาก, action, มือคน/คนถ่ายถ้ามี, the referenced character, camera motion, lighting, mobile-phone/realistic style
+
+ตัวอย่างการเขียน:
+- ถ้า Character REF เป็นกากอย และ Shot REF เป็นมือคนเล่นกับตัวสีฟ้า ให้เขียนเป็น "a human hand gently pets the referenced character" และห้ามพูดถึงตัวสีฟ้า
+- ถ้า Shot REF เป็น POV มือถือ ให้เขียนเป็น "mobile phone POV from a human camera operator" ไม่ใช่ "from the referenced character's perspective"
 
 ตอบกลับเป็น JSON เท่านั้น ตาม schema นี้:
 {
@@ -254,7 +296,13 @@ ${hasVisualReference ? `มีภาพ scene/reference แนบมา ${visual
 }`;
 }
 
-async function callOpenRouterStoryboard(storyContext: string, sceneCount: number, model: string, visualReferenceDataUrls: string[] = []) {
+async function callOpenRouterStoryboard(
+  storyContext: string,
+  sceneCount: number,
+  model: string,
+  characterReferenceDataUrls: string[] = [],
+  styleReferenceDataUrls: string[] = [],
+) {
   const candidates = await getOpenRouterKeyCandidates();
   if (candidates.length === 0) throw new Error('ไม่พบ OpenRouter API Key — กรุณาตั้งค่า API Key ก่อน');
 
@@ -262,10 +310,25 @@ async function callOpenRouterStoryboard(storyContext: string, sceneCount: number
     model,
     ...STORYBOARD_MODEL_FALLBACKS,
   ].filter(Boolean)));
-  const prompt = buildAiStoryboardPrompt(storyContext, sceneCount, visualReferenceDataUrls.length);
+  const prompt = buildAiStoryboardPrompt(storyContext, sceneCount, characterReferenceDataUrls.length, styleReferenceDataUrls.length);
   const triedErrors: string[] = [];
   let creditErrors = 0;
   let timeoutErrors = 0;
+  const multimodalContent = [
+    { type: 'text', text: prompt },
+    ...(characterReferenceDataUrls.length > 0
+      ? [
+          { type: 'text', text: 'CHARACTER REF MAIN IMAGE(S). Use the main subject here as the referenced character identity only.' },
+          ...characterReferenceDataUrls.map(url => ({ type: 'image_url', image_url: { url } })),
+        ]
+      : []),
+    ...(styleReferenceDataUrls.length > 0
+      ? [
+          { type: 'text', text: 'SHOT / SCENE / STYLE REF IMAGE(S). Use only camera, lighting, location mood, activity pattern, and handheld style. Do not copy their subject identity.' },
+          ...styleReferenceDataUrls.map(url => ({ type: 'image_url', image_url: { url } })),
+        ]
+      : []),
+  ];
 
   for (const candidate of candidates) {
     for (const modelId of modelsToTry) {
@@ -280,16 +343,19 @@ async function callOpenRouterStoryboard(storyContext: string, sceneCount: number
           },
           body: JSON.stringify({
             model: modelId,
-            messages: [{
-              role: 'user',
-              content: visualReferenceDataUrls.length > 0
-                ? [
-                    { type: 'text', text: prompt },
-                    ...visualReferenceDataUrls.map(url => ({ type: 'image_url', image_url: { url } })),
-                  ]
-                : prompt,
-            }],
-            temperature: 0.7,
+            messages: [
+              {
+                role: 'system',
+                content: 'You write production-ready image-to-video prompts. Character REF images define the main subject identity and must be called "the referenced character". Shot/style references define only cinematography, environment mood, and activity pattern. Never copy a subject from shot/style references as the main character.',
+              },
+              {
+                role: 'user',
+                content: characterReferenceDataUrls.length > 0 || styleReferenceDataUrls.length > 0
+                  ? multimodalContent
+                  : prompt,
+              },
+            ],
+            temperature: 0.45,
             max_tokens: Math.min(5200, Math.max(1200, sceneCount * 430)),
             response_format: { type: 'json_object' },
           }),
@@ -339,7 +405,7 @@ async function callOpenRouterStoryboard(storyContext: string, sceneCount: number
   throw new Error(triedErrors.slice(-2).join(' | ') || 'OpenRouter error');
 }
 
-export function StoryboardModule() {
+export function StoryboardModule({ splitReferenceMode = false }: { splitReferenceMode?: boolean }) {
   const [storyContext, setStoryContext] = useState(DEFAULT_CONTEXT);
   const [sceneCount, setSceneCount] = useState(6);
   const [hasBuilt, setHasBuilt] = useState(false);
@@ -348,7 +414,9 @@ export function StoryboardModule() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [lastModelUsed, setLastModelUsed] = useState('');
-  const [visualReferences, setVisualReferences] = useState<Array<{ id: string; name: string; dataUrl: string }>>([]);
+  const [visualReferences, setVisualReferences] = useState<UploadedReference[]>([]);
+  const [characterReference, setCharacterReference] = useState<UploadedReference | null>(null);
+  const [styleReferences, setStyleReferences] = useState<UploadedReference[]>([]);
 
   const exportText = buildStoryboardExportText(scenes);
   const imageBatchText = scenes
@@ -372,15 +440,26 @@ export function StoryboardModule() {
       setErrorMsg('กรุณาใส่ Story Context ก่อน');
       return;
     }
+    if (splitReferenceMode && !characterReference) {
+      setErrorMsg('กรุณาแนบ Character REF หลัก 1 รูปก่อนสร้าง Storyboard');
+      return;
+    }
     setIsGenerating(true);
     setErrorMsg('');
     setHasBuilt(false);
+    const characterReferenceUrls = splitReferenceMode
+      ? (characterReference ? [characterReference.dataUrl] : [])
+      : visualReferences.map(reference => reference.dataUrl);
+    const styleReferenceUrls = splitReferenceMode
+      ? styleReferences.map(reference => reference.dataUrl)
+      : [];
     try {
       const result = await callOpenRouterStoryboard(
         storyContext.trim(),
         normalizedSceneCount,
         model,
-        visualReferences.map(reference => reference.dataUrl),
+        characterReferenceUrls,
+        styleReferenceUrls,
       );
       setScenes(result.scenes);
       setLastModelUsed(result.model);
@@ -399,6 +478,58 @@ export function StoryboardModule() {
     setLastModelUsed('Template fallback');
     setErrorMsg('');
     setHasBuilt(true);
+  };
+
+  const handleCharacterReferenceUpload = async (file?: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setErrorMsg('กรุณาเลือกไฟล์รูปภาพสำหรับ Character REF');
+      return;
+    }
+    try {
+      setErrorMsg('');
+      setCharacterReference({
+        id: `${Date.now()}-${file.name}`,
+        name: file.name,
+        dataUrl: await readImageFileAsDataUrl(file),
+      });
+    } catch (error: any) {
+      setErrorMsg(error?.message || 'อ่านรูป Character REF ไม่สำเร็จ');
+    }
+  };
+
+  const handleStyleReferenceUpload = async (files?: FileList | null) => {
+    const selectedFiles = Array.from(files || []);
+    if (selectedFiles.length === 0) return;
+    const imageFiles = selectedFiles.filter(file => file.type.startsWith('image/'));
+    if (imageFiles.length === 0) {
+      setErrorMsg('กรุณาเลือกไฟล์รูปภาพสำหรับ Shot / Scene / Style REF');
+      return;
+    }
+    const freeSlots = MAX_VISUAL_REFERENCES - styleReferences.length;
+    if (freeSlots <= 0) {
+      setErrorMsg(`แนบรูป Shot / Scene / Style REF ได้สูงสุด ${MAX_VISUAL_REFERENCES} รูป`);
+      return;
+    }
+    try {
+      setErrorMsg('');
+      const filesToAdd = imageFiles.slice(0, freeSlots);
+      const nextReferences = await Promise.all(
+        filesToAdd.map(async (file, index) => ({
+          id: `${Date.now()}-${index}-${file.name}`,
+          name: file.name,
+          dataUrl: await readImageFileAsDataUrl(file),
+        })),
+      );
+      setStyleReferences(current => [...current, ...nextReferences].slice(0, MAX_VISUAL_REFERENCES));
+      if (selectedFiles.length !== imageFiles.length) {
+        setErrorMsg('ข้ามไฟล์ที่ไม่ใช่รูปภาพแล้ว แนบเฉพาะไฟล์รูปให้เรียบร้อย');
+      } else if (imageFiles.length > filesToAdd.length) {
+        setErrorMsg(`แนบได้สูงสุด ${MAX_VISUAL_REFERENCES} รูป ตอนนี้เพิ่มเท่าที่มีช่องว่างให้แล้ว`);
+      }
+    } catch (error: any) {
+      setErrorMsg(error?.message || 'อ่านรูป Shot / Scene / Style REF ไม่สำเร็จ');
+    }
   };
 
   const handleVisualReferenceUpload = async (files?: FileList | null) => {
@@ -443,8 +574,12 @@ export function StoryboardModule() {
             <Film className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="sa-title text-xl font-bold">Storyboard Generator</h2>
-            <p className="sa-muted text-sm">Step 2: สร้าง scene cards สำหรับ Image-to-Video</p>
+            <h2 className="sa-title text-xl font-bold">{splitReferenceMode ? 'REF Locked Storyboard' : 'Storyboard Generator'}</h2>
+            <p className="sa-muted text-sm">
+              {splitReferenceMode
+                ? 'บังคับ Character REF 1 รูป + Shot/Style REF หลายรูป'
+                : 'Step 2: สร้าง scene cards สำหรับ Image-to-Video'}
+            </p>
           </div>
         </div>
 
@@ -459,57 +594,151 @@ export function StoryboardModule() {
           placeholder="เล่า context นิทานสั้นเป็นภาษาไทย"
         />
 
-        <label className="sa-label mt-4 block text-sm font-bold">
-          Scene / Style REF image
-        </label>
-        <label className="mt-2 flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--border-color)] bg-black/10 px-4 py-3 text-sm font-bold transition hover:border-[var(--accent)]">
-          <ImagePlus className="h-4 w-4 text-[var(--accent)]" />
-          {visualReferences.length > 0
-            ? `เพิ่มรูป REF ฉาก/สไตล์ (${visualReferences.length}/${MAX_VISUAL_REFERENCES})`
-            : 'แนบรูป REF ได้หลายรูป เพื่ออิงฉาก/แสง/กล้อง'}
-          <input
-            type="file"
-            accept="image/*"
-            multiple
-            className="hidden"
-            onChange={event => {
-              handleVisualReferenceUpload(event.target.files);
-              event.currentTarget.value = '';
-            }}
-          />
-        </label>
-        {visualReferences.length > 0 && (
-          <div className="mt-3 rounded-xl border border-[var(--border-color)] bg-black/10 p-3">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <p className="sa-muted text-xs leading-5">
-                ใช้ทุกภาพเป็น visual guide สำหรับฉาก, mood, lighting, composition, camera feel ไม่ใช้คุมตัวละคร
-              </p>
-              <button
-                type="button"
-                onClick={() => setVisualReferences([])}
-                className="sa-secondary-button px-3 py-2 text-xs"
-              >
-                ลบทั้งหมด
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {visualReferences.map(reference => (
-                <div key={reference.id} className="rounded-lg border border-[var(--border-color)] bg-black/20 p-2">
-                  <img src={reference.dataUrl} alt="" className="h-20 w-full rounded-md object-cover" />
-                  <div className="mt-2 flex items-center gap-2">
-                    <p className="min-w-0 flex-1 truncate text-xs font-bold">{reference.name}</p>
-                    <button
-                      type="button"
-                      onClick={() => setVisualReferences(current => current.filter(item => item.id !== reference.id))}
-                      className="sa-secondary-button px-2 py-1 text-[11px]"
-                    >
-                      ลบ
-                    </button>
+        {splitReferenceMode ? (
+          <>
+            <label className="sa-label mt-4 block text-sm font-bold">
+              Character REF หลัก <span className="text-red-400">*</span>
+            </label>
+            <label className="mt-2 flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--border-color)] bg-black/10 px-4 py-3 text-sm font-bold transition hover:border-[var(--accent)]">
+              <ImagePlus className="h-4 w-4 text-[var(--accent)]" />
+              {characterReference ? 'เปลี่ยน Character REF หลัก' : 'อัป Character REF หลัก 1 รูป'}
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={event => {
+                  handleCharacterReferenceUpload(event.target.files?.[0]);
+                  event.currentTarget.value = '';
+                }}
+              />
+            </label>
+            {characterReference && (
+              <div className="mt-3 rounded-xl border border-[var(--accent)] bg-black/10 p-3">
+                <div className="flex items-center gap-3">
+                  <img src={characterReference.dataUrl} alt="" className="h-20 w-24 rounded-lg object-cover" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-bold">{characterReference.name}</p>
+                    <p className="sa-muted text-xs leading-5">รูปนี้เท่านั้นคือ identity ของ the referenced character</p>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setCharacterReference(null)}
+                    className="sa-secondary-button px-3 py-2 text-xs"
+                  >
+                    ลบ
+                  </button>
                 </div>
-              ))}
-            </div>
-          </div>
+              </div>
+            )}
+
+            <label className="sa-label mt-4 block text-sm font-bold">
+              Shot / Scene / Style REF images
+            </label>
+            <label className="mt-2 flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--border-color)] bg-black/10 px-4 py-3 text-sm font-bold transition hover:border-[var(--accent)]">
+              <ImagePlus className="h-4 w-4 text-[var(--accent)]" />
+              {styleReferences.length > 0
+                ? `เพิ่มรูป Shot/Style (${styleReferences.length}/${MAX_VISUAL_REFERENCES})`
+                : 'แนบรูปมุมกล้อง/ฉาก/แสงได้หลายรูป'}
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={event => {
+                  handleStyleReferenceUpload(event.target.files);
+                  event.currentTarget.value = '';
+                }}
+              />
+            </label>
+            {styleReferences.length > 0 && (
+              <div className="mt-3 rounded-xl border border-[var(--border-color)] bg-black/10 p-3">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <p className="sa-muted text-xs leading-5">
+                    ใช้ชุดนี้เฉพาะมุมกล้อง แสง ฉาก โทน และกิจกรรม ไม่ใช้เป็นตัวละครหลัก
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setStyleReferences([])}
+                    className="sa-secondary-button px-3 py-2 text-xs"
+                  >
+                    ลบทั้งหมด
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {styleReferences.map(reference => (
+                    <div key={reference.id} className="rounded-lg border border-[var(--border-color)] bg-black/20 p-2">
+                      <img src={reference.dataUrl} alt="" className="h-20 w-full rounded-md object-cover" />
+                      <div className="mt-2 flex items-center gap-2">
+                        <p className="min-w-0 flex-1 truncate text-xs font-bold">{reference.name}</p>
+                        <button
+                          type="button"
+                          onClick={() => setStyleReferences(current => current.filter(item => item.id !== reference.id))}
+                          className="sa-secondary-button px-2 py-1 text-[11px]"
+                        >
+                          ลบ
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <label className="sa-label mt-4 block text-sm font-bold">
+              Primary REF images
+            </label>
+            <label className="mt-2 flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--border-color)] bg-black/10 px-4 py-3 text-sm font-bold transition hover:border-[var(--accent)]">
+              <ImagePlus className="h-4 w-4 text-[var(--accent)]" />
+              {visualReferences.length > 0
+                ? `เพิ่มรูป REF หลัก (${visualReferences.length}/${MAX_VISUAL_REFERENCES})`
+                : 'แนบรูป REF หลักได้หลายรูป'}
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={event => {
+                  handleVisualReferenceUpload(event.target.files);
+                  event.currentTarget.value = '';
+                }}
+              />
+            </label>
+            {visualReferences.length > 0 && (
+              <div className="mt-3 rounded-xl border border-[var(--border-color)] bg-black/10 p-3">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <p className="sa-muted text-xs leading-5">
+                    ใช้รูปที่แนบเป็นหลักของตัวละคร/ซับเจกต์ ฉาก โทน แสง มุมกล้อง และกิจกรรมใน storyboard นี้
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setVisualReferences([])}
+                    className="sa-secondary-button px-3 py-2 text-xs"
+                  >
+                    ลบทั้งหมด
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {visualReferences.map(reference => (
+                    <div key={reference.id} className="rounded-lg border border-[var(--border-color)] bg-black/20 p-2">
+                      <img src={reference.dataUrl} alt="" className="h-20 w-full rounded-md object-cover" />
+                      <div className="mt-2 flex items-center gap-2">
+                        <p className="min-w-0 flex-1 truncate text-xs font-bold">{reference.name}</p>
+                        <button
+                          type="button"
+                          onClick={() => setVisualReferences(current => current.filter(item => item.id !== reference.id))}
+                          className="sa-secondary-button px-2 py-1 text-[11px]"
+                        >
+                          ลบ
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         <label className="sa-label mt-4 block text-sm font-bold" htmlFor="scene-count">
@@ -575,9 +804,11 @@ export function StoryboardModule() {
         <div className="sa-note mt-5 p-4 text-sm leading-6">
           <div className="mb-1 flex items-center gap-2 font-bold text-[var(--success)]">
             <ShieldCheck className="h-4 w-4" />
-            Reference-safe prompt logic
+            {splitReferenceMode ? 'Split REF prompt logic' : 'Primary REF prompt logic'}
           </div>
-          Storyboard prompts จะใช้ reference image จากเครื่องมือภายนอกเป็นตัวกำหนดตัวละคร และห้ามเพิ่มรายละเอียดเสื้อผ้า หน้า ผม รูปร่าง หรือสีใน prompt ของแต่ละฉาก
+          {splitReferenceMode
+            ? 'Character REF หลักคุม identity เท่านั้น ส่วน Shot / Scene / Style REF คุมมุมกล้อง แสง ฉาก โทน และกิจกรรม'
+            : 'รูปที่แนบในหน้านี้จะเป็นฐานหลักของ storyboard: subject หลักในรูปคือ the referenced character และ prompt จะใช้ภาพนั้นนำทางฉาก แสง มุมกล้อง และกิจกรรม'}
         </div>
       </div>
 
