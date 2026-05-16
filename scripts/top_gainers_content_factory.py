@@ -64,6 +64,7 @@ class StockItem:
     domain: str = ""
     ohlc: Any = None
     news: list[str] = field(default_factory=list)
+    headline: str = ""
     caption: str = ""
     image_path: Path | None = None
     dropbox_url: str = ""
@@ -190,7 +191,8 @@ def requests_session():
 def fetch_yahoo_screener(scr_id: str, count: int) -> list[dict[str, Any]]:
     session = requests_session()
     url = "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved"
-    params = {"scrIds": scr_id, "count": max(count, 25)}
+    # Yahoo Finance predefined screeners have a maximum limit of 250 items.
+    params = {"scrIds": scr_id, "count": min(max(count, 25), 250)}
     res = session.get(url, params=params, timeout=20)
     res.raise_for_status()
     payload = res.json()
@@ -438,7 +440,28 @@ def generate_caption(item: StockItem, creds: AppCreds, model: str, mode: str = "
         f"Price: {item.price:.2f}\n% Change: {item.pct_change:.2f}%\nVolume: {item.volume:,}\n"
         f"{pe_line}"
         f"OHLC last 30 trading days:\n{summarize_ohlc(item)}\n\nNews:\n{news_block}\n\n"
-        "Return only Thai caption text. Include 1-3 finance/social emojis naturally."
+        "Return your response EXACTLY in this format:\n\n"
+        "IMAGE_TEXT:\n"
+        "[Write exactly 3 lines in Thai. Separate each line with a newline character.\n"
+        "CRITICAL: Each line must be a COMPLETE phrase — never break a word across lines!\n"
+        "Line 1: Short hook or question (8-15 chars). Example: ทำไมหุ้นนี้พุ่ง?\n"
+        "Line 2: Key fact with **stock_symbol** highlighted (12-25 chars). Example: **NVDA** ทำสถิติใหม่\n"
+        "Line 3: Punchy takeaway (10-20 chars). Example: นักลงทุนต้องจับตา!\n"
+        "Use **double asterisks** to wrap ONLY the stock symbol and 1-2 key Thai words you want emphasized.\n"
+        "NO EMOJIS. NO special symbols. Keep it readable and impactful.]\n\n"
+        "POST_CAPTION:\n"
+        "[Write a concise but professional stock analysis article in Thai for a financial Facebook page.\n"
+        "Use this structure:\n"
+        "1. 🧠 Hook headline — one line summarizing the stock's story today\n"
+        "2. Price summary — current price, % change, volume, 1-month trend in 2-3 sentences\n"
+        "3. 🔑 Why it matters — 3-4 bullet points explaining what's driving the move (news, sector rotation, earnings, etc.)\n"
+        "4. 📍 Key levels — Support and Resistance zones from the chart (2-3 levels each)\n"
+        "5. ⚠️ Risks — 2-3 key risks investors should watch\n"
+        "6. 🎯 Action plan — Brief recommendation for different investor types\n"
+        "7. Disclaimer line\n\n"
+        "Keep it concise (300-500 words). Use Thai mixed with English financial terms naturally.\n"
+        "Use emojis sparingly for section headers only. Make it feel professional like a real analyst wrote it.]\n\n"
+        "DO NOT use any emojis or special symbols in IMAGE_TEXT."
     )
 
     if creds.openrouter_key:
@@ -465,30 +488,31 @@ def generate_caption(item: StockItem, creds: AppCreds, model: str, mode: str = "
         except Exception as exc:
             print(f"[WARN] OpenAI caption failed for {item.symbol}: {exc}", file=sys.stderr)
 
-    headline = item.news[0] if item.news else "ตลาดกำลังจับตาโมเมนตัมของหุ้นตัวนี้"
+    headline_str = item.news[0] if item.news else "ตลาดกำลังจับตาหุ้นตัวนี้"
     if mode == "losers":
         return (
-            f"⚠️ {item.symbol} วันนี้ราคาร่วงลง {abs(item.pct_change):.2f}% "
-            f"มาอยู่ที่ {item.price:.2f} ดอลลาร์ ด้วยวอลุ่ม {item.volume:,} หุ้น "
-            f"ข่าว \"{headline}\" อาจเป็นปัจจัย นักลงทุนควรติดตามสถานการณ์อย่างใกล้ชิด 📉"
+            f"IMAGE_TEXT:\nระวัง! หุ้นร่วงหนัก\n**{item.symbol}** ดิ่ง {abs(item.pct_change):.2f}%\nนักลงทุนควรทำอย่างไร?\n\n"
+            f"POST_CAPTION:\n{item.symbol} วันนี้ราคาร่วงลง {abs(item.pct_change):.2f}% "
+            f"มาอยู่ที่ {item.price:.2f} ดอลลาร์ ด้วยวอลุ่ม {item.volume:,} หุ้น\n\n"
+            f"ข่าวสำคัญ: \"{headline_str}\"\n\nอาจเป็นปัจจัยที่ส่งผลกระทบ นักลงทุนควรติดตามสถานการณ์อย่างใกล้ชิด"
         )
     if mode == "low_pe":
         pe_str = f"P/E {item.pe_ratio:.1f}x" if item.pe_ratio > 0 else "P/E ต่ำ"
         return (
-            f"💰 {item.symbol} น่าสนใจในเชิง Value Investing ด้วย{pe_str} "
-            f"ราคาปัจจุบัน {item.price:.2f} ดอลลาร์ เปลี่ยนแปลง {item.pct_change:+.2f}% "
-            f"ข่าว \"{headline}\" เป็นปัจจัยที่ควรติดตาม 📊"
+            f"IMAGE_TEXT:\nหุ้นคุณค่า น่าสะสม\n**{item.symbol}** ด้วย {pe_str}\nโอกาสทอง?\n\n"
+            f"POST_CAPTION:\n{item.symbol} น่าสนใจในเชิง Value Investing ด้วย{pe_str} "
+            f"ราคาปัจจุบัน {item.price:.2f} ดอลลาร์ เปลี่ยนแปลง {item.pct_change:+.2f}%\n\nข่าว \"{headline_str}\" เป็นปัจจัยที่ควรติดตาม"
         )
     if mode == "trending":
         return (
-            f"🔥 {item.symbol} มีปริมาณซื้อขายพุ่งสูงถึง {item.volume:,} หุ้นวันนี้ "
-            f"ราคาเปลี่ยนแปลง {item.pct_change:+.2f}% มาอยู่ที่ {item.price:.2f} ดอลลาร์ "
-            f"ข่าว \"{headline}\" ทำให้เป็นหุ้นที่ต้องจับตาเป็นพิเศษ 👀"
+            f"IMAGE_TEXT:\nซื้อขายเดือดสุดๆ\n**{item.symbol}** พุ่งติดเทรนด์\nจับตาด่วน!\n\n"
+            f"POST_CAPTION:\n{item.symbol} มีปริมาณซื้อขายพุ่งสูงถึง {item.volume:,} หุ้นวันนี้ "
+            f"ราคาเปลี่ยนแปลง {item.pct_change:+.2f}% มาอยู่ที่ {item.price:.2f} ดอลลาร์\n\nข่าว \"{headline_str}\" ทำให้เป็นหุ้นที่ต้องจับตาเป็นพิเศษ"
         )
     return (
-        f"🚀 {item.symbol} วันนี้โดดเด่นด้วยแรงซื้อหนุนให้ราคาปรับขึ้น {item.pct_change:.2f}% "
-        f"มาปิดใกล้ {item.price:.2f} ดอลลาร์ พร้อมวอลุ่ม {item.volume:,} หุ้น "
-        f"ข่าวล่าสุดอย่าง \"{headline}\" ทำให้หุ้นตัวนี้น่าจับตาสำหรับเพจการเงินวันนี้ 📈"
+        f"IMAGE_TEXT:\nพุ่งแรง น่าจับตา!\n**{item.symbol}** บวก {item.pct_change:.2f}%\nโอกาสทองมาแล้ว?\n\n"
+        f"POST_CAPTION:\n{item.symbol} วันนี้โดดเด่นด้วยแรงซื้อหนุนให้ราคาปรับขึ้น {item.pct_change:.2f}% "
+        f"มาปิดใกล้ {item.price:.2f} ดอลลาร์ พร้อมวอลุ่ม {item.volume:,} หุ้น\n\nข่าวล่าสุดอย่าง \"{headline_str}\" ทำให้หุ้นตัวนี้น่าจับตาสำหรับเพจการเงินวันนี้"
     )
 
 
@@ -652,50 +676,387 @@ def wrap_long_token(draw, token: str, font, max_width: int) -> list[str]:
     return lines or [token]
 
 
-def compose_canvas(item: StockItem, chart_path: Path, logo_bytes: bytes | None, output_path: Path) -> Path:
-    from PIL import Image, ImageDraw
+def clean_text_for_font(text: str) -> str:
+    # Remove emojis and unrenderable characters for basic Thai/English fonts
+    import re
+    return re.sub(r'[^\u0E00-\u0E7F\u0020-\u007E\u2013\u2014\u2018\u2019\u201C\u201D\*]', '', text).strip()
 
+def draw_rich_text_wrapped(draw, text: str, xy: tuple[int, int], font, default_color: str, highlight_color: str, max_width: int, line_gap: int = 8) -> int:
+    """Render a 3-line headline with per-line auto-scaling and tight highlights.
+
+    Each line from the AI is separated by \\n.  For each line we measure the
+    total width at the base font size, and if it exceeds *max_width* the font
+    is scaled down so it fits perfectly – no mid-word wrapping.
+
+    Highlighted text (wrapped in **) gets a tight background pill matching
+    the reference design.
+    """
+    import re
+    x_start, y = xy
+    text = clean_text_for_font(text)
+
+    # ── Split into explicit lines (AI outputs \n between them) ──
+    raw_lines = [ln.strip() for ln in text.split('\n') if ln.strip()]
+    if not raw_lines:
+        return y
+
+    # Base font info
+    base_font_name = getattr(font, 'path', None) or "Kanit-Bold.ttf"
+    # Try to get the base font path; fall back gracefully
+    try:
+        base_size = font.size
+    except AttributeError:
+        base_size = 60
+
+    pad_x, pad_y = 4, 2  # Tight highlight padding like reference image
+
+    for raw_line in raw_lines:
+        # Parse **highlights** within this line
+        segments: list[tuple[str, bool]] = []
+        for part in re.split(r'(\*\*.*?\*\*)', raw_line):
+            if not part:
+                continue
+            if part.startswith('**') and part.endswith('**'):
+                segments.append((part[2:-2], True))
+            else:
+                segments.append((part, False))
+
+        plain_text = ''.join(seg[0] for seg in segments)
+        if not plain_text.strip():
+            y += line_gap
+            continue
+
+        # ── Auto-scale: find the largest font size that fits ──
+        cur_size = base_size
+        cur_font = load_font(base_font_name, cur_size)
+        total_w = draw.textlength(plain_text, font=cur_font)
+        while total_w > max_width and cur_size > 24:
+            cur_size -= 2
+            cur_font = load_font(base_font_name, cur_size)
+            total_w = draw.textlength(plain_text, font=cur_font)
+
+        ref_bbox = draw.textbbox((0, 0), "Aygjป์", font=cur_font)
+        line_h = ref_bbox[3] - ref_bbox[1]
+
+        # ── 1st pass: draw highlight backgrounds ──
+        rx = x_start
+        for seg_text, is_hl in segments:
+            seg_w = draw.textlength(seg_text, font=cur_font)
+            if is_hl and seg_text.strip():
+                bg = [rx - pad_x, y + ref_bbox[1] - pad_y,
+                      rx + seg_w + pad_x, y + ref_bbox[3] + pad_y]
+                draw.rounded_rectangle(bg, radius=6, fill="#FFC107")
+            rx += seg_w
+
+        # ── 2nd pass: draw text ──
+        rx = x_start
+        for seg_text, is_hl in segments:
+            color = "#111827" if is_hl else default_color
+            draw.text((rx, y), seg_text, font=cur_font, fill=color)
+            rx += draw.textlength(seg_text, font=cur_font)
+
+        y += line_h + line_gap + 12
+
+    return y
+
+
+# ── Canvas helper functions ──────────────────────────────────────────
+
+def _draw_header(draw, canvas, item, logo_bytes, title_font, company_font, metric_font, price_font, bg_fill, outline_color, text_color, muted_color):
+    draw.rounded_rectangle((44, 44, 1036, 216), radius=8, fill=bg_fill, outline=outline_color, width=2)
+    logo = image_from_logo_bytes(logo_bytes, item.symbol)
+    canvas.paste(logo, (74, 70), logo)
+    draw.text((218, 68), item.symbol, font=title_font, fill=text_color)
+    company = item.company_name[:34] + ("..." if len(item.company_name) > 34 else "")
+    draw.text((222, 145), company, font=company_font, fill=muted_color)
+    metric = f"+{item.pct_change:.2f}%" if item.pct_change >= 0 else f"{item.pct_change:.2f}%"
+    m_bbox = draw.textbbox((0, 0), metric, font=metric_font)
+    draw.text((1002 - (m_bbox[2] - m_bbox[0]), 68), metric, font=metric_font, fill=BULL if item.pct_change >= 0 else BEAR)
+    price = f"${item.price:,.2f}"
+    p_bbox = draw.textbbox((0, 0), price, font=price_font)
+    draw.text((1002 - (p_bbox[2] - p_bbox[0]), 145), price, font=price_font, fill=text_color)
+
+
+def _paste_chart(draw, canvas, chart_path, chart_area, bg_fill, outline_color):
+    from PIL import Image
+    x1, y1, x2, y2 = chart_area
+    draw.rounded_rectangle(chart_area, radius=8, fill=bg_fill, outline=outline_color, width=2)
+    chart = Image.open(chart_path).convert("RGB")
+    chart.thumbnail((x2 - x1 - 12, y2 - y1 - 12), Image.Resampling.LANCZOS)
+    canvas.paste(chart, (x1 + (x2 - x1 - chart.width) // 2, y1 + (y2 - y1 - chart.height) // 2))
+
+
+# ── Canvas Style 1: Classic Dark ─────────────────────────────────────
+def compose_canvas_classic(item, chart_path, logo_bytes, output_path):
+    from PIL import Image, ImageDraw
+    canvas = Image.new("RGB", CANVAS_SIZE, BG)
+    draw = ImageDraw.Draw(canvas)
+    draw.rectangle((0, 0, 1080, 10), fill=BULL)
+    _draw_header(draw, canvas, item, logo_bytes,
+                 load_font("Kanit-Bold.ttf", 66), load_font("Prompt-Regular.ttf", 30),
+                 load_font("Kanit-Bold.ttf", 60), load_font("Prompt-Bold.ttf", 34),
+                 "#161b22", "#30363d", TEXT, MUTED)
+    _paste_chart(draw, canvas, chart_path, (44, 236, 1036, 948), "#0b0f14", "#30363d")
+    hl = getattr(item, 'headline', f"อัปเดตหุ้น **{item.symbol}**")
+    draw_rich_text_wrapped(draw, hl, (74, 1000), load_font("Kanit-Bold.ttf", 60), TEXT, "#FFC107", 932, line_gap=16)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(output_path, "PNG", optimize=True)
+    return output_path
+
+
+# ── Canvas Style 2: Neon Glow ────────────────────────────────────────
+def compose_canvas_neon(item, chart_path, logo_bytes, output_path):
+    from PIL import Image, ImageDraw
+    canvas = Image.new("RGB", CANVAS_SIZE, "#0a0a1a")
+    draw = ImageDraw.Draw(canvas)
+    for yp in range(1350):
+        draw.line([(0, yp), (1080, yp)], fill=(int(10 + yp/90), int(10 + yp/270), int(26 + yp/67)))
+    accent = "#00d4ff" if item.pct_change >= 0 else "#ff4d6a"
+    draw.rectangle((0, 0, 1080, 6), fill=accent)
+    draw.rectangle((0, 1344, 1080, 1350), fill=accent)
+    _draw_header(draw, canvas, item, logo_bytes,
+                 load_font("Kanit-Bold.ttf", 66), load_font("Prompt-Regular.ttf", 30),
+                 load_font("Kanit-Bold.ttf", 60), load_font("Prompt-Bold.ttf", 34),
+                 "#12122a", "#2a2a5a", "#e0e0ff", "#7a7aaa")
+    _paste_chart(draw, canvas, chart_path, (44, 236, 1036, 948), "#08081a", "#1a1a4a")
+    hl = getattr(item, 'headline', f"อัปเดตหุ้น **{item.symbol}**")
+    draw_rich_text_wrapped(draw, hl, (74, 1000), load_font("Kanit-Bold.ttf", 58), "#e0e0ff", "#FFC107", 932, line_gap=16)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(output_path, "PNG", optimize=True)
+    return output_path
+
+
+# ── Canvas Style 3: Clean White ──────────────────────────────────────
+def compose_canvas_clean(item, chart_path, logo_bytes, output_path):
+    from PIL import Image, ImageDraw
+    canvas = Image.new("RGB", CANVAS_SIZE, "#f5f5f5")
+    draw = ImageDraw.Draw(canvas)
+    accent = BULL if item.pct_change >= 0 else BEAR
+    draw.rectangle((0, 0, 1080, 8), fill=accent)
+    tf = load_font("Kanit-Bold.ttf", 66)
+    cf = load_font("Prompt-Regular.ttf", 30)
+    mf = load_font("Kanit-Bold.ttf", 60)
+    pf = load_font("Prompt-Bold.ttf", 34)
+    draw.rounded_rectangle((44, 44, 1036, 216), radius=12, fill="#ffffff", outline="#e0e0e0", width=2)
+    logo = image_from_logo_bytes(logo_bytes, item.symbol)
+    canvas.paste(logo, (74, 70), logo)
+    draw.text((218, 68), item.symbol, font=tf, fill="#1a1a2e")
+    co = item.company_name[:34] + ("..." if len(item.company_name) > 34 else "")
+    draw.text((222, 145), co, font=cf, fill="#666680")
+    met = f"+{item.pct_change:.2f}%" if item.pct_change >= 0 else f"{item.pct_change:.2f}%"
+    mb = draw.textbbox((0,0), met, font=mf)
+    draw.text((1002-(mb[2]-mb[0]), 68), met, font=mf, fill=accent)
+    pr = f"${item.price:,.2f}"
+    pb = draw.textbbox((0,0), pr, font=pf)
+    draw.text((1002-(pb[2]-pb[0]), 145), pr, font=pf, fill="#1a1a2e")
+    _paste_chart(draw, canvas, chart_path, (44, 236, 1036, 948), "#ffffff", "#e0e0e0")
+    hl = getattr(item, 'headline', f"อัปเดตหุ้น **{item.symbol}**")
+    draw_rich_text_wrapped(draw, hl, (74, 1000), load_font("Kanit-Bold.ttf", 56), "#1a1a2e", "#FFC107", 932, line_gap=16)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(output_path, "PNG", optimize=True)
+    return output_path
+
+
+# ── Canvas Style 4: Bold Impact ──────────────────────────────────────
+def compose_canvas_bold(item, chart_path, logo_bytes, output_path):
+    from PIL import Image, ImageDraw
+    canvas = Image.new("RGB", CANVAS_SIZE, "#111111")
+    draw = ImageDraw.Draw(canvas)
+    accent = BULL if item.pct_change >= 0 else BEAR
+    draw.rectangle((0, 0, 12, 1350), fill=accent)
+    draw.rectangle((1068, 0, 1080, 1350), fill=accent)
+    tf = load_font("Kanit-Bold.ttf", 72)
+    cf = load_font("Prompt-Regular.ttf", 28)
+    mf = load_font("Kanit-Bold.ttf", 80)
+    pf = load_font("Prompt-Bold.ttf", 36)
+    met = f"+{item.pct_change:.2f}%" if item.pct_change >= 0 else f"{item.pct_change:.2f}%"
+    mb = draw.textbbox((0,0), met, font=mf)
+    draw.text(((1080-(mb[2]-mb[0]))//2, 50), met, font=mf, fill=accent)
+    sb = draw.textbbox((0,0), item.symbol, font=tf)
+    draw.text(((1080-(sb[2]-sb[0]))//2, 155), item.symbol, font=tf, fill="#ffffff")
+    co = item.company_name[:40] + ("..." if len(item.company_name) > 40 else "")
+    cb = draw.textbbox((0,0), co, font=cf)
+    draw.text(((1080-(cb[2]-cb[0]))//2, 240), co, font=cf, fill="#888888")
+    pr = f"${item.price:,.2f}"
+    pb = draw.textbbox((0,0), pr, font=pf)
+    draw.text(((1080-(pb[2]-pb[0]))//2, 285), pr, font=pf, fill="#cccccc")
+    _paste_chart(draw, canvas, chart_path, (44, 350, 1036, 880), "#0a0a0a", "#333333")
+    hl = getattr(item, 'headline', f"อัปเดตหุ้น **{item.symbol}**")
+    draw_rich_text_wrapped(draw, hl, (74, 930), load_font("Kanit-Bold.ttf", 64), "#ffffff", "#FFC107", 932, line_gap=16)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(output_path, "PNG", optimize=True)
+    return output_path
+
+
+CANVAS_STYLES = {
+    "classic": compose_canvas_classic,
+    "neon": compose_canvas_neon,
+    "clean": compose_canvas_clean,
+    "bold": compose_canvas_bold,
+}
+
+
+def compose_canvas(item: StockItem, chart_path: Path, logo_bytes: bytes | None, output_path: Path, style: str = "classic") -> Path:
+    fn = CANVAS_STYLES.get(style, compose_canvas_classic)
+    return fn(item, chart_path, logo_bytes, output_path)
+
+
+
+
+    from PIL import Image, ImageDraw
     canvas = Image.new("RGB", CANVAS_SIZE, BG)
     draw = ImageDraw.Draw(canvas)
     title_font = load_font("Kanit-Bold.ttf", 66)
     company_font = load_font("Prompt-Regular.ttf", 30)
     metric_font = load_font("Kanit-Bold.ttf", 60)
     price_font = load_font("Prompt-Bold.ttf", 34)
-    body_font = load_font("Prompt-Regular.ttf", 40)
-    small_font = load_font("Prompt-Regular.ttf", 24)
+    headline_font = load_font("Kanit-Bold.ttf", 60)
 
-    draw.rectangle((0, 0, 1080, 1350), fill=BG)
     draw.rectangle((0, 0, 1080, 10), fill=BULL)
-    draw.rounded_rectangle((44, 44, 1036, 216), radius=8, fill="#161b22", outline="#30363d", width=2)
+    _draw_header(draw, canvas, item, logo_bytes, title_font, company_font, metric_font, price_font,
+                 "#161b22", "#30363d", TEXT, MUTED)
+    _paste_chart(draw, canvas, chart_path, (44, 236, 1036, 948), "#0b0f14", "#30363d")
 
-    logo = image_from_logo_bytes(logo_bytes, item.symbol)
-    canvas.paste(logo, (74, 70), logo)
-    draw.text((218, 68), item.symbol, font=title_font, fill=TEXT)
-    company = item.company_name[:34] + ("..." if len(item.company_name) > 34 else "")
-    draw.text((222, 145), company, font=company_font, fill=MUTED)
-
-    metric = f"+{item.pct_change:.2f}%" if item.pct_change >= 0 else f"{item.pct_change:.2f}%"
-    metric_bbox = draw.textbbox((0, 0), metric, font=metric_font)
-    draw.text((1002 - (metric_bbox[2] - metric_bbox[0]), 68), metric, font=metric_font, fill=BULL if item.pct_change >= 0 else BEAR)
-    price = f"${item.price:,.2f}"
-    price_bbox = draw.textbbox((0, 0), price, font=price_font)
-    draw.text((1002 - (price_bbox[2] - price_bbox[0]), 145), price, font=price_font, fill=TEXT)
-
-    chart = Image.open(chart_path).convert("RGB")
-    chart.thumbnail((980, 675), Image.Resampling.LANCZOS)
-    chart_x = (1080 - chart.width) // 2
-    chart_y = 262
-    draw.rounded_rectangle((44, 236, 1036, 948), radius=8, fill="#0b0f14", outline="#30363d", width=2)
-    canvas.paste(chart, (chart_x, chart_y))
-
-    draw.text((74, 974), "WHY IT MATTERS TODAY", font=small_font, fill=BULL)
-    bottom_text = item.caption.strip()
-    draw_wrapped_text(draw, bottom_text, (74, 1016), body_font, TEXT, 932, line_gap=10)
-    draw.text((74, 1290), f"Generated {date.today().isoformat()} | Data: Yahoo Finance", font=small_font, fill=MUTED)
+    headline_text = getattr(item, 'headline', f"อัปเดตหุ้น **{item.symbol}** วันนี้")
+    draw_rich_text_wrapped(draw, headline_text, (74, 1000), headline_font, TEXT, "#FFC107", 932, line_gap=16)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(output_path, "PNG", optimize=True)
     return output_path
+
+
+def compose_canvas_neon(item, chart_path, logo_bytes, output_path):
+    """Style 2: Neon glow — deep purple/blue gradient background with cyan/magenta accents."""
+    from PIL import Image, ImageDraw
+    canvas = Image.new("RGB", CANVAS_SIZE, "#0a0a1a")
+    draw = ImageDraw.Draw(canvas)
+
+    # Gradient background effect (top to bottom)
+    for y_pos in range(1350):
+        r = int(10 + (y_pos / 1350) * 15)
+        g = int(10 + (y_pos / 1350) * 5)
+        b = int(26 + (y_pos / 1350) * 20)
+        draw.line([(0, y_pos), (1080, y_pos)], fill=(r, g, b))
+
+    # Accent bars
+    accent = "#00d4ff" if item.pct_change >= 0 else "#ff4d6a"
+    draw.rectangle((0, 0, 1080, 6), fill=accent)
+    draw.rectangle((0, 1344, 1080, 1350), fill=accent)
+
+    title_font = load_font("Kanit-Bold.ttf", 66)
+    company_font = load_font("Prompt-Regular.ttf", 30)
+    metric_font = load_font("Kanit-Bold.ttf", 60)
+    price_font = load_font("Prompt-Bold.ttf", 34)
+    headline_font = load_font("Kanit-Bold.ttf", 58)
+
+    _draw_header(draw, canvas, item, logo_bytes, title_font, company_font, metric_font, price_font,
+                 "#12122a", "#2a2a5a", "#e0e0ff", "#7a7aaa")
+    _paste_chart(draw, canvas, chart_path, (44, 236, 1036, 948), "#08081a", "#1a1a4a")
+
+    headline_text = getattr(item, 'headline', f"อัปเดตหุ้น **{item.symbol}** วันนี้")
+    draw_rich_text_wrapped(draw, headline_text, (74, 1000), headline_font, "#e0e0ff", "#FFC107", 932, line_gap=16)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(output_path, "PNG", optimize=True)
+    return output_path
+
+
+def compose_canvas_clean(item, chart_path, logo_bytes, output_path):
+    """Style 3: Clean white — light background, professional minimal look."""
+    from PIL import Image, ImageDraw
+    canvas = Image.new("RGB", CANVAS_SIZE, "#f5f5f5")
+    draw = ImageDraw.Draw(canvas)
+
+    accent = BULL if item.pct_change >= 0 else BEAR
+    draw.rectangle((0, 0, 1080, 8), fill=accent)
+
+    title_font = load_font("Kanit-Bold.ttf", 66)
+    company_font = load_font("Prompt-Regular.ttf", 30)
+    metric_font = load_font("Kanit-Bold.ttf", 60)
+    price_font = load_font("Prompt-Bold.ttf", 34)
+    headline_font = load_font("Kanit-Bold.ttf", 56)
+
+    draw.rounded_rectangle((44, 44, 1036, 216), radius=12, fill="#ffffff", outline="#e0e0e0", width=2)
+    logo = image_from_logo_bytes(logo_bytes, item.symbol)
+    canvas.paste(logo, (74, 70), logo)
+    draw.text((218, 68), item.symbol, font=title_font, fill="#1a1a2e")
+    company = item.company_name[:34] + ("..." if len(item.company_name) > 34 else "")
+    draw.text((222, 145), company, font=company_font, fill="#666680")
+    metric = f"+{item.pct_change:.2f}%" if item.pct_change >= 0 else f"{item.pct_change:.2f}%"
+    metric_bbox = draw.textbbox((0, 0), metric, font=metric_font)
+    draw.text((1002 - (metric_bbox[2] - metric_bbox[0]), 68), metric, font=metric_font, fill=accent)
+    price = f"${item.price:,.2f}"
+    price_bbox = draw.textbbox((0, 0), price, font=price_font)
+    draw.text((1002 - (price_bbox[2] - price_bbox[0]), 145), price, font=price_font, fill="#1a1a2e")
+
+    _paste_chart(draw, canvas, chart_path, (44, 236, 1036, 948), "#ffffff", "#e0e0e0")
+
+    headline_text = getattr(item, 'headline', f"อัปเดตหุ้น **{item.symbol}** วันนี้")
+    draw_rich_text_wrapped(draw, headline_text, (74, 1000), headline_font, "#1a1a2e", "#FFC107", 932, line_gap=16)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(output_path, "PNG", optimize=True)
+    return output_path
+
+
+def compose_canvas_bold(item, chart_path, logo_bytes, output_path):
+    """Style 4: Bold headline — large text on top, smaller chart below. Impact-first design."""
+    from PIL import Image, ImageDraw
+    canvas = Image.new("RGB", CANVAS_SIZE, "#111111")
+    draw = ImageDraw.Draw(canvas)
+
+    accent = BULL if item.pct_change >= 0 else BEAR
+    # Bold side accent bar
+    draw.rectangle((0, 0, 12, 1350), fill=accent)
+    draw.rectangle((1068, 0, 1080, 1350), fill=accent)
+
+    title_font = load_font("Kanit-Bold.ttf", 72)
+    company_font = load_font("Prompt-Regular.ttf", 28)
+    metric_font = load_font("Kanit-Bold.ttf", 80)
+    price_font = load_font("Prompt-Bold.ttf", 36)
+    headline_font = load_font("Kanit-Bold.ttf", 64)
+
+    # Large % change at top
+    metric = f"+{item.pct_change:.2f}%" if item.pct_change >= 0 else f"{item.pct_change:.2f}%"
+    metric_bbox = draw.textbbox((0, 0), metric, font=metric_font)
+    metric_w = metric_bbox[2] - metric_bbox[0]
+    draw.text(((1080 - metric_w) // 2, 50), metric, font=metric_font, fill=accent)
+
+    # Symbol + company below
+    sym_bbox = draw.textbbox((0, 0), item.symbol, font=title_font)
+    sym_w = sym_bbox[2] - sym_bbox[0]
+    draw.text(((1080 - sym_w) // 2, 155), item.symbol, font=title_font, fill="#ffffff")
+    company = item.company_name[:40] + ("..." if len(item.company_name) > 40 else "")
+    comp_bbox = draw.textbbox((0, 0), company, font=company_font)
+    comp_w = comp_bbox[2] - comp_bbox[0]
+    draw.text(((1080 - comp_w) // 2, 240), company, font=company_font, fill="#888888")
+
+    # Price
+    price = f"${item.price:,.2f}"
+    price_bbox2 = draw.textbbox((0, 0), price, font=price_font)
+    price_w = price_bbox2[2] - price_bbox2[0]
+    draw.text(((1080 - price_w) // 2, 285), price, font=price_font, fill="#cccccc")
+
+    # Chart (smaller, in middle)
+    _paste_chart(draw, canvas, chart_path, (44, 350, 1036, 880), "#0a0a0a", "#333333")
+
+    # Headline at bottom
+    headline_text = getattr(item, 'headline', f"อัปเดตหุ้น **{item.symbol}** วันนี้")
+    draw_rich_text_wrapped(draw, headline_text, (74, 930), headline_font, "#ffffff", "#FFC107", 932, line_gap=16)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(output_path, "PNG", optimize=True)
+    return output_path
+
+
+CANVAS_STYLES = {
+    "classic": compose_canvas_classic,
+    "neon": compose_canvas_neon,
+    "clean": compose_canvas_clean,
+    "bold": compose_canvas_bold,
+}
+
+
 
 
 def dropbox_client(creds: DropboxCreds):
@@ -769,6 +1130,71 @@ def safe_file_part(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())[:80] or "stock"
 
 
+def generate_summary_post(items: list[StockItem], creds: AppCreds, model: str, mode: str, run_date: str) -> str:
+    """Generate a summary/overview post that covers all stocks in the batch."""
+    mode_label = {
+        "gainers": "หุ้นพุ่งแรงวันนี้",
+        "losers": "หุ้นร่วงหนักวันนี้",
+        "low_pe": "หุ้น Value น่าจับตา",
+        "trending": "หุ้นซื้อขายเดือดวันนี้",
+    }.get(mode, "หุ้นน่าจับตาวันนี้")
+
+    stock_list = "\n".join(
+        f"- {item.symbol} ({item.company_name}): {item.pct_change:+.2f}% ราคา ${item.price:.2f} วอลุ่ม {item.volume:,}"
+        for item in items
+    )
+
+    prompt = (
+        f"You are a professional Thai stock analyst writing a Facebook page post.\n"
+        f"Today is {run_date}. Topic: {mode_label}\n\n"
+        f"Here are the stocks covered today:\n{stock_list}\n\n"
+        f"Write a MAIN SUMMARY POST in Thai that will be the FIRST thing readers see.\n"
+        f"This post introduces all {len(items)} stocks as a group.\n\n"
+        f"Structure:\n"
+        f"1. Eye-catching opening line with emoji (e.g. 🔥📊🚀)\n"
+        f"2. Brief overview of today's market theme (2-3 sentences)\n"
+        f"3. Quick bullet list of all stocks with 1-line summary each\n"
+        f"4. A teaser line like 'ดูรายละเอียดวิเคราะห์แต่ละตัวในคอมเมนต์ด้านล่าง 👇'\n"
+        f"5. Relevant hashtags (5-8 tags)\n\n"
+        f"Keep it concise (150-250 words). Use Thai mixed with English terms.\n"
+        f"Make it feel urgent, professional, and scroll-stopping.\n"
+        f"Return ONLY the post text, nothing else."
+    )
+
+    if creds.openrouter_key:
+        try:
+            return chat_completion(
+                api_key=creds.openrouter_key,
+                base_url="https://openrouter.ai/api/v1/chat/completions",
+                model=model,
+                prompt=prompt,
+                headers={"HTTP-Referer": "http://localhost", "X-Title": "BulkVideoCreatorApp"},
+            )
+        except Exception as exc:
+            print(f"[WARN] Summary post AI failed: {exc}", file=sys.stderr)
+
+    if creds.openai_key:
+        try:
+            return chat_completion(
+                api_key=creds.openai_key,
+                base_url="https://api.openai.com/v1/chat/completions",
+                model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+                prompt=prompt,
+                headers={},
+            )
+        except Exception as exc:
+            print(f"[WARN] Summary post OpenAI failed: {exc}", file=sys.stderr)
+
+    # Fallback: generate without AI
+    lines = [f"📊 {mode_label} — {run_date}\n"]
+    for item in items:
+        arrow = "🟢" if item.pct_change >= 0 else "🔴"
+        lines.append(f"{arrow} {item.symbol} ({item.company_name}) {item.pct_change:+.2f}% ราคา ${item.price:.2f}")
+    lines.append(f"\nดูรายละเอียดวิเคราะห์แต่ละตัวในคอมเมนต์ด้านล่าง 👇")
+    lines.append(f"\n#หุ้นวันนี้ #StockAnalysis #TopGainers #การลงทุน #หุ้นอเมริกา")
+    return "\n".join(lines)
+
+
 def run(args: argparse.Namespace) -> int:
     creds = load_credentials(args.profile)
     spreadsheet_path = Path(args.spreadsheet).expanduser().resolve()
@@ -799,11 +1225,26 @@ def run(args: argparse.Namespace) -> int:
     for index, item in enumerate(items, start=1):
         print(f"[INFO] ({index}/{len(items)}) Processing {item.symbol} {item.company_name}")
         item.news = fetch_news(item, creds)
-        item.caption = generate_caption(item, creds, args.model, args.mode)
+        raw_caption = generate_caption(item, creds, args.model, args.mode)
+        
+        import re
+        img_match = re.search(r'IMAGE_TEXT:\s*(.*?)\s*(?:POST_CAPTION:|$)', raw_caption, re.DOTALL)
+        post_match = re.search(r'POST_CAPTION:\s*(.*)', raw_caption, re.DOTALL)
+        
+        if img_match:
+            item.headline = img_match.group(1).strip()
+        else:
+            item.headline = f"อัปเดตหุ้น **{item.symbol}** วันนี้"
+            
+        if post_match:
+            item.caption = post_match.group(1).strip()
+        else:
+            item.caption = raw_caption.strip()
+            
         chart_path = generate_chart(item, chart_dir / f"{safe_file_part(item.symbol)}_chart.png")
         logo_bytes = fetch_logo(item)
         image_path = output_dir / f"{run_date}_{safe_file_part(item.symbol)}.png"
-        item.image_path = compose_canvas(item, chart_path, logo_bytes, image_path)
+        item.image_path = compose_canvas(item, chart_path, logo_bytes, image_path, style=args.canvas_style)
 
         if not args.skip_dropbox:
             try:
@@ -823,6 +1264,12 @@ def run(args: argparse.Namespace) -> int:
         processed.append(item)
         if args.pause_seconds > 0 and index < len(items):
             time.sleep(args.pause_seconds)
+
+    # Generate summary post for the entire batch
+    summary_post = generate_summary_post(processed, creds, args.model, args.mode, run_date)
+    summary_path = output_dir / "summary_post.txt"
+    summary_path.write_text(summary_post, encoding="utf-8")
+    print(f"[INFO] Summary post saved: {summary_path}")
 
     csv_path = Path(args.csv_path).expanduser().resolve() if args.csv_path else output_dir / "content_factory_post.csv"
     write_csv(processed, config_ref, csv_path, run_date)
@@ -848,6 +1295,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mode", default="gainers",
                         choices=["gainers", "losers", "low_pe", "trending"],
                         help="Screening mode: gainers=top gainers, losers=top losers, low_pe=low P/E value stocks, trending=most active/news-heavy")
+    parser.add_argument("--canvas-style", default="classic",
+                        choices=["classic", "neon", "clean", "bold"],
+                        help="Visual style for the generated canvas images.")
     return parser
 
 

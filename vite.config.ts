@@ -3009,7 +3009,7 @@ const fileSaverPlugin = (): Plugin => ({
           caption: item.Caption || '',
           imageUrl: item.Image_URL || '',
           configRef: item.Config_Ref || '',
-          localImagePath: relImagePath,
+          localImagePath: imagePath && fs.existsSync(imagePath) ? imagePath : '',
           previewUrl: relImagePath ? `/api/top-gainers-image?file=${encodeURIComponent(relImagePath)}` : '',
         };
       });
@@ -3097,6 +3097,9 @@ const fileSaverPlugin = (): Plugin => ({
           const skipDropbox = Boolean(parsed.skipDropbox);
           const VALID_MODES = ['gainers', 'losers', 'low_pe', 'trending'];
           const mode = VALID_MODES.includes(parsed.mode) ? parsed.mode : 'gainers';
+          const destDir = parsed.destDir ? String(parsed.destDir).trim() : '';
+          const VALID_CANVAS = ['classic', 'neon', 'clean', 'bold'];
+          const canvasStyle = VALID_CANVAS.includes(parsed.canvasStyle) ? parsed.canvasStyle : 'classic';
           writeTopGainersConfigCsv(p2);
 
           const py = fs.existsSync(path.resolve(__dirname, '.venv-top-gainers/bin/python'))
@@ -3114,11 +3117,15 @@ const fileSaverPlugin = (): Plugin => ({
             '--mode', mode,
           ];
           if (skipDropbox) args.push('--skip-dropbox');
+          args.push('--canvas-style', canvasStyle);
 
           send({ type: 'log', text: `ใช้ P2: ${p2}` });
           send({ type: 'log', text: `โหมด: ${mode}` });
           send({ type: 'log', text: `เริ่มสร้าง ${limit} หุ้น → ${dropboxFolder}${skipDropbox ? ' (ไม่อัป Dropbox)' : ''}` });
           send({ type: 'log', text: `สแกน Yahoo candidates สูงสุด ${scanCount} ตัว` });
+          if (destDir) {
+            send({ type: 'log', text: `📁 Export Folder: ${destDir}` });
+          }
 
           const { spawn } = require('child_process');
           const env = {
@@ -3139,7 +3146,47 @@ const fileSaverPlugin = (): Plugin => ({
             if (done) return;
             done = true;
             if (code === 0) {
-              send({ type: 'done', result: readTopGainersResults() });
+              const result = readTopGainersResults();
+
+              // ── Inline export: copy files to destDir if provided ──
+              let exportInfo: any = null;
+              if (destDir && result.rows && result.rows.length > 0) {
+                try {
+                  const now = new Date();
+                  const pad2 = (n: number) => String(n).padStart(2, '0');
+                  const folderName = `topGainer_${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}_${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}`;
+                  const exportDir = path.join(destDir, folderName);
+                  fs.mkdirSync(exportDir, { recursive: true });
+                  let count = 0;
+                  for (const row of result.rows) {
+                    if (!row.symbol) continue;
+                    const safeSym = row.symbol.replace(/[^a-zA-Z0-9._-]/g, '_');
+                    if (row.localImagePath && fs.existsSync(row.localImagePath)) {
+                      const ext = path.extname(row.localImagePath) || '.png';
+                      fs.copyFileSync(row.localImagePath, path.join(exportDir, `${safeSym}${ext}`));
+                    }
+                    if (row.caption) {
+                      fs.writeFileSync(path.join(exportDir, `${safeSym}.txt`), row.caption, 'utf-8');
+                    }
+                    count++;
+                  }
+                  // Copy summary_post.txt and CSV if they exist
+                  const summaryPath = path.join(result.outputDir, 'summary_post.txt');
+                  if (fs.existsSync(summaryPath)) {
+                    fs.copyFileSync(summaryPath, path.join(exportDir, 'summary_post.txt'));
+                  }
+                  if (result.csvPath && fs.existsSync(result.csvPath)) {
+                    fs.copyFileSync(result.csvPath, path.join(exportDir, 'content_factory_post.csv'));
+                  }
+                  exportInfo = { success: true, exportDir, count };
+                  send({ type: 'log', text: `✅ บันทึกไฟล์สำเร็จ → ${exportDir} (${count} รายการ)` });
+                } catch (exportErr: any) {
+                  send({ type: 'log', text: `❌ บันทึกไฟล์ไม่สำเร็จ: ${exportErr.message}` });
+                  exportInfo = { success: false, error: exportErr.message };
+                }
+              }
+
+              send({ type: 'done', result, exportInfo });
             } else {
               send({ type: 'error', text: `Top Gainers process exited with code ${code ?? 'unknown'}` });
             }

@@ -58,11 +58,12 @@ const P2_PRESETS = [
 
 export function TopGainersFactoryTab() {
   const [p2, setP2] = useState(DEFAULT_P2);
-  const [limit, setLimit] = useState(5);
+  const [limit, setLimit] = useState<number | string>(5);
   const [scanCount, setScanCount] = useState(150);
   const [dropboxFolder, setDropboxFolder] = useState(DEFAULT_DROPBOX);
   const [skipDropbox, setSkipDropbox] = useState(false);
   const [mode, setMode] = useState<RunMode>('gainers');
+  const [canvasStyle, setCanvasStyle] = useState('classic');
   const [saveFolder, setSaveFolder] = useState('');
   const [isRunning, setIsRunning] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -110,7 +111,7 @@ export function TopGainersFactoryTab() {
 
   const pickFolder = async () => {
     try {
-      const res = await fetch('/api/pick-folder');
+      const res = await fetch('/api/pick-folder', { method: 'POST' });
       const data = await res.json();
       if (data.success && data.dir) setSaveFolder(data.dir);
     } catch (e: any) {
@@ -155,7 +156,7 @@ export function TopGainersFactoryTab() {
       const res = await fetch('/api/top-gainers-run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ p2, limit, scanCount, dropboxFolder, skipDropbox, mode }),
+        body: JSON.stringify({ p2, limit: Number(limit) || 1, scanCount, dropboxFolder, skipDropbox, mode, destDir: saveFolder, canvasStyle }),
       });
 
       const reader = res.body?.getReader();
@@ -347,9 +348,15 @@ export function TopGainersFactoryTab() {
               <input
                 type="number"
                 min={1}
-                max={20}
+                max={100}
                 value={limit}
-                onChange={(e) => setLimit(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
+                onChange={(e) => setLimit(e.target.value === '' ? '' : Number(e.target.value))}
+                onBlur={() => {
+                  let val = Number(limit);
+                  if (isNaN(val) || val < 1) val = 1;
+                  if (val > 100) val = 100;
+                  setLimit(val);
+                }}
                 className="w-full rounded-lg border px-3 py-2 bg-transparent"
                 style={{ borderColor: 'var(--border-color)' }}
               />
@@ -379,6 +386,21 @@ export function TopGainersFactoryTab() {
               <option value={150}>สมดุล · 150 candidates</option>
               <option value={300}>ลึก · 300 candidates</option>
               <option value={500}>ลึกสุด · 500 candidates</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold mb-2">🎨 Canvas Style</label>
+            <select
+              value={canvasStyle}
+              onChange={(e) => setCanvasStyle(e.target.value)}
+              className="w-full h-[42px] rounded-lg border px-3 bg-transparent"
+              style={{ borderColor: 'var(--border-color)' }}
+            >
+              <option value="classic">🌙 Classic Dark — มืดเท่ สไตล์ GitHub</option>
+              <option value="neon">💜 Neon Glow — พื้นน้ำเงินเข้ม เรืองแสง</option>
+              <option value="clean">☀️ Clean White — สะอาดตา มินิมอล</option>
+              <option value="bold">💥 Bold Impact — ตัวเลขยักษ์ จัดเต็ม</option>
             </select>
           </div>
 
