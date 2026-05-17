@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { checkOpenRouterCredits, type ApiProfile } from '../../hooks/useApiSettings';
 
-type KeyKind = 'openrouter' | 'kie' | 'github' | 'dropbox' | 'google' | 'apify';
+type KeyKind = 'openrouter' | 'kie' | 'github' | 'dropbox' | 'google' | 'apify' | 'giphy';
 
 type KeyOption = {
   id: KeyKind;
@@ -60,6 +60,14 @@ const KEY_OPTIONS: KeyOption[] = [
     legacyKey: 'apify_api_key',
     placeholder: 'apify_api_...',
   },
+  {
+    id: 'giphy',
+    label: 'GIPHY',
+    hint: 'ใช้ค้นหา/โหลดมีมสำหรับ Top Gainers',
+    profileField: 'giphyKey',
+    legacyKey: 'giphy_api_key',
+    placeholder: 'ใส่ GIPHY API key',
+  },
 ];
 
 const PROFILE_STORAGE_KEY = 'api_global_profiles';
@@ -83,6 +91,7 @@ function makeQuickProfile(): ApiProfile {
     kieKey: '',
     googleKey: '',
     apifyKey: '',
+    giphyKey: '',
   };
 }
 

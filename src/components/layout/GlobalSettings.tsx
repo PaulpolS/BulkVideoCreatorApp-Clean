@@ -12,6 +12,8 @@ interface ApiProfile {
   kieKey: string;
   googleKey?: string;
   apifyKey?: string;
+  giphyKey?: string;
+  active?: boolean;
 }
 
 export default function GlobalSettings() {
@@ -29,6 +31,7 @@ export default function GlobalSettings() {
   const [kieKey, setKieKey] = useState('');
   const [googleKey, setGoogleKey] = useState('');
   const [apifyKey, setApifyKey] = useState('');
+  const [giphyKey, setGiphyKey] = useState('');
   const [isCheckingCredits, setIsCheckingCredits] = useState(false);
   const [creditResult, setCreditResult] = useState('');
   
@@ -154,6 +157,7 @@ export default function GlobalSettings() {
             setKieKey(p.kieKey || '');
             setGoogleKey(p.googleKey || '');
             setApifyKey(p.apifyKey || '');
+            setGiphyKey(p.giphyKey || '');
           }
         })
         .catch(console.error);
@@ -183,10 +187,12 @@ export default function GlobalSettings() {
       dropboxRefreshToken: dropboxRefreshToken,
       kieKey: kieKey.trim(),
       googleKey: googleKey.trim(),
-      apifyKey: apifyKey.trim()
+      apifyKey: apifyKey.trim(),
+      giphyKey: giphyKey.trim(),
+      active: true
     };
     
-    let updated = [...profiles];
+    let updated = profiles.map(profile => ({ ...profile, active: false }));
     const index = updated.findIndex(p => p.id === newProfile.id);
     if (index >= 0) {
       updated[index] = newProfile;
@@ -217,6 +223,7 @@ export default function GlobalSettings() {
     if (newProfile.googleKey) {
       localStorage.setItem('google_api_key', newProfile.googleKey);
     }
+    localStorage.setItem('giphy_api_key', newProfile.giphyKey || '');
     window.dispatchEvent(new CustomEvent('api-profiles-updated', {
       detail: { profiles: updated, activeProfileId: newProfile.id },
     }));
@@ -234,6 +241,7 @@ export default function GlobalSettings() {
     setKieKey('');
     setGoogleKey('');
     setApifyKey('');
+    setGiphyKey('');
     setCreditResult('');
   };
 
@@ -250,6 +258,7 @@ export default function GlobalSettings() {
       setKieKey(p.kieKey || '');
       setGoogleKey(p.googleKey || '');
       setApifyKey(p.apifyKey || '');
+      setGiphyKey(p.giphyKey || '');
       setCreditResult('');
       
       // Update backwards compatibility immediately so switching takes effect
@@ -257,6 +266,7 @@ export default function GlobalSettings() {
       localStorage.setItem('openrouter_key', p.openRouterKey);
       localStorage.setItem('dropbox_api_key', p.dropboxKey);
       if (p.googleKey) localStorage.setItem('google_api_key', p.googleKey);
+      localStorage.setItem('giphy_api_key', p.giphyKey || '');
       window.dispatchEvent(new CustomEvent('api-profiles-updated', {
         detail: { profiles, activeProfileId: p.id },
       }));
@@ -499,6 +509,17 @@ export default function GlobalSettings() {
                   onChange={(e) => setApifyKey(e.target.value)}
                   className="w-full px-4 py-2 bg-gray-50 dark:bg-black border border-[var(--border-color)] rounded-lg focus:outline-none focus:border-indigo-500"
                   placeholder="apify_api_..."
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">🎞️ GIPHY API Key (Meme/GIF)</label>
+                <input
+                  type="password"
+                  value={giphyKey}
+                  onChange={(e) => setGiphyKey(e.target.value)}
+                  className="w-full px-4 py-2 bg-gray-50 dark:bg-black border border-[var(--border-color)] rounded-lg focus:outline-none focus:border-indigo-500"
+                  placeholder="GIPHY API Key"
                 />
               </div>
             </div>

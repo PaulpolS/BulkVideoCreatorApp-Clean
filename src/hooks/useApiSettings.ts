@@ -22,6 +22,7 @@ export interface ApiProfile {
   kieKey: string;
   googleKey?: string;
   apifyKey?: string;
+  giphyKey?: string;
 }
 
 // ─── Module-level cache ──────────────────────────────────────────────────────
@@ -106,6 +107,7 @@ function _syncServerProfilesToLocalStorage(profiles: ApiProfile[]): void {
   if (active.dropboxKey)    localStorage.setItem('dropbox_api_key', active.dropboxKey);
   if (active.kieKey)        localStorage.setItem('kie_api_key', active.kieKey);
   if (active.googleKey)     localStorage.setItem('google_api_key', active.googleKey);
+  if (active.giphyKey)      localStorage.setItem('giphy_api_key', active.giphyKey);
 
   _refreshCacheFromStorage();
 }
@@ -199,6 +201,15 @@ export function getActiveApifyKey(): string {
   const profile = _cachedProfile ?? _readLocalActiveProfile();
   if (profile?.apifyKey?.trim()) return profile.apifyKey.trim();
   return localStorage.getItem('apify_api_key')?.trim() || '';
+}
+
+/**
+ * Get the GIPHY API key synchronously.
+ */
+export function getActiveGiphyKey(): string {
+  const profile = _cachedProfile ?? _readLocalActiveProfile();
+  if (profile?.giphyKey?.trim()) return profile.giphyKey.trim();
+  return localStorage.getItem('giphy_api_key')?.trim() || '';
 }
 
 /**

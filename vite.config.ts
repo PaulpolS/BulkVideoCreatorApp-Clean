@@ -3003,6 +3003,7 @@ const fileSaverPlugin = (): Plugin => ({
         const symbol = String(item.Symbol || '').trim();
         const imagePath = symbol ? path.join(outputDir, `${runDate}_${symbol}.png`) : '';
         const relImagePath = imagePath && fs.existsSync(imagePath) ? path.relative(__dirname, imagePath) : '';
+        const imageVersion = imagePath && fs.existsSync(imagePath) ? String(Math.floor(fs.statSync(imagePath).mtimeMs)) : '';
         return {
           date: item.Date || runDate,
           symbol,
@@ -3010,7 +3011,7 @@ const fileSaverPlugin = (): Plugin => ({
           imageUrl: item.Image_URL || '',
           configRef: item.Config_Ref || '',
           localImagePath: imagePath && fs.existsSync(imagePath) ? imagePath : '',
-          previewUrl: relImagePath ? `/api/top-gainers-image?file=${encodeURIComponent(relImagePath)}` : '',
+          previewUrl: relImagePath ? `/api/top-gainers-image?file=${encodeURIComponent(relImagePath)}&v=${encodeURIComponent(imageVersion)}` : '',
         };
       });
       return { date: runDate, outputDir, csvPath, configP2: readTopGainersConfigP2(), rows };
@@ -3073,6 +3074,101 @@ const fileSaverPlugin = (): Plugin => ({
       }
     });
 
+    const readGiphyKeyFromProfiles = () => {
+      try {
+        const profilesPath = path.resolve(__dirname, 'public/app_data/api_profiles.json');
+        if (!fs.existsSync(profilesPath)) return '';
+        const profiles = JSON.parse(fs.readFileSync(profilesPath, 'utf-8'));
+        if (!Array.isArray(profiles)) return '';
+        const active = profiles.find((profile: any) => profile?.active && profile?.giphyKey) || profiles.find((profile: any) => profile?.giphyKey);
+        return String(active?.giphyKey || '').trim();
+      } catch {
+        return '';
+      }
+    };
+
+    const topGainersMemeLibraryInfo = () => {
+      const outputDir = path.resolve(__dirname, 'public/app_data/top_gainers_memes');
+      const files = fs.existsSync(outputDir)
+        ? fs.readdirSync(outputDir).filter((file: string) => /\.(png|jpe?g|webp|gif)$/i.test(file))
+        : [];
+      return { outputDir, count: files.length };
+    };
+
+    server.middlewares.use('/api/top-gainers-meme-library', (req, res) => {
+      if (req.method !== 'GET') { res.statusCode = 405; res.end('Method not allowed'); return; }
+      try {
+        const info = topGainersMemeLibraryInfo();
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ success: true, ...info }));
+      } catch (e: any) {
+        res.statusCode = 500;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ success: false, error: e.message }));
+      }
+    });
+
+    const runTopGainersMemeScript = (req: any, res: any, dryRun: boolean) => {
+      if (req.method !== 'POST') { res.statusCode = 405; res.end('Method not allowed'); return; }
+      let body = '';
+      req.on('data', (chunk: any) => { body += chunk.toString(); });
+      req.on('end', () => {
+        try {
+          const parsed = JSON.parse(body || '{}');
+          const count = Math.max(1, Math.min(100, Number(parsed.count || 50)));
+          const giphyKey = String(parsed.giphyKey || '').trim() || readGiphyKeyFromProfiles();
+          const outputDir = path.resolve(__dirname, 'public/app_data/top_gainers_memes');
+          if (!giphyKey) {
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ success: false, error: 'ยังไม่พบ GIPHY API Key: ใส่ใน Global Settings หรือช่อง GIPHY API Key ก่อน' }));
+            return;
+          }
+          fs.mkdirSync(outputDir, { recursive: true });
+          const py = fs.existsSync(path.resolve(__dirname, '.venv-top-gainers/bin/python'))
+            ? path.resolve(__dirname, '.venv-top-gainers/bin/python')
+            : 'python3';
+          const script = path.resolve(__dirname, 'scripts/download_giphy_stock_memes.py');
+          const { spawn } = require('child_process');
+          const scriptArgs = [script, '--count', String(count), '--output-dir', outputDir];
+          if (dryRun) scriptArgs.push('--dry-run');
+          const proc = spawn(py, scriptArgs, {
+            cwd: __dirname,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: { ...process.env, GIPHY_API_KEY: giphyKey },
+          });
+          let stdout = '';
+          let stderr = '';
+          proc.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
+          proc.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
+          proc.on('close', (code: number | null) => {
+            const info = topGainersMemeLibraryInfo();
+            const summaryLine = stdout.split('\n').reverse().find((line: string) => line.includes('Downloaded this run')) || '';
+            const availableLine = stdout.split('\n').reverse().find((line: string) => line.includes('Available new static memes')) || '';
+            const availableMatch = availableLine.match(/(\d+)\s*$/);
+            const available = availableMatch ? Number(availableMatch[1]) : 0;
+            res.setHeader('Content-Type', 'application/json');
+            if (dryRun && code === 0) {
+              res.end(JSON.stringify({ success: true, outputDir: info.outputDir, count: info.count, available, summary: availableLine || `โหลดเพิ่มได้ ${available} รูป` }));
+              return;
+            }
+            if (code === 0 || info.count > 0) {
+              res.end(JSON.stringify({ success: true, outputDir: info.outputDir, count: info.count, summary: summaryLine || `มีมีมทั้งหมด ${info.count} รูปในโฟลเดอร์` }));
+            } else {
+              const cleanError = (stderr || stdout || 'โหลดมีมไม่สำเร็จ').split('\n').slice(-4).join('\n');
+              res.end(JSON.stringify({ success: false, error: cleanError }));
+            }
+          });
+        } catch (e: any) {
+          res.statusCode = 500;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ success: false, error: e.message || 'Download meme error' }));
+        }
+      });
+    };
+
+    server.middlewares.use('/api/top-gainers-check-memes', (req, res) => runTopGainersMemeScript(req, res, true));
+    server.middlewares.use('/api/top-gainers-download-memes', (req, res) => runTopGainersMemeScript(req, res, false));
+
     server.middlewares.use('/api/top-gainers-run', (req, res) => {
       if (req.method !== 'POST') { res.statusCode = 405; res.end('Method not allowed'); return; }
       res.setHeader('Content-Type', 'text/event-stream');
@@ -3098,8 +3194,17 @@ const fileSaverPlugin = (): Plugin => ({
           const VALID_MODES = ['gainers', 'losers', 'low_pe', 'trending'];
           const mode = VALID_MODES.includes(parsed.mode) ? parsed.mode : 'gainers';
           const destDir = parsed.destDir ? String(parsed.destDir).trim() : '';
-          const VALID_CANVAS = ['classic', 'neon', 'clean', 'bold'];
-          const canvasStyle = VALID_CANVAS.includes(parsed.canvasStyle) ? parsed.canvasStyle : 'classic';
+          const VALID_CANVAS = ['viral', 'classic', 'neon', 'clean', 'bold'];
+          const canvasStyle = VALID_CANVAS.includes(parsed.canvasStyle) ? parsed.canvasStyle : 'viral';
+          const imageRatio = parsed.imageRatio === 'square' ? 'square' : 'default';
+          const VALID_HEADLINE_THEMES = ['classic', 'emerald_gold', 'orange_teal', 'purple_lime', 'rose_cyan', 'amber_indigo', 'magenta_mint', 'graphite_gold', 'navy_coral', 'white_hot'];
+          const headlineTheme = VALID_HEADLINE_THEMES.includes(parsed.headlineTheme) ? parsed.headlineTheme : 'classic';
+          const memeOverlay = Boolean(parsed.memeOverlay);
+          const pageCredit = String(parsed.pageCredit || '').trim().slice(0, 96);
+          const memeSource = parsed.memeSource === 'giphy' ? 'giphy' : 'local';
+          let giphyKey = String(parsed.giphyKey || '').trim();
+          if (!giphyKey && memeSource === 'giphy') giphyKey = readGiphyKeyFromProfiles();
+          const localMemePath = String(parsed.localMemePath || '').trim();
           writeTopGainersConfigCsv(p2);
 
           const py = fs.existsSync(path.resolve(__dirname, '.venv-top-gainers/bin/python'))
@@ -3118,10 +3223,22 @@ const fileSaverPlugin = (): Plugin => ({
           ];
           if (skipDropbox) args.push('--skip-dropbox');
           args.push('--canvas-style', canvasStyle);
+          args.push('--image-ratio', imageRatio);
+          args.push('--headline-theme', headlineTheme);
+          if (memeOverlay) args.push('--meme-overlay');
+          if (pageCredit) args.push('--page-credit', pageCredit);
+          args.push('--meme-source', memeSource);
+          if (localMemePath) args.push('--local-meme-path', localMemePath);
 
           send({ type: 'log', text: `ใช้ P2: ${p2}` });
           send({ type: 'log', text: `โหมด: ${mode}` });
+          send({ type: 'log', text: `ขนาดรูป: ${imageRatio === 'square' ? '1:1 (1080x1080)' : 'แบบเดิม (1080x1350)'}` });
+          send({ type: 'log', text: `ชุดสีพาดหัว: ${headlineTheme}` });
           send({ type: 'log', text: `เริ่มสร้าง ${limit} หุ้น → ${dropboxFolder}${skipDropbox ? ' (ไม่อัป Dropbox)' : ''}` });
+          if (memeOverlay) send({ type: 'log', text: 'เปิด Meme Sticker overlay' });
+          if (memeOverlay) send({ type: 'log', text: `แหล่ง Meme: ${memeSource === 'giphy' ? 'GIPHY' : 'ในเครื่อง'}` });
+          if (memeOverlay && memeSource === 'giphy') send({ type: 'log', text: `GIPHY API Key: ${giphyKey ? 'พบ key แล้ว' : 'ไม่พบ key จะ fallback เป็น local sticker'}` });
+          if (pageCredit) send({ type: 'log', text: `เครดิตเพจ: ${pageCredit}` });
           send({ type: 'log', text: `สแกน Yahoo candidates สูงสุด ${scanCount} ตัว` });
           if (destDir) {
             send({ type: 'log', text: `📁 Export Folder: ${destDir}` });
@@ -3132,8 +3249,9 @@ const fileSaverPlugin = (): Plugin => ({
             ...process.env,
             MPLCONFIGDIR: mplDir,
             PATH: `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${process.env.PATH || ''}`,
+            ...(giphyKey ? { GIPHY_API_KEY: giphyKey } : {}),
           };
-          const proc = spawn(py, args, { cwd: __dirname, stdio: ['ignore', 'pipe', 'pipe'], env });
+          const proc = spawn(py, ['-u', ...args], { cwd: __dirname, stdio: ['ignore', 'pipe', 'pipe'], env: { ...env, PYTHONUNBUFFERED: '1' } });
           let done = false;
           const onChunk = (data: Buffer) => {
             data.toString().split('\n').forEach((line) => {

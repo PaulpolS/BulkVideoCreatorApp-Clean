@@ -8,9 +8,24 @@ import {
   FolderOpenIcon,
   LinkIcon,
   PlayIcon,
+  TrashIcon,
 } from '@heroicons/react/24/outline';
+import { getActiveGiphyKey } from '../../hooks/useApiSettings';
 
 type RunMode = 'gainers' | 'losers' | 'low_pe' | 'trending';
+type MemeSource = 'local' | 'giphy';
+type ImageRatio = 'default' | 'square';
+type HeadlineTheme =
+  | 'classic'
+  | 'emerald_gold'
+  | 'orange_teal'
+  | 'purple_lime'
+  | 'rose_cyan'
+  | 'amber_indigo'
+  | 'magenta_mint'
+  | 'graphite_gold'
+  | 'navy_coral'
+  | 'white_hot';
 
 const MODE_OPTIONS: { value: RunMode; label: string; desc: string }[] = [
   { value: 'gainers',  label: '📈 ราคาพุ่ง',    desc: 'Top Day Gainers' },
@@ -40,7 +55,15 @@ interface TopGainersPayload {
 const DEFAULT_P2 = 'sector: Technology';
 const DEFAULT_DROPBOX = '/Stock_Gainers_Content';
 const CUSTOM_P2_VALUE = '__custom__';
+const EXPORT_FOLDER_STORAGE_KEY = 'topGainers.exportFolder';
+const PAGE_CREDIT_STORAGE_KEY = 'topGainers.pageCredit';
+const GIPHY_KEY_STORAGE_KEY = 'topGainers.giphyKey';
+const MEME_SOURCE_STORAGE_KEY = 'topGainers.memeSource';
+const LOCAL_MEME_PATH_STORAGE_KEY = 'topGainers.localMemePath';
+const IMAGE_RATIO_STORAGE_KEY = 'topGainers.imageRatio';
+const HEADLINE_THEME_STORAGE_KEY = 'topGainers.headlineTheme';
 const P2_PRESETS = [
+  { label: 'ทั้งตลาด / ทุกอุตสาหกรรม', value: 'market: all' },
   { label: 'Technology', value: 'sector: Technology' },
   { label: 'Healthcare', value: 'sector: Healthcare' },
   { label: 'Financial Services', value: 'sector: Financial Services' },
@@ -56,6 +79,24 @@ const P2_PRESETS = [
   { label: 'Watchlist: EV & Energy', value: 'symbols: TSLA, RIVN, LCID, ENPH, FSLR' },
 ];
 
+const HEADLINE_THEME_OPTIONS: Array<{
+  value: HeadlineTheme;
+  label: string;
+  desc: string;
+  colors: [string, string, string];
+}> = [
+  { value: 'classic', label: 'Classic', desc: 'Red / Blue / Yellow', colors: ['#e11d1d', '#fff200', '#1688f0'] },
+  { value: 'emerald_gold', label: 'Emerald', desc: 'Green / Gold / Teal', colors: ['#059669', '#facc15', '#0f766e'] },
+  { value: 'orange_teal', label: 'Orange Teal', desc: 'Orange / Yellow / Cyan', colors: ['#f97316', '#fde047', '#0891b2'] },
+  { value: 'purple_lime', label: 'Purple Lime', desc: 'Purple / Lime / Indigo', colors: ['#7c3aed', '#bef264', '#4f46e5'] },
+  { value: 'rose_cyan', label: 'Rose Cyan', desc: 'Rose / Cyan / Deep Cyan', colors: ['#e11d48', '#22d3ee', '#0e7490'] },
+  { value: 'amber_indigo', label: 'Amber Indigo', desc: 'Amber / Cream / Indigo', colors: ['#d97706', '#fef08a', '#4f46e5'] },
+  { value: 'magenta_mint', label: 'Magenta Mint', desc: 'Pink / Mint / Green', colors: ['#db2777', '#a7f3d0', '#10b981'] },
+  { value: 'graphite_gold', label: 'Graphite', desc: 'Slate / Gold / Bronze', colors: ['#374151', '#fbbf24', '#92400e'] },
+  { value: 'navy_coral', label: 'Navy Coral', desc: 'Navy / Coral / Ink', colors: ['#1d4ed8', '#fb7185', '#0f172a'] },
+  { value: 'white_hot', label: 'White Hot', desc: 'White / Orange / Yellow', colors: ['#f8fafc', '#fb923c', '#facc15'] },
+];
+
 export function TopGainersFactoryTab() {
   const [p2, setP2] = useState(DEFAULT_P2);
   const [limit, setLimit] = useState<number | string>(5);
@@ -63,10 +104,66 @@ export function TopGainersFactoryTab() {
   const [dropboxFolder, setDropboxFolder] = useState(DEFAULT_DROPBOX);
   const [skipDropbox, setSkipDropbox] = useState(false);
   const [mode, setMode] = useState<RunMode>('gainers');
-  const [canvasStyle, setCanvasStyle] = useState('classic');
-  const [saveFolder, setSaveFolder] = useState('');
+  const [canvasStyle, setCanvasStyle] = useState('viral');
+  const [imageRatio, setImageRatio] = useState<ImageRatio>(() => {
+    try {
+      return localStorage.getItem(IMAGE_RATIO_STORAGE_KEY) === 'square' ? 'square' : 'default';
+    } catch {
+      return 'default';
+    }
+  });
+  const [headlineTheme, setHeadlineTheme] = useState<HeadlineTheme>(() => {
+    try {
+      const saved = localStorage.getItem(HEADLINE_THEME_STORAGE_KEY) as HeadlineTheme | null;
+      return HEADLINE_THEME_OPTIONS.some(option => option.value === saved) ? saved! : 'classic';
+    } catch {
+      return 'classic';
+    }
+  });
+  const [memeOverlay, setMemeOverlay] = useState(false);
+  const [memeSource, setMemeSource] = useState<MemeSource>(() => {
+    try {
+      const saved = localStorage.getItem(MEME_SOURCE_STORAGE_KEY);
+      return saved === 'giphy' ? 'giphy' : 'local';
+    } catch {
+      return 'local';
+    }
+  });
+  const [giphyKey, setGiphyKey] = useState(() => {
+    try {
+      return localStorage.getItem(GIPHY_KEY_STORAGE_KEY) || getActiveGiphyKey();
+    } catch {
+      return '';
+    }
+  });
+  const [localMemePath, setLocalMemePath] = useState(() => {
+    try {
+      return localStorage.getItem(LOCAL_MEME_PATH_STORAGE_KEY) || '';
+    } catch {
+      return '';
+    }
+  });
+  const [pageCredit, setPageCredit] = useState(() => {
+    try {
+      return localStorage.getItem(PAGE_CREDIT_STORAGE_KEY) || '';
+    } catch {
+      return '';
+    }
+  });
+  const [saveFolder, setSaveFolder] = useState(() => {
+    try {
+      return localStorage.getItem(EXPORT_FOLDER_STORAGE_KEY) || '';
+    } catch {
+      return '';
+    }
+  });
   const [isRunning, setIsRunning] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isDownloadingMemes, setIsDownloadingMemes] = useState(false);
+  const [isCheckingMemes, setIsCheckingMemes] = useState(false);
+  const [memeLibraryDir, setMemeLibraryDir] = useState('');
+  const [memeLibraryCount, setMemeLibraryCount] = useState(0);
+  const [memeAvailableCount, setMemeAvailableCount] = useState<number | null>(null);
   const [logLines, setLogLines] = useState<string[]>([]);
   const [results, setResults] = useState<TopGainersPayload | null>(null);
   const [error, setError] = useState('');
@@ -87,36 +184,207 @@ export function TopGainersFactoryTab() {
   }, []);
 
   useEffect(() => {
+    const handleApiProfilesUpdated = () => {
+      if (!giphyKey.trim()) updateGiphyKey(getActiveGiphyKey());
+    };
+    window.addEventListener('api-profiles-updated', handleApiProfilesUpdated);
+    return () => window.removeEventListener('api-profiles-updated', handleApiProfilesUpdated);
+  }, [giphyKey]);
+
+  useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logLines]);
 
   const loadInitialState = async () => {
     try {
-      const [configRes, resultRes] = await Promise.all([
+      const [configRes, resultRes, memeLibraryRes] = await Promise.all([
         fetch('/api/top-gainers-config'),
         fetch('/api/top-gainers-results'),
+        fetch('/api/top-gainers-meme-library'),
       ]);
       const config = await configRes.json();
       const latest = await resultRes.json();
+      const memeLibrary = await memeLibraryRes.json();
       if (config?.p2) setP2(config.p2);
       if (latest?.success) setResults(latest);
+      if (memeLibrary?.success) {
+        setMemeLibraryDir(memeLibrary.outputDir || '');
+        setMemeLibraryCount(Number(memeLibrary.count || 0));
+      }
     } catch (e: any) {
       setError(e.message || 'โหลดข้อมูลไม่สำเร็จ');
     }
   };
 
   const appendLog = (line: string) => {
-    setLogLines(prev => [...prev, line].slice(-300));
+    const timestamp = new Date().toLocaleTimeString('th-TH', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+    const text = String(line || '').trim();
+    setLogLines(prev => [...prev, `[${timestamp}] ${text}`].slice(-300));
+  };
+
+  const updateSaveFolder = (dir: string) => {
+    setSaveFolder(dir);
+    try {
+      if (dir) localStorage.setItem(EXPORT_FOLDER_STORAGE_KEY, dir);
+    } catch {}
+  };
+
+  const updatePageCredit = (next: string) => {
+    setPageCredit(next);
+    try {
+      localStorage.setItem(PAGE_CREDIT_STORAGE_KEY, next);
+    } catch {}
+  };
+
+  const updateMemeSource = (next: MemeSource) => {
+    setMemeSource(next);
+    try {
+      localStorage.setItem(MEME_SOURCE_STORAGE_KEY, next);
+    } catch {}
+  };
+
+  const updateGiphyKey = (next: string) => {
+    setGiphyKey(next);
+    try {
+      localStorage.setItem(GIPHY_KEY_STORAGE_KEY, next);
+    } catch {}
+  };
+
+  const updateLocalMemePath = (next: string) => {
+    setLocalMemePath(next);
+    try {
+      localStorage.setItem(LOCAL_MEME_PATH_STORAGE_KEY, next);
+    } catch {}
+  };
+
+  const updateImageRatio = (next: ImageRatio) => {
+    setImageRatio(next);
+    try {
+      localStorage.setItem(IMAGE_RATIO_STORAGE_KEY, next);
+    } catch {}
+  };
+
+  const updateHeadlineTheme = (next: HeadlineTheme) => {
+    setHeadlineTheme(next);
+    try {
+      localStorage.setItem(HEADLINE_THEME_STORAGE_KEY, next);
+    } catch {}
   };
 
   const pickFolder = async () => {
     try {
       const res = await fetch('/api/pick-folder', { method: 'POST' });
       const data = await res.json();
-      if (data.success && data.dir) setSaveFolder(data.dir);
+      if (data.success && data.dir) updateSaveFolder(data.dir);
     } catch (e: any) {
       setError(e.message || 'เลือก Folder ไม่สำเร็จ');
     }
+  };
+
+  const pickLocalMemeFile = async () => {
+    try {
+      const res = await fetch('/api/pick-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: 'เลือกไฟล์ Meme (png, jpg, gif, webp)' }),
+      });
+      const data = await res.json();
+      if (data.success && data.file) updateLocalMemePath(data.file);
+    } catch (e: any) {
+      setError(e.message || 'เลือกไฟล์ Meme ไม่สำเร็จ');
+    }
+  };
+
+  const pickLocalMemeFolder = async () => {
+    try {
+      const res = await fetch('/api/pick-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: 'เลือกโฟลเดอร์ Meme' }),
+      });
+      const data = await res.json();
+      if (data.success && data.dir) updateLocalMemePath(data.dir);
+    } catch (e: any) {
+      setError(e.message || 'เลือกโฟลเดอร์ Meme ไม่สำเร็จ');
+    }
+  };
+
+  const downloadStockMemes = async () => {
+    setIsDownloadingMemes(true);
+    setError('');
+    appendLog('เริ่มโหลด stock meme เข้าโฟลเดอร์ในเครื่อง...');
+    try {
+      const key = giphyKey.trim() || getActiveGiphyKey();
+      const res = await fetch('/api/top-gainers-download-memes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count: 50, giphyKey: key }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'โหลดมีมไม่สำเร็จ');
+      updateLocalMemePath(data.outputDir);
+      updateMemeSource('local');
+      setMemeLibraryDir(data.outputDir || '');
+      setMemeLibraryCount(Number(data.count || 0));
+      appendLog(`โหลดมีมเสร็จ → ${data.outputDir}`);
+      if (data.summary) appendLog(data.summary);
+    } catch (e: any) {
+      const message = e.message || 'โหลดมีมไม่สำเร็จ';
+      setError(message);
+      appendLog(message);
+    } finally {
+      setIsDownloadingMemes(false);
+    }
+  };
+
+  const checkStockMemes = async () => {
+    setIsCheckingMemes(true);
+    setError('');
+    appendLog('กำลังเช็กมีมรูปนิ่งใหม่จาก GIPHY...');
+    try {
+      const key = giphyKey.trim() || getActiveGiphyKey();
+      const res = await fetch('/api/top-gainers-check-memes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count: 50, giphyKey: key }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'เช็กมีมไม่สำเร็จ');
+      setMemeAvailableCount(Number(data.available || 0));
+      setMemeLibraryDir(data.outputDir || memeLibraryDir);
+      setMemeLibraryCount(Number(data.count || memeLibraryCount));
+      appendLog(`เช็กแล้ว: โหลดมีมรูปนิ่งใหม่ได้อีก ${Number(data.available || 0)} รูป`);
+    } catch (e: any) {
+      const message = e.message || 'เช็กมีมไม่สำเร็จ';
+      setError(message);
+      appendLog(message);
+    } finally {
+      setIsCheckingMemes(false);
+    }
+  };
+
+  const openMemeLibraryFolder = async () => {
+    const dir = memeLibraryDir || localMemePath;
+    if (!dir) {
+      appendLog('ยังไม่มีโฟลเดอร์คลังมีม ให้กดค้นหา/โหลดก่อน');
+      return;
+    }
+    await fetch(`/api/open-folder?type=${encodeURIComponent(dir)}`);
+  };
+
+  const useMemeLibraryFolder = () => {
+    if (!memeLibraryDir) {
+      appendLog('ยังไม่มีโฟลเดอร์คลังมีม ให้กดค้นหา/โหลดก่อน');
+      return;
+    }
+    updateLocalMemePath(memeLibraryDir);
+    updateMemeSource('local');
+    appendLog(`ตั้ง Local Meme Folder → ${memeLibraryDir}`);
   };
 
   const exportToFolder = async () => {
@@ -156,7 +424,7 @@ export function TopGainersFactoryTab() {
       const res = await fetch('/api/top-gainers-run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ p2, limit: Number(limit) || 1, scanCount, dropboxFolder, skipDropbox, mode, destDir: saveFolder, canvasStyle }),
+        body: JSON.stringify({ p2, limit: Number(limit) || 1, scanCount, dropboxFolder, skipDropbox, mode, destDir: saveFolder, canvasStyle, imageRatio, headlineTheme, memeOverlay, pageCredit, memeSource, giphyKey, localMemePath }),
       });
 
       const reader = res.body?.getReader();
@@ -218,6 +486,12 @@ export function TopGainersFactoryTab() {
   const openOutputFolder = async () => {
     if (!results?.outputDir) return;
     await fetch(`/api/open-folder?type=${encodeURIComponent(results.outputDir)}`);
+  };
+
+  const clearGeneratedAssets = () => {
+    if (!results) return;
+    setResults(null);
+    appendLog('ล้างรายการ Generated Assets บนหน้าจอแล้ว');
   };
 
   return (
@@ -310,6 +584,62 @@ export function TopGainersFactoryTab() {
           </div>
 
           <div>
+            <label className="block text-sm font-bold mb-2">ขนาดรูป</label>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { value: 'default' as ImageRatio, label: '4:5 เดิม', desc: '1080×1350' },
+                { value: 'square' as ImageRatio, label: '1:1 Square', desc: '1080×1080' },
+              ].map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => updateImageRatio(opt.value)}
+                  type="button"
+                  className={`flex flex-col items-start px-3 py-2 rounded-lg border text-left transition-colors ${
+                    imageRatio === opt.value
+                      ? 'border-sky-500 bg-sky-500/15 text-sky-200'
+                      : 'border-transparent bg-black/20'
+                  }`}
+                  style={imageRatio !== opt.value ? { borderColor: 'var(--border-color)' } : {}}
+                >
+                  <span className="text-sm font-semibold">{opt.label}</span>
+                  <span className="text-xs opacity-60">{opt.desc}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold mb-2">ชุดสีพาดหัว</label>
+            <div className="grid grid-cols-2 gap-2">
+              {HEADLINE_THEME_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => updateHeadlineTheme(opt.value)}
+                  type="button"
+                  className={`min-h-[68px] flex flex-col items-start justify-between px-3 py-2 rounded-lg border text-left transition-colors ${
+                    headlineTheme === opt.value
+                      ? 'border-amber-400 bg-amber-400/10 text-amber-100'
+                      : 'border-transparent bg-black/20'
+                  }`}
+                  style={headlineTheme !== opt.value ? { borderColor: 'var(--border-color)' } : {}}
+                >
+                  <span className="text-sm font-semibold leading-tight">{opt.label}</span>
+                  <span className="flex gap-1.5 my-1">
+                    {opt.colors.map((color) => (
+                      <span
+                        key={color}
+                        className="w-5 h-2.5 rounded-sm border border-white/20"
+                        style={{ backgroundColor: color }}
+                      />
+                    ))}
+                  </span>
+                  <span className="text-[11px] opacity-60 leading-tight">{opt.desc}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
             <label className="block text-sm font-bold mb-2">Cell P2</label>
             <select
               value={selectedPreset}
@@ -337,7 +667,7 @@ export function TopGainersFactoryTab() {
                 rows={3}
                 className="mt-3 w-full rounded-lg border px-3 py-2 text-sm bg-transparent"
                 style={{ borderColor: 'var(--border-color)' }}
-                placeholder="sector: Technology หรือ symbols: NVDA, AMD, TSLA"
+                placeholder="market: all หรือ sector: Technology หรือ symbols: NVDA, AMD, TSLA"
               />
             )}
           </div>
@@ -397,11 +727,141 @@ export function TopGainersFactoryTab() {
               className="w-full h-[42px] rounded-lg border px-3 bg-transparent"
               style={{ borderColor: 'var(--border-color)' }}
             >
+              <option value="viral">🔥 Viral Split — กราฟบน แถบดำพาดหัว 3 บรรทัด</option>
               <option value="classic">🌙 Classic Dark — มืดเท่ สไตล์ GitHub</option>
               <option value="neon">💜 Neon Glow — พื้นน้ำเงินเข้ม เรืองแสง</option>
               <option value="clean">☀️ Clean White — สะอาดตา มินิมอล</option>
               <option value="bold">💥 Bold Impact — ตัวเลขยักษ์ จัดเต็ม</option>
             </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold mb-2">Meme Sticker</label>
+            <label className="h-[42px] flex items-center gap-2 rounded-lg border px-3 text-sm" style={{ borderColor: 'var(--border-color)' }}>
+              <input
+                type="checkbox"
+                checked={memeOverlay}
+                onChange={(e) => setMemeOverlay(e.target.checked)}
+              />
+              ใส่ reaction meme ในพื้นที่กราฟ
+            </label>
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold mb-2">Meme Source</label>
+            <select
+              value={memeSource}
+              onChange={(e) => updateMemeSource(e.target.value as MemeSource)}
+              className="w-full h-[42px] rounded-lg border px-3 bg-transparent"
+              style={{ borderColor: 'var(--border-color)' }}
+            >
+              <option value="local">ในเครื่อง / Sticker local</option>
+              <option value="giphy">GIPHY API</option>
+            </select>
+          </div>
+
+          {memeSource === 'local' ? (
+            <div>
+              <label className="block text-sm font-bold mb-2">Local Meme File/Folder</label>
+              <div className="flex gap-2">
+                <div
+                  className="flex-1 h-[42px] rounded-lg border px-3 py-2 text-sm truncate"
+                  style={{ borderColor: 'var(--border-color)', color: localMemePath ? 'var(--text-main)' : 'var(--text-secondary, #94a3b8)' }}
+                  title={localMemePath}
+                >
+                  {localMemePath || 'ไม่เลือก = ใช้ sticker local'}
+                </div>
+                <button
+                  onClick={pickLocalMemeFile}
+                  type="button"
+                  className="h-[42px] px-3 rounded-lg border text-sm font-semibold"
+                  style={{ borderColor: 'var(--border-color)' }}
+                >
+                  เลือกไฟล์
+                </button>
+                <button
+                  onClick={pickLocalMemeFolder}
+                  type="button"
+                  className="h-[42px] px-3 rounded-lg border text-sm font-semibold"
+                  style={{ borderColor: 'var(--border-color)' }}
+                >
+                  เลือกโฟลเดอร์
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <label className="block text-sm font-bold mb-2">GIPHY API Key</label>
+              <input
+                type="password"
+                value={giphyKey}
+                onChange={(e) => updateGiphyKey(e.target.value)}
+                placeholder="ใส่ GIPHY API Key หรือใช้จาก Global Settings"
+                className="w-full h-[42px] rounded-lg border px-3 bg-transparent"
+                style={{ borderColor: 'var(--border-color)' }}
+              />
+            </div>
+          )}
+
+          <div className="rounded-lg border p-3 space-y-2" style={{ borderColor: 'var(--border-color)' }}>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <label className="block text-sm font-bold">คลังมีม Stock</label>
+                <p className="text-xs mt-1" style={{ color: 'var(--text-secondary, #94a3b8)' }}>
+                  {memeLibraryCount > 0 ? `${memeLibraryCount} รูป · ตรวจ/ลบในโฟลเดอร์ได้` : 'ยังไม่มีมีมในคลัง'}
+                  {memeAvailableCount !== null ? ` · ใหม่อีก ${memeAvailableCount} รูป` : ''}
+                </p>
+              </div>
+              <button
+                onClick={checkStockMemes}
+                type="button"
+                disabled={isCheckingMemes || isDownloadingMemes}
+                className="h-[38px] px-3 rounded-lg border text-sm font-bold disabled:opacity-50"
+                style={{ borderColor: 'var(--border-color)' }}
+              >
+                {isCheckingMemes ? 'กำลัง Check...' : 'Check'}
+              </button>
+              <button
+                onClick={downloadStockMemes}
+                type="button"
+                disabled={isDownloadingMemes || isCheckingMemes}
+                className="h-[38px] px-3 rounded-lg border text-sm font-bold disabled:opacity-50"
+                style={{ borderColor: 'var(--border-color)' }}
+              >
+                {isDownloadingMemes ? 'กำลังค้นหา...' : 'ค้นหา/โหลด 50 รูป'}
+              </button>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={openMemeLibraryFolder}
+                type="button"
+                disabled={!memeLibraryDir && !localMemePath}
+                className="flex-1 h-[38px] rounded-lg border text-sm font-semibold disabled:opacity-50"
+                style={{ borderColor: 'var(--border-color)' }}
+              >
+                เปิดโฟลเดอร์ตรวจมีม
+              </button>
+              <button
+                onClick={useMemeLibraryFolder}
+                type="button"
+                disabled={!memeLibraryDir}
+                className="flex-1 h-[38px] rounded-lg border text-sm font-semibold disabled:opacity-50"
+                style={{ borderColor: 'var(--border-color)' }}
+              >
+                ใช้โฟลเดอร์นี้
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold mb-2">Page Credit</label>
+            <input
+              value={pageCredit}
+              onChange={(e) => updatePageCredit(e.target.value)}
+              placeholder="เช่น TrendTech หรือ @TrendTech"
+              className="w-full h-[42px] rounded-lg border px-3 bg-transparent"
+              style={{ borderColor: 'var(--border-color)' }}
+            />
           </div>
 
           <div>
@@ -487,71 +947,88 @@ export function TopGainersFactoryTab() {
         </div>
       </section>
 
-      <section
-        className="border rounded-lg p-5"
-        style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)' }}
-      >
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-5">
-          <div>
-            <h2 className="text-lg font-bold">Generated Assets</h2>
-            <p className="text-sm mt-1" style={{ color: 'var(--text-secondary, #94a3b8)' }}>
-              {results?.date ? `${results.date} · ${completedCount} images` : 'ยังไม่มีผลลัพธ์'}
-            </p>
-          </div>
-          {results?.csvPath && (
-            <div className="text-xs rounded-lg border px-3 py-2 max-w-full truncate" style={{ borderColor: 'var(--border-color)' }}>
-              {results.csvPath}
+      {results && (
+        <section
+          className="border rounded-lg p-5"
+          style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)' }}
+        >
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-5">
+            <div>
+              <h2 className="text-lg font-bold">Generated Assets</h2>
+              <p className="text-sm mt-1" style={{ color: 'var(--text-secondary, #94a3b8)' }}>
+                {results.date ? `${results.date} · ${completedCount} images` : 'ยังไม่มีผลลัพธ์'}
+              </p>
             </div>
-          )}
-        </div>
-
-        {!hasResults ? (
-          <div className="min-h-[280px] flex items-center justify-center rounded-lg border border-dashed" style={{ borderColor: 'var(--border-color)' }}>
-            <div className="text-center">
-              <ChartBarSquareIcon className="w-12 h-12 mx-auto mb-3 text-emerald-400" />
-              <p className="font-semibold">กด Run เพื่อสร้างภาพและ CSV</p>
-            </div>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4">
-            {results!.rows.map((item) => (
-              <article
-                key={`${item.date}-${item.symbol}`}
-                className="rounded-lg border overflow-hidden"
+            <div className="flex flex-col md:flex-row md:items-center gap-2 min-w-0">
+              {results.csvPath && (
+                <div
+                  className="text-xs rounded-lg border px-3 py-2 max-w-full truncate"
+                  style={{ borderColor: 'var(--border-color)' }}
+                >
+                  {results.csvPath}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={clearGeneratedAssets}
+                disabled={isRunning}
+                className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border text-sm font-semibold disabled:opacity-50"
                 style={{ borderColor: 'var(--border-color)' }}
               >
-                <div className="aspect-[4/5] bg-black/30">
-                  {item.previewUrl ? (
-                    <img src={item.previewUrl} alt={item.symbol} className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-sm text-slate-500">No preview</div>
-                  )}
-                </div>
-                <div className="p-4 space-y-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <h3 className="text-xl font-black">{item.symbol}</h3>
-                      <p className="text-xs" style={{ color: 'var(--text-secondary, #94a3b8)' }}>{item.configRef}</p>
-                    </div>
-                    <button
-                      onClick={() => copyText(item.imageUrl)}
-                      disabled={!item.imageUrl}
-                      title="Copy Dropbox image URL"
-                      className="w-10 h-10 inline-flex items-center justify-center rounded-lg border disabled:opacity-40"
-                      style={{ borderColor: 'var(--border-color)' }}
-                    >
-                      <LinkIcon className="w-5 h-5" />
-                    </button>
-                  </div>
-                  <p className="text-sm leading-6 line-clamp-4" style={{ color: 'var(--text-secondary, #cbd5e1)' }}>
-                    {item.caption}
-                  </p>
-                </div>
-              </article>
-            ))}
+                <TrashIcon className="w-4 h-4" />
+                ล้างรายการ
+              </button>
+            </div>
           </div>
-        )}
-      </section>
+
+          {!hasResults ? (
+            <div className="min-h-[280px] flex items-center justify-center rounded-lg border border-dashed" style={{ borderColor: 'var(--border-color)' }}>
+              <div className="text-center">
+                <ChartBarSquareIcon className="w-12 h-12 mx-auto mb-3 text-emerald-400" />
+                <p className="font-semibold">กด Run เพื่อสร้างภาพและ CSV</p>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4">
+              {results.rows.map((item) => (
+                <article
+                  key={`${item.date}-${item.symbol}`}
+                  className="rounded-lg border overflow-hidden"
+                  style={{ borderColor: 'var(--border-color)' }}
+                >
+                  <div className="bg-black/30" style={{ aspectRatio: imageRatio === 'square' ? '1 / 1' : '4 / 5' }}>
+                    {item.previewUrl ? (
+                      <img src={item.previewUrl} alt={item.symbol} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-sm text-slate-500">No preview</div>
+                    )}
+                  </div>
+                  <div className="p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-xl font-black">{item.symbol}</h3>
+                        <p className="text-xs" style={{ color: 'var(--text-secondary, #94a3b8)' }}>{item.configRef}</p>
+                      </div>
+                      <button
+                        onClick={() => copyText(item.imageUrl)}
+                        disabled={!item.imageUrl}
+                        title="Copy Dropbox image URL"
+                        className="w-10 h-10 inline-flex items-center justify-center rounded-lg border disabled:opacity-40"
+                        style={{ borderColor: 'var(--border-color)' }}
+                      >
+                        <LinkIcon className="w-5 h-5" />
+                      </button>
+                    </div>
+                    <p className="text-sm leading-6 line-clamp-4" style={{ color: 'var(--text-secondary, #cbd5e1)' }}>
+                      {item.caption}
+                    </p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }
