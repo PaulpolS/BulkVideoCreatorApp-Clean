@@ -113,6 +113,7 @@ const LOCAL_API_TIMEOUT_MS = 30_000;
 const IMAGE_FETCH_TIMEOUT_MS = 20_000;
 const GH_FOOTAGE_FOLDER_KEY = 'gh_footage_folder';
 const BULK_WORKSPACE_KEY = 'aipage_bulk_article_workspace';
+const TOP_GAINERS_TEMPLATE_KEY = 'aipage_top_gainers_template_v1';
 const YOUTUBE_IMAGE_STYLE_ID = '__youtube_image_style__';
 const AI_NEWS_IMAGE_STYLE_ID = '__ai_news_image_style__';
 const GITHUB_IMAGE_STYLE_ID = '__github_image_style__';
@@ -191,10 +192,48 @@ const YOUTUBE_FONT_PALETTES = [
   { id: 'tg-classic', name: 'TopGainers Classic', primary: '#ffffff', accent: '#fff200', block: '#e11d1d', altBlock: '#1688f0', stroke: '#020617' },
   { id: 'tg-emerald-gold', name: 'TopGainers Emerald', primary: '#f8fafc', accent: '#facc15', block: '#059669', altBlock: '#0f766e', stroke: '#022c22' },
   { id: 'tg-orange-teal', name: 'TopGainers Orange Teal', primary: '#ffffff', accent: '#fde047', block: '#f97316', altBlock: '#0891b2', stroke: '#111827' },
+  { id: 'tg-purple-lime', name: 'TopGainers Purple Lime', primary: '#ffffff', accent: '#bef264', block: '#7c3aed', altBlock: '#4f46e5', stroke: '#111827' },
   { id: 'tg-rose-cyan', name: 'TopGainers Rose Cyan', primary: '#ffffff', accent: '#22d3ee', block: '#e11d48', altBlock: '#0e7490', stroke: '#111827' },
+  { id: 'tg-amber-indigo', name: 'TopGainers Amber Indigo', primary: '#fff7ed', accent: '#fef08a', block: '#f59e0b', altBlock: '#4f46e5', stroke: '#111827' },
+  { id: 'tg-magenta-mint', name: 'TopGainers Magenta Mint', primary: '#ffffff', accent: '#a7f3d0', block: '#db2777', altBlock: '#10b981', stroke: '#111827' },
   { id: 'tg-graphite-gold', name: 'TopGainers Graphite', primary: '#f8fafc', accent: '#fbbf24', block: '#374151', altBlock: '#92400e', stroke: '#030712' },
   { id: 'tg-navy-coral', name: 'TopGainers Navy Coral', primary: '#ffffff', accent: '#fb7185', block: '#1d4ed8', altBlock: '#0f172a', stroke: '#020617' },
+  { id: 'tg-white-hot', name: 'TopGainers White Hot', primary: '#ffffff', accent: '#facc15', block: '#fb923c', altBlock: '#f8fafc', stroke: '#000000' },
 ];
+const TOP_GAINERS_PALETTE_CHOICES = [
+  { id: 'tg-classic', label: 'Classic', desc: 'Red / Blue / Yellow', colors: ['#e11d1d', '#fff200', '#1688f0'] },
+  { id: 'tg-emerald-gold', label: 'Emerald', desc: 'Green / Gold / Teal', colors: ['#059669', '#facc15', '#0f766e'] },
+  { id: 'tg-orange-teal', label: 'Orange Teal', desc: 'Orange / Yellow / Cyan', colors: ['#f97316', '#fde047', '#0891b2'] },
+  { id: 'tg-purple-lime', label: 'Purple Lime', desc: 'Purple / Lime / Indigo', colors: ['#7c3aed', '#bef264', '#4f46e5'] },
+  { id: 'tg-rose-cyan', label: 'Rose Cyan', desc: 'Rose / Cyan / Deep Cyan', colors: ['#e11d48', '#22d3ee', '#0e7490'] },
+  { id: 'tg-amber-indigo', label: 'Amber Indigo', desc: 'Amber / Cream / Indigo', colors: ['#f59e0b', '#fef08a', '#4f46e5'] },
+  { id: 'tg-magenta-mint', label: 'Magenta Mint', desc: 'Pink / Mint / Green', colors: ['#db2777', '#a7f3d0', '#10b981'] },
+  { id: 'tg-graphite-gold', label: 'Graphite', desc: 'Slate / Gold / Bronze', colors: ['#374151', '#fbbf24', '#92400e'] },
+  { id: 'tg-navy-coral', label: 'Navy Coral', desc: 'Navy / Coral / Ink', colors: ['#1d4ed8', '#fb7185', '#0f172a'] },
+  { id: 'tg-white-hot', label: 'White Hot', desc: 'White / Orange / Yellow', colors: ['#f8fafc', '#fb923c', '#facc15'] },
+] as const;
+const TOP_GAINERS_PALETTE_IDS = TOP_GAINERS_PALETTE_CHOICES.map(choice => choice.id);
+const TOP_GAINERS_TEMPLATE_DEFAULT = {
+  showLogo: true,
+  logoText: 'AI',
+  logoSubText: 'Content Lab',
+  showMetric: true,
+  metricText: 'NEW',
+  paletteId: 'tg-classic',
+  fontFamily: 'Kanit',
+  creditText: 'วางแผนเป็น เห็นทางรวย',
+  headline1: '',
+  headline2: '',
+  headline3: '',
+  showNewsCard: true,
+  newsTitle: '',
+  newsDetail: '',
+  newsSource: '',
+  showMemeSticker: false,
+  memeText: 'เร็วกว่าเดิม',
+  memeSubText: 'AI ช่วยย่นเวลา',
+  savedName: 'Top Gainers Classic',
+};
 const AI_NEWS_BADGE_STYLES = [
   { id: 'breaking-red', name: 'แดง Breaking', bg: '#dc2626', fg: '#ffffff', accent: '#facc15', border: '#7f1d1d' },
   { id: 'cyber-blue', name: 'น้ำเงิน Cyber', bg: '#0f172a', fg: '#e0f2fe', accent: '#38bdf8', border: '#2563eb' },
@@ -388,6 +427,14 @@ export function AIPagePostGeneratorTab({ initialBulkItems, onInitialBulkItemsCon
   const [showGlobalApply, setShowGlobalApply] = useState(false);
   const [previewSeed, setPreviewSeed] = useState(0);
   const [selectedVisualTemplateId, setSelectedVisualTemplateId] = useState<VisualTemplateId>('top-gainers-classic');
+  const [topGainersTemplate, setTopGainersTemplate] = useState(() => {
+    try {
+      const saved = localStorage.getItem(TOP_GAINERS_TEMPLATE_KEY);
+      return saved ? { ...TOP_GAINERS_TEMPLATE_DEFAULT, ...JSON.parse(saved) } : TOP_GAINERS_TEMPLATE_DEFAULT;
+    } catch {
+      return TOP_GAINERS_TEMPLATE_DEFAULT;
+    }
+  });
   const [visualTemplateSettings, setVisualTemplateSettings] = useState({
     imageMode: 'attached' as BulkArticleItem['imageSourceMode'],
     paletteId: 'tg-classic',
@@ -3051,6 +3098,14 @@ Return only the final Thai text in the required format.`;
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Canvas ไม่พร้อมใช้งาน');
 
+    if ('fonts' in document) {
+      await Promise.allSettled([
+        document.fonts.load('900 64px Kanit'),
+        document.fonts.load('900 64px Prompt'),
+        document.fonts.load('800 40px Prompt'),
+      ]);
+    }
+
     const w = canvas.width;
     const h = canvas.height;
     const palette = YOUTUBE_FONT_PALETTES.find(p => p.id === task.localYoutubeOverlay?.fontPaletteId) || YOUTUBE_FONT_PALETTES[0];
@@ -3110,9 +3165,9 @@ Return only the final Thai text in the required format.`;
       y = Math.min(y, h - pad - textBlockH);
     }
 
-    if (isEditorialOverlay || isQuoteOverlay) {
-      const strapLabel = isQuoteOverlay ? 'QUOTE CARD' : 'CONTENT FACTORY';
-      const strapSub = isQuoteOverlay ? 'คำสอนคนดัง / บทเรียน' : 'Editorial แบบ Top Gainers';
+    if (isQuoteOverlay) {
+      const strapLabel = 'QUOTE CARD';
+      const strapSub = 'คำสอนคนดัง / บทเรียน';
       const strapH = Math.max(58, Math.min(92, h * 0.085));
       const strapW = Math.max(330, Math.min(540, w * 0.48));
       const strapX = pad;
@@ -3121,7 +3176,7 @@ Return only the final Thai text in the required format.`;
       ctx.shadowColor = 'rgba(0,0,0,0.45)';
       ctx.shadowBlur = 18;
       drawRoundRect(ctx, strapX, strapY, strapW, strapH, 14);
-      ctx.fillStyle = isQuoteOverlay ? 'rgba(15,23,42,0.88)' : palette.block;
+      ctx.fillStyle = 'rgba(15,23,42,0.88)';
       ctx.fill();
       ctx.shadowBlur = 0;
       ctx.strokeStyle = palette.accent;
@@ -3137,19 +3192,18 @@ Return only the final Thai text in the required format.`;
       ctx.strokeStyle = 'rgba(0,0,0,0.35)';
       ctx.strokeText(strapLabel, strapX + strapH * 0.28, strapY + strapH * 0.48);
       ctx.fillText(strapLabel, strapX + strapH * 0.28, strapY + strapH * 0.48);
-      ctx.fillStyle = isQuoteOverlay ? '#cbd5e1' : palette.accent;
+      ctx.fillStyle = '#cbd5e1';
       ctx.font = `800 ${Math.floor(strapH * 0.18)}px Kanit, Prompt, Arial, sans-serif`;
       ctx.fillText(strapSub, strapX + strapH * 0.30, strapY + strapH * 0.76);
-      if (isQuoteOverlay) {
-        ctx.globalAlpha = 0.18;
-        ctx.fillStyle = palette.accent;
-        ctx.font = `900 ${Math.floor(w * 0.34)}px Georgia, serif`;
-        ctx.fillText('“', pad, Math.max(h * 0.38, y - fontSize * 0.85));
-      }
+      ctx.globalAlpha = 0.18;
+      ctx.fillStyle = palette.accent;
+      ctx.font = `900 ${Math.floor(w * 0.34)}px Georgia, serif`;
+      ctx.fillText('“', pad, Math.max(h * 0.38, y - fontSize * 0.85));
       ctx.restore();
     }
 
     if (isEditorialOverlay) {
+      const topSettings = { ...TOP_GAINERS_TEMPLATE_DEFAULT, ...(task.sourceMeta?.topGainersTemplate || {}) };
       const panelH = isLandscape ? h * 0.43 : isPortrait ? h * 0.34 : h * 0.38;
       const panelY = h - panelH;
       const dividerH = Math.max(8, h * 0.008);
@@ -3159,18 +3213,166 @@ Return only the final Thai text in the required format.`;
       imageShade.addColorStop(1, 'rgba(0,0,0,0.92)');
       ctx.fillStyle = imageShade;
       ctx.fillRect(0, 0, w, panelY + h * 0.05);
+
+      const sourceTitle = String(topSettings.logoText || task.sourceMeta?.sourceLabel || task.localYoutubeOverlay?.channelName || task.sourceMeta?.domain || 'AI Content Lab');
+      const sourceSub = String(task.sourceMeta?.sourceDomain || task.sourceMeta?.sourceUrl || task.bulkSourceUrl || 'คลัง Content')
+        .replace(/^https?:\/\//, '')
+        .replace(/^www\./, '')
+        .slice(0, 34);
+      const brand = (sourceTitle.split(/\s+/)[0] || 'AI').slice(0, 8).toUpperCase();
+      const metricText = task.localYoutubeOverlay?.markedKeywords?.[0]
+        ? `#${task.localYoutubeOverlay.markedKeywords[0]}`
+        : (topSettings.metricText || task.sourceMeta?.tagText ? `${String(topSettings.metricText || task.sourceMeta.tagText).slice(0, 18)}` : 'TREND');
+      const topBottom = panelY - dividerH;
+      const chartTop = Math.max(h * 0.12, pad * 2.2);
+      const chartBottom = Math.max(chartTop + h * 0.20, topBottom - h * 0.07);
+      const chartLeft = Math.max(30, w * 0.06);
+      const chartRight = w - chartLeft;
+      const chartH = chartBottom - chartTop;
+      const seed = Array.from(headline + sourceTitle).reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+
+      ctx.save();
+      ctx.globalAlpha = 0.92;
+      ctx.strokeStyle = 'rgba(255,255,255,0.80)';
+      ctx.lineWidth = Math.max(3, w * 0.003);
+      ctx.beginPath();
+      ctx.moveTo(chartLeft, chartBottom - chartH * 0.22);
+      ctx.lineTo(chartRight, chartBottom - chartH * 0.22);
+      ctx.stroke();
+
+      const candleCount = isLandscape ? 20 : 17;
+      const step = (chartRight - chartLeft) / candleCount;
+      let last = 0.24 + (seed % 13) / 100;
+      for (let i = 0; i < candleCount; i += 1) {
+        const wave = Math.sin((i + 1) * 1.36 + seed * 0.017) * 0.085 + Math.cos((i + 2) * 0.71) * 0.045;
+        const open = Math.max(0.10, Math.min(0.88, last));
+        const close = Math.max(0.10, Math.min(0.92, open + wave + 0.026));
+        const high = Math.min(0.98, Math.max(open, close) + 0.08 + ((seed + i * 7) % 9) / 120);
+        const low = Math.max(0.03, Math.min(open, close) - 0.07 - ((seed + i * 5) % 7) / 130);
+        const x = chartLeft + step * i + step * 0.50;
+        const yOpen = chartBottom - open * chartH;
+        const yClose = chartBottom - close * chartH;
+        const yHigh = chartBottom - high * chartH;
+        const yLow = chartBottom - low * chartH;
+        const isUp = close >= open;
+        const candleColor = isUp ? '#35b957' : '#ef5148';
+        ctx.strokeStyle = candleColor;
+        ctx.fillStyle = candleColor;
+        ctx.lineWidth = Math.max(2, w * 0.002);
+        ctx.beginPath();
+        ctx.moveTo(x, yHigh);
+        ctx.lineTo(x, yLow);
+        ctx.stroke();
+        const bodyW = Math.max(10, step * 0.58);
+        const bodyY = Math.min(yOpen, yClose);
+        const bodyH = Math.max(10, Math.abs(yClose - yOpen));
+        ctx.fillRect(x - bodyW / 2, bodyY, bodyW, bodyH);
+        last = close;
+      }
+      ctx.restore();
+
+      const logoH = Math.max(68, h * 0.105);
+      const logoW = Math.min(w * 0.45, Math.max(330, logoH * 4.0));
+      ctx.save();
+      if (topSettings.showLogo) {
+        ctx.shadowColor = 'rgba(0,0,0,0.45)';
+        ctx.shadowBlur = 16;
+        drawRoundRect(ctx, pad, pad, logoW, logoH, 8);
+        ctx.fillStyle = 'rgba(0,0,0,0.92)';
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = 'rgba(148,163,184,0.85)';
+        ctx.lineWidth = Math.max(2, w * 0.002);
+        ctx.stroke();
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `900 ${Math.floor(logoH * 0.36)}px Kanit, Prompt, Arial, sans-serif`;
+        ctx.fillText(brand, pad + logoH * 0.24, pad + logoH * 0.48);
+        ctx.font = `800 ${Math.floor(logoH * 0.20)}px Prompt, Kanit, Arial, sans-serif`;
+        ctx.fillStyle = '#d1d5db';
+        ctx.fillText(topSettings.logoSubText || sourceSub || 'Content source', pad + logoH * 0.24, pad + logoH * 0.73);
+      }
+
+      const metricW = Math.min(w * 0.36, Math.max(230, w * 0.24));
+      const metricH = Math.max(76, h * 0.108);
+      const metricX = w - pad - metricW;
+      const metricY = pad;
+      if (topSettings.showMetric) {
+        drawRoundRect(ctx, metricX, metricY, metricW, metricH, 10);
+        ctx.fillStyle = 'rgba(0,0,0,0.93)';
+        ctx.fill();
+        ctx.strokeStyle = '#ff5a5f';
+        ctx.lineWidth = Math.max(3, w * 0.003);
+        ctx.stroke();
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#ff646b';
+        ctx.font = `900 ${Math.floor(metricH * 0.34)}px Kanit, Prompt, Arial, sans-serif`;
+        ctx.fillText(metricText.slice(0, 18), metricX + metricW - metricH * 0.18, metricY + metricH * 0.44);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `800 ${Math.floor(metricH * 0.18)}px Prompt, Kanit, Arial, sans-serif`;
+        ctx.fillText(sourceSub || 'จากคลัง', metricX + metricW - metricH * 0.18, metricY + metricH * 0.72);
+      }
+
+      const newsCardW = Math.min(w * 0.55, Math.max(470, w * 0.46));
+      const newsCardH = Math.max(110, Math.min(h * 0.16, 150));
+      const newsCardX = Math.max(pad, w * 0.25);
+      const newsCardY = Math.max(chartTop + h * 0.22, topBottom - newsCardH * 0.92);
+      if (topSettings.showNewsCard) {
+        drawRoundRect(ctx, newsCardX, newsCardY, newsCardW, newsCardH, 8);
+        ctx.fillStyle = 'rgba(0,0,0,0.90)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.82)';
+        ctx.lineWidth = Math.max(2, w * 0.0025);
+        ctx.stroke();
+        const thumbSize = newsCardH * 0.62;
+        const thumbX = newsCardX + newsCardH * 0.16;
+        const thumbY = newsCardY + (newsCardH - thumbSize) / 2;
+        drawRoundRect(ctx, thumbX, thumbY, thumbSize * 1.38, thumbSize, 6);
+        ctx.clip();
+        ctx.translate(thumbX, thumbY);
+        drawCoverImage(ctx, base, thumbSize * 1.38, thumbSize);
+        ctx.restore();
+        ctx.save();
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        const cardTextX = thumbX + thumbSize * 1.55;
+        const cardTextW = newsCardX + newsCardW - cardTextX - newsCardH * 0.14;
+        ctx.font = `900 ${Math.floor(newsCardH * 0.21)}px Kanit, Prompt, Arial, sans-serif`;
+        ctx.fillStyle = '#fff200';
+        const newsTitle = topSettings.newsTitle || headline;
+        wrapCanvasText(ctx, newsTitle, cardTextW).slice(0, 1).forEach((line, idx) => {
+          ctx.fillText(line, cardTextX, newsCardY + newsCardH * (0.22 + idx * 0.22));
+        });
+        ctx.font = `800 ${Math.floor(newsCardH * 0.17)}px Prompt, Kanit, Arial, sans-serif`;
+        ctx.fillStyle = '#ffffff';
+        const supportingLine = topSettings.newsDetail || lines[1] || lines[0] || headline;
+        ctx.fillText(wrapCanvasText(ctx, supportingLine, cardTextW)[0] || supportingLine, cardTextX, newsCardY + newsCardH * 0.50);
+        ctx.font = `800 ${Math.floor(newsCardH * 0.12)}px Prompt, Kanit, Arial, sans-serif`;
+        ctx.fillStyle = '#cbd5e1';
+        ctx.fillText(`ที่มา: ${topSettings.newsSource || sourceSub || 'คลัง Content'}`, cardTextX, newsCardY + newsCardH * 0.73);
+        ctx.restore();
+      } else {
+        ctx.restore();
+      }
+
       ctx.fillStyle = '#050505';
       ctx.fillRect(0, panelY, w, panelH);
       ctx.fillStyle = palette.block;
       ctx.fillRect(0, panelY, w, dividerH);
 
-      const editorialLines = lines.length ? lines : splitHeadlineForCanvas(headline);
-      const firstLine = editorialLines[0] || headline;
-      const restLines = editorialLines.slice(1, 4);
+      const editorialLines = [
+        topSettings.headline1,
+        topSettings.headline2,
+        topSettings.headline3,
+      ].filter(Boolean);
+      const finalEditorialLines = editorialLines.length ? editorialLines : (lines.length ? lines : splitHeadlineForCanvas(headline));
+      const firstLine = finalEditorialLines[0] || headline;
+      const restLines = finalEditorialLines.slice(1, 4);
       const headlinePad = Math.max(28, w * 0.045);
       const barH = Math.max(62, Math.min(92, panelH * 0.22));
       const barY = panelY + Math.max(38, panelH * 0.09);
-      const barW = Math.min(w - headlinePad * 2, Math.max(w * 0.60, ctx.measureText(firstLine).width + headlinePad * 1.35));
+      const barW = Math.min(w - headlinePad * 2, Math.max(w * 0.18, ctx.measureText(firstLine).width + headlinePad * 1.35));
       ctx.fillStyle = palette.altBlock;
       ctx.fillRect((w - barW) / 2, barY, barW, barH);
       ctx.textAlign = 'center';
@@ -3207,7 +3409,29 @@ Return only the final Thai text in the required format.`;
       ctx.textAlign = 'center';
       ctx.font = `800 ${Math.max(20, Math.floor(w * 0.026))}px Prompt, Kanit, Arial, sans-serif`;
       ctx.fillStyle = '#cbd5e1';
-      ctx.fillText('เครดิต: วางแผนเป็น เห็นทางรวย', w / 2, Math.min(h - Math.max(28, h * 0.035), textY + Math.max(22, panelH * 0.08)));
+      ctx.fillText(`เครดิต: ${topSettings.creditText || 'วางแผนเป็น เห็นทางรวย'}`, w / 2, Math.min(h - Math.max(28, h * 0.035), textY + Math.max(22, panelH * 0.08)));
+
+      if (topSettings.showMemeSticker) {
+        const stickerW = Math.min(w * 0.33, 360);
+        const stickerH = stickerW * 0.36;
+        const stickerX = w - pad - stickerW;
+        const stickerY = Math.max(pad + metricH + 36, panelY - stickerH - h * 0.10);
+        drawRoundRect(ctx, stickerX + 8, stickerY + 10, stickerW, stickerH, 18);
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fill();
+        drawRoundRect(ctx, stickerX, stickerY, stickerW, stickerH, 18);
+        ctx.fillStyle = 'rgba(255,255,255,0.94)';
+        ctx.fill();
+        ctx.strokeStyle = palette.accent;
+        ctx.lineWidth = 4;
+        ctx.stroke();
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#111827';
+        ctx.font = `900 ${Math.floor(stickerH * 0.30)}px Kanit, Prompt, Arial, sans-serif`;
+        ctx.fillText(topSettings.memeText || 'เร็วกว่าเดิม', stickerX + stickerW / 2, stickerY + stickerH * 0.35);
+        ctx.font = `800 ${Math.floor(stickerH * 0.20)}px Prompt, Kanit, Arial, sans-serif`;
+        ctx.fillText(topSettings.memeSubText || 'AI ช่วยย่นเวลา', stickerX + stickerW / 2, stickerY + stickerH * 0.68);
+      }
       ctx.restore();
       return canvas.toDataURL('image/png');
     }
@@ -3585,6 +3809,7 @@ Return only the final Thai text in the required format.`;
           articleLength: item.articleLength,
           fontPaletteId: item.fontPaletteId,
           markedKeywords: item.markedKeywords,
+          topGainersTemplate,
         },
         bulkItemId: item.id,
       };
@@ -4340,7 +4565,7 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
     const template = VISUAL_TEMPLATE_PRESETS.find(preset => preset.id === templateId) || VISUAL_TEMPLATE_PRESETS[0];
     const nextSettings = {
       imageMode: overrides.imageMode ?? visualTemplateSettings.imageMode ?? template.imageMode,
-      paletteId: overrides.paletteId ?? visualTemplateSettings.paletteId ?? template.paletteId,
+      paletteId: overrides.paletteId ?? (templateId === 'top-gainers-classic' ? topGainersTemplate.paletteId : visualTemplateSettings.paletteId) ?? template.paletteId,
       ratio: overrides.ratio ?? visualTemplateSettings.ratio ?? template.ratio,
       decorateOriginalPhoto: overrides.decorateOriginalPhoto ?? visualTemplateSettings.decorateOriginalPhoto ?? true,
     };
@@ -4364,6 +4589,29 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
   };
 
   const selectedVisualTemplate = VISUAL_TEMPLATE_PRESETS.find(preset => preset.id === selectedVisualTemplateId) || VISUAL_TEMPLATE_PRESETS[0];
+  const selectedTopGainersPalette = YOUTUBE_FONT_PALETTES.find(p => p.id === topGainersTemplate.paletteId) || YOUTUBE_FONT_PALETTES.find(p => p.id === 'tg-classic') || YOUTUBE_FONT_PALETTES[0];
+  const topGainersPreviewLines = [
+    topGainersTemplate.headline1.trim() || previewContent?.lines[0] || 'เลือก Content จากคลัง',
+    topGainersTemplate.headline2.trim() || previewContent?.lines[1] || 'ระบบจะดึงเรื่องจริงมาโชว์',
+    topGainersTemplate.headline3.trim() || previewContent?.lines[2] || 'พร้อมแปะเป็นหน้าตาภาพให้ดู',
+  ];
+  const saveTopGainersTemplate = () => {
+    localStorage.setItem(TOP_GAINERS_TEMPLATE_KEY, JSON.stringify(topGainersTemplate));
+    setSmartConfigLog(`💾 บันทึกแม่แบบ "${topGainersTemplate.savedName || 'Top Gainers Classic'}" แล้ว`);
+    window.setTimeout(() => setSmartConfigLog(''), 1800);
+  };
+  const updateTopGainersTemplate = (patch: Partial<typeof TOP_GAINERS_TEMPLATE_DEFAULT>) => {
+    const next = { ...topGainersTemplate, ...patch };
+    setTopGainersTemplate(next);
+    if (selectedVisualTemplateId === 'top-gainers-classic') {
+      setVisualTemplateSettings(prev => ({ ...prev, paletteId: next.paletteId }));
+      setBulkItems(prev => prev.map(item => ({
+        ...item,
+        fontPaletteId: next.paletteId,
+        smartConfigNote: item.smartConfigNote || 'ใช้แม่แบบ Top Gainers Classic ที่กำลังปรับแต่ง',
+      })));
+    }
+  };
 
   const applyBulkMainSettings = (updates: Partial<typeof bulkMainSettings>) => {
     const next = { ...bulkMainSettings, ...updates };
@@ -4799,201 +5047,210 @@ ${rejected.slice(0, 8).map(h => `- ${h}`).join('\n')}`;
           <div className="mb-3 text-[11px] text-gray-500">
             เลือกต้นแบบแล้วทุก Content ในส่วนนี้จะถูกตั้งค่าตามแบบเดียวกันทันที ไม่ต้องไปตั้งค่าทีละกล่อง
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <button
-              type="button"
-              onClick={() => applyVisualTemplateToAllContent('top-gainers-classic', {
-                imageMode: 'attached',
-                paletteId: 'tg-classic',
-                ratio: '1:1',
-                decorateOriginalPhoto: true,
-              })}
-              className={`group rounded-lg border bg-slate-950 p-2 text-left transition-all hover:border-rose-400 hover:bg-rose-950/20 ${
-                selectedVisualTemplateId === 'top-gainers-classic' ? 'border-cyan-300 ring-2 ring-cyan-400/80 bg-cyan-950/20' : 'border-gray-700'
-              }`}
-            >
-              <div className="aspect-square overflow-hidden rounded-md bg-[#050505] shadow-inner">
-                <div className="h-[57%] bg-gradient-to-br from-slate-900 via-slate-800 to-cyan-950 relative">
-                  <div className="absolute left-3 top-3 rounded border border-slate-500 bg-black/85 px-3 py-2">
-                    <div className="text-lg font-black leading-none text-white">{previewContent?.shortTitle || 'Content'}</div>
-                    <div className="text-[10px] font-bold leading-tight text-slate-300">{previewContent?.sourceLabel || 'คลัง Content'}</div>
-                  </div>
-                  <div className="absolute right-4 top-5 rounded border border-red-400 bg-black/90 px-3 py-2 text-right">
-                    <div className="text-xl font-black leading-none text-red-400">{previewContent?.tagText ? `#${previewContent.tagText}` : 'NEW'}</div>
-                    <div className="text-[10px] font-bold text-white">{previewContent?.sourceLabel || 'Content'}</div>
-                  </div>
-                  <div className="absolute bottom-4 left-4 right-4 rounded border border-white/70 bg-black/85 p-3 shadow-lg">
-                    <div className="text-sm font-black leading-tight text-[#fff200]">{previewContent?.lines[0] || 'เลือก Content จากคลัง'}</div>
-                    <div className="mt-1 text-xs font-bold leading-tight text-white">{previewContent?.lines[1] || 'ระบบจะดึงเรื่องจริงมาโชว์'}</div>
-                    <div className="mt-1 text-[9px] font-bold text-slate-300">ที่มา: {previewContent?.sourceLabel || 'คลัง Content'}</div>
-                  </div>
-                </div>
-                <div className="h-[2%] bg-[#ff4747]" />
-                <div className="h-[41%] bg-black p-3 text-center">
-                  <div className="mx-auto mb-3 bg-[#0f9f82] px-2 py-1 text-[15px] font-black leading-tight text-white">
-                    {previewContent?.lines[0] || 'กู้ Content มาใช้เลย'}
-                  </div>
-                  <div className="mb-3 text-[18px] font-black leading-tight text-white">
-                    {previewContent?.lines[1] || 'เลือกจากคลังหรือ cache'}
-                  </div>
-                  <div className="bg-[#138f83] px-2 py-1 text-[15px] font-black leading-tight text-white">
-                    {previewContent?.lines[2] || 'แล้วทำหน้าตาภาพใหม่'}
-                  </div>
-                </div>
-              </div>
-              <div className="mt-2 text-xs font-black text-white">Top Gainers Classic</div>
-              <div className="text-[10px] text-gray-500">รูปข่าว/YouTube + พาดหัวแถบใหญ่</div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => applyVisualTemplateToAllContent('editorial-emerald', {
-                imageMode: 'github-random',
-                paletteId: 'tg-emerald-gold',
-                ratio: '1:1',
-                decorateOriginalPhoto: true,
-              })}
-              className={`group rounded-lg border bg-slate-950 p-2 text-left transition-all hover:border-emerald-400 hover:bg-emerald-950/20 ${
-                selectedVisualTemplateId === 'editorial-emerald' ? 'border-emerald-300 ring-2 ring-emerald-400/80 bg-emerald-950/20' : 'border-gray-700'
-              }`}
-            >
-              <div className="aspect-square overflow-hidden rounded-md bg-[#06130f] shadow-inner">
-                <div className="h-[60%] bg-gradient-to-br from-emerald-950 via-slate-900 to-yellow-950 relative">
-                  <div className="absolute left-4 top-4 rounded bg-emerald-700/90 px-3 py-2">
-                    <div className="text-xs font-black text-emerald-50">{previewContent?.sourceLabel || 'EDITORIAL PICK'}</div>
-                    <div className="text-[9px] font-bold text-emerald-200">{previewContent?.origin || 'สุ่มจากคลังรูป'}</div>
-                  </div>
-                  <div className="absolute bottom-5 right-5 rounded border border-yellow-300/50 bg-yellow-300/20 px-3 py-3 text-center">
-                    <div className="text-2xl font-black text-yellow-200">{previewContent?.metric || 'PICK'}</div>
-                    <div className="text-[9px] font-bold text-yellow-100">จากคลัง</div>
-                  </div>
-                </div>
-                <div className="h-[40%] bg-black p-3">
-                  <div className="mb-3 w-[82%] bg-[#059669] px-2 py-1 text-[15px] font-black leading-tight text-white">
-                    {previewContent?.lines[0] || 'เลือก Content จากคลัง'}
-                  </div>
-                  <div className="mb-3 bg-[#facc15] px-2 py-1 text-[16px] font-black leading-tight text-black">
-                    {previewContent?.lines[1] || 'แล้วทำภาพใหม่ทันที'}
-                  </div>
-                  <div className="w-[92%] bg-white px-2 py-1 text-[14px] font-black leading-tight text-slate-950">
-                    {previewContent?.lines[2] || 'ไม่ใช้ข้อความตัวอย่างเดิม'}
-                  </div>
-                </div>
-              </div>
-              <div className="mt-2 text-xs font-black text-white">Editorial Emerald</div>
-              <div className="text-[10px] text-gray-500">สุ่มคลังรูป + สีเขียวทอง</div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => applyVisualTemplateToAllContent('quote-card', {
-                imageMode: 'attached',
-                paletteId: 'tg-graphite-gold',
-                ratio: '1:1',
-                decorateOriginalPhoto: true,
-              })}
-              className={`group rounded-lg border bg-slate-950 p-2 text-left transition-all hover:border-amber-400 hover:bg-amber-950/20 ${
-                selectedVisualTemplateId === 'quote-card' ? 'border-amber-300 ring-2 ring-amber-400/80 bg-amber-950/20' : 'border-gray-700'
-              }`}
-            >
-              <div className="aspect-square overflow-hidden rounded-md bg-gradient-to-br from-zinc-950 via-slate-900 to-amber-950 p-4 shadow-inner">
-                <div className="mb-6 w-36 rounded border border-amber-300/70 bg-black/50 px-3 py-2">
-                  <div className="text-xs font-black text-amber-200">{previewContent?.sourceLabel || 'QUOTE CARD'}</div>
-                  <div className="text-[9px] font-bold text-slate-300">{previewContent?.origin || 'บทเรียนจากคลัง'}</div>
-                </div>
-                <div className="mb-1 text-[70px] leading-none text-amber-300/40">“</div>
-                <div className="mb-3 text-[19px] font-black leading-tight text-white">
-                  {previewContent?.lines[0] || 'เลือกเรื่องจากคลังจริง'}
-                </div>
-                <div className="mb-3 bg-amber-300 px-2 py-1 text-[16px] font-black leading-tight text-black">
-                  {previewContent?.lines[1] || 'แล้วสรุปเป็น Quote Card'}
-                </div>
-                <div className="text-[12px] font-bold leading-tight text-slate-300">
-                  {previewContent?.lines[2] || 'ใช้ข้อความจาก Content ของคุณเอง'}
-                </div>
-              </div>
-              <div className="mt-2 text-xs font-black text-white">Quote Card</div>
-              <div className="text-[10px] text-gray-500">คำสอนคนดัง/ข้อคิด/บทเรียน</div>
-            </button>
+          <div className="flex flex-wrap gap-2">
+            {VISUAL_TEMPLATE_PRESETS.map(template => (
+              <button
+                key={template.id}
+                type="button"
+                onClick={() => applyVisualTemplateToAllContent(template.id, {
+                  imageMode: template.imageMode,
+                  paletteId: template.id === 'top-gainers-classic' ? topGainersTemplate.paletteId : template.paletteId,
+                  ratio: template.ratio,
+                  decorateOriginalPhoto: true,
+                })}
+                className={`rounded-xl border px-4 py-3 text-left transition-all ${
+                  selectedVisualTemplateId === template.id
+                    ? 'border-cyan-300 bg-cyan-500/15 text-white shadow-[0_0_0_2px_rgba(34,211,238,0.25)]'
+                    : 'border-gray-700 bg-slate-950 text-gray-300 hover:border-gray-500'
+                }`}
+              >
+                <div className="text-sm font-black">{template.label}</div>
+                <div className="mt-0.5 text-[11px] text-gray-500">{template.desc}</div>
+              </button>
+            ))}
           </div>
 
-          <div className="mt-4 rounded-xl border border-cyan-500/25 bg-cyan-950/10 p-3">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          {selectedVisualTemplateId === 'top-gainers-classic' ? (
+            <div className="mt-4 grid grid-cols-1 xl:grid-cols-[minmax(360px,560px)_1fr] gap-4 rounded-xl border border-cyan-500/25 bg-cyan-950/10 p-4">
               <div>
-                <div className="text-sm font-black text-cyan-200">ตั้งค่าแม่แบบ: {selectedVisualTemplate.label}</div>
-                <div className="text-[11px] text-gray-500">{selectedVisualTemplate.desc} · ใช้กับทุก Content ในส่วนนี้</div>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div>
+                    <div className="text-sm font-black text-cyan-200">Preview สด: Top Gainers Classic</div>
+                    <div className="text-[11px] text-gray-500">เปลี่ยนค่าอะไรก็เห็นตรงนี้ทันที</div>
+                  </div>
+                  <span className="rounded-full border border-cyan-400/30 bg-cyan-500/10 px-3 py-1 text-[10px] font-bold text-cyan-200">
+                    {bulkItems.length} รายการ
+                  </span>
+                </div>
+                <div className="mx-auto aspect-square max-w-[560px] overflow-hidden rounded-lg bg-[#050505] shadow-inner [container-type:inline-size] [font-family:'Kanit','Prompt',sans-serif]">
+                  <div
+                    className="h-[60.2%] relative bg-cover bg-center"
+                    style={{
+                      backgroundImage: "linear-gradient(180deg, rgba(8,13,23,0.22), rgba(8,13,23,0.04) 45%, rgba(0,0,0,0.80)), url('/footage.png')",
+                    }}
+                  >
+                    <div className="absolute inset-x-[7.2cqw] bottom-[23%] h-[0.32cqw] bg-white/80" />
+                    <div className="absolute inset-x-[7cqw] bottom-[21%] h-[22cqw] opacity-90">
+                      {Array.from({ length: 16 }).map((_, idx) => {
+                        const isUp = idx % 4 !== 2;
+                        return (
+                          <span
+                            key={idx}
+                            className={`absolute bottom-0 w-[2.5%] ${isUp ? 'bg-[#35b957]' : 'bg-[#ef5148]'}`}
+                            style={{ left: `${2 + idx * 6}%`, height: `${12 + ((idx * 11) % 42)}%`, transform: `translateY(-${2 + ((idx * 8) % 38)}%)` }}
+                          />
+                        );
+                      })}
+                    </div>
+                    {topGainersTemplate.showLogo && (
+                      <div className="absolute left-[3.2cqw] top-[3.2cqw] h-[11.7cqw] w-[41cqw] rounded-[0.75cqw] border-[0.18cqw] border-[#2f3a45] bg-black/92 px-[2.5cqw] py-[1.8cqw]">
+                        <div className="truncate text-[4.6cqw] font-black leading-none text-white [text-shadow:0_0.25cqw_0_rgba(0,0,0,0.85)]">{topGainersTemplate.logoText}</div>
+                        <div className="mt-[0.6cqw] truncate text-[2cqw] font-bold leading-tight text-slate-200">{topGainersTemplate.logoSubText}</div>
+                      </div>
+                    )}
+                    {topGainersTemplate.showMetric && (
+                      <div className="absolute right-[3.2cqw] top-[3.2cqw] h-[10.8cqw] max-w-[25cqw] rounded-[0.75cqw] border-[0.28cqw] border-[#ff646b] bg-black/92 px-[2cqw] py-[1.3cqw] text-right">
+                        <div className="truncate text-[4.2cqw] font-black leading-none text-[#ff646b]">{topGainersTemplate.metricText}</div>
+                        <div className="mt-[0.5cqw] truncate text-[2cqw] font-bold text-white">{previewContent?.sourceLabel || 'Content'}</div>
+                      </div>
+                    )}
+                    {topGainersTemplate.showNewsCard && (
+                      <div className="absolute bottom-[7cqw] left-[7.2cqw] w-[50.7cqw] rounded-[0.9cqw] border-[0.3cqw] border-white/80 bg-black/88 p-[1.7cqw] shadow-[0_0.9cqw_1.2cqw_rgba(0,0,0,0.55)]">
+                        <div className="truncate text-[2.8cqw] font-black leading-tight text-[#fff200] [text-shadow:0_0.18cqw_0_#000]">{topGainersTemplate.newsTitle || topGainersPreviewLines[0]}</div>
+                        <div className="mt-[0.8cqw] line-clamp-2 text-[2.55cqw] font-bold leading-[1.18] text-white [text-shadow:0_0.18cqw_0_#000]">{topGainersTemplate.newsDetail || topGainersPreviewLines[1]}</div>
+                        <div className="mt-[0.8cqw] truncate text-[1.65cqw] font-bold text-slate-300">ที่มา: {topGainersTemplate.newsSource || previewContent?.sourceLabel || 'คลัง Content'}</div>
+                      </div>
+                    )}
+                    {topGainersTemplate.showMemeSticker && (
+                      <div className="absolute bottom-[10cqw] right-[4cqw] w-[31cqw] rounded-[1.7cqw] border-[0.3cqw] bg-white/95 px-[2cqw] py-[1.5cqw] text-center shadow-[0.8cqw_0.9cqw_0_rgba(0,0,0,0.55)]" style={{ borderColor: selectedTopGainersPalette.accent }}>
+                        <div className="truncate text-[3cqw] font-black text-slate-950">{topGainersTemplate.memeText}</div>
+                        <div className="truncate text-[2cqw] font-bold text-slate-700">{topGainersTemplate.memeSubText}</div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="h-[0.8%] bg-[#ff4747]" />
+                  <div className="relative h-[39%] bg-black text-center">
+                    <div className="absolute left-1/2 top-[11%] inline-block min-w-[18cqw] max-w-[88%] -translate-x-1/2 overflow-hidden text-ellipsis whitespace-nowrap px-[2.2cqw] py-[0.9cqw] text-[4.8cqw] font-black leading-none text-white" style={{ backgroundColor: selectedTopGainersPalette.altBlock }}>
+                      {topGainersPreviewLines[0]}
+                    </div>
+                    <div className="absolute left-1/2 top-[33%] inline-block max-w-[94%] -translate-x-1/2 overflow-hidden text-ellipsis whitespace-nowrap text-[5.2cqw] font-black leading-none [text-shadow:0.18cqw_0_0_#000,-0.18cqw_0_0_#000,0_0.18cqw_0_#000,0_-0.18cqw_0_#000,0_0.28cqw_0.28cqw_rgba(0,0,0,0.9)]" style={{ color: selectedTopGainersPalette.primary }}>
+                      {topGainersPreviewLines[1]}
+                    </div>
+                    <div className="absolute left-1/2 top-[56%] inline-block min-w-[18cqw] max-w-[93%] -translate-x-1/2 overflow-hidden text-ellipsis whitespace-nowrap px-[2.2cqw] py-[0.9cqw] text-[4.6cqw] font-black leading-none text-white" style={{ backgroundColor: selectedTopGainersPalette.block }}>
+                      {topGainersPreviewLines[2]}
+                    </div>
+                    <div className="absolute bottom-[6%] left-0 right-0 text-center text-[2.6cqw] font-bold text-slate-300 [font-family:'Prompt','Kanit',sans-serif]">
+                      เครดิต: {topGainersTemplate.creditText}
+                    </div>
+                  </div>
+                </div>
               </div>
-              <span className="rounded-full border border-cyan-400/30 bg-cyan-500/10 px-3 py-1 text-[10px] font-bold text-cyan-200">
-                พร้อมใช้ {bulkItems.length} รายการ
-              </span>
+
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="md:col-span-3">
+                    <label className="text-sm font-black text-white block mb-2">ชุดสีพาดหัว</label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
+                      {TOP_GAINERS_PALETTE_CHOICES.map(choice => (
+                        <button
+                          key={choice.id}
+                          type="button"
+                          onClick={() => updateTopGainersTemplate({ paletteId: choice.id })}
+                          className={`rounded-lg border bg-black/25 p-3 text-left transition-all hover:border-cyan-400 ${
+                            topGainersTemplate.paletteId === choice.id
+                              ? 'border-cyan-300 bg-cyan-500/15 ring-2 ring-cyan-400/70'
+                              : 'border-gray-700'
+                          }`}
+                        >
+                          <div className="text-sm font-black text-white">{choice.label}</div>
+                          <div className="mt-2 flex gap-2">
+                            {choice.colors.map(color => (
+                              <span
+                                key={color}
+                                className="h-4 w-8 rounded-sm border border-white/10"
+                                style={{ backgroundColor: color }}
+                              />
+                            ))}
+                          </div>
+                          <div className="mt-2 text-xs font-bold text-gray-400">{choice.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-400 block mb-1">ภาพต้นทาง</label>
+                    <select className="input-field text-xs py-1.5 w-full" value={visualTemplateSettings.imageMode} onChange={e => applyVisualTemplateToAllContent('top-gainers-classic', { imageMode: e.target.value as BulkArticleItem['imageSourceMode'] })}>
+                      {IMAGE_SOURCE_MODE_OPTIONS.map(opt => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-400 block mb-1">สัดส่วนรูป</label>
+                    <select className="input-field text-xs py-1.5 w-full" value={visualTemplateSettings.ratio} onChange={e => applyVisualTemplateToAllContent('top-gainers-classic', { ratio: e.target.value })}>
+                      <option value="1:1">1:1 Square</option>
+                      <option value="16:9">16:9 Landscape</option>
+                      <option value="9:16">9:16 Portrait</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <input className="input-field text-sm" value={topGainersTemplate.headline1} onChange={e => updateTopGainersTemplate({ headline1: e.target.value })} placeholder={topGainersPreviewLines[0]} />
+                  <input className="input-field text-sm" value={topGainersTemplate.headline2} onChange={e => updateTopGainersTemplate({ headline2: e.target.value })} placeholder={topGainersPreviewLines[1]} />
+                  <input className="input-field text-sm" value={topGainersTemplate.headline3} onChange={e => updateTopGainersTemplate({ headline3: e.target.value })} placeholder={topGainersPreviewLines[2]} />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <label className="rounded-lg border border-gray-700 bg-black/25 p-3">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-xs font-black text-white">Logo</span>
+                      <input type="checkbox" checked={topGainersTemplate.showLogo} onChange={e => updateTopGainersTemplate({ showLogo: e.target.checked })} />
+                    </div>
+                    <input className="input-field mb-2 text-xs" value={topGainersTemplate.logoText} onChange={e => updateTopGainersTemplate({ logoText: e.target.value })} placeholder="AI" />
+                    <input className="input-field text-xs" value={topGainersTemplate.logoSubText} onChange={e => updateTopGainersTemplate({ logoSubText: e.target.value })} placeholder="Content Lab" />
+                  </label>
+                  <label className="rounded-lg border border-gray-700 bg-black/25 p-3">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-xs font-black text-white">Metric / ป้ายมุมขวา</span>
+                      <input type="checkbox" checked={topGainersTemplate.showMetric} onChange={e => updateTopGainersTemplate({ showMetric: e.target.checked })} />
+                    </div>
+                    <input className="input-field text-xs" value={topGainersTemplate.metricText} onChange={e => updateTopGainersTemplate({ metricText: e.target.value })} placeholder="NEW" />
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <label className="rounded-lg border border-gray-700 bg-black/25 p-3">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-xs font-black text-white">รูปข่าว + เนื้อหาข่าวสั้น</span>
+                      <input type="checkbox" checked={topGainersTemplate.showNewsCard} onChange={e => updateTopGainersTemplate({ showNewsCard: e.target.checked })} />
+                    </div>
+                    <input className="input-field mb-2 text-xs" value={topGainersTemplate.newsTitle} onChange={e => updateTopGainersTemplate({ newsTitle: e.target.value })} placeholder="หัวข้อข่าวบนการ์ด" />
+                    <input className="input-field mb-2 text-xs" value={topGainersTemplate.newsDetail} onChange={e => updateTopGainersTemplate({ newsDetail: e.target.value })} placeholder="เนื้อหาข่าวสั้น ๆ" />
+                    <input className="input-field text-xs" value={topGainersTemplate.newsSource} onChange={e => updateTopGainersTemplate({ newsSource: e.target.value })} placeholder="ที่มา" />
+                  </label>
+                  <label className="rounded-lg border border-gray-700 bg-black/25 p-3">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-xs font-black text-white">Sticker Meme</span>
+                      <input type="checkbox" checked={topGainersTemplate.showMemeSticker} onChange={e => updateTopGainersTemplate({ showMemeSticker: e.target.checked })} />
+                    </div>
+                    <input className="input-field mb-2 text-xs" value={topGainersTemplate.memeText} onChange={e => updateTopGainersTemplate({ memeText: e.target.value })} placeholder="ข้อความมีม" />
+                    <input className="input-field text-xs" value={topGainersTemplate.memeSubText} onChange={e => updateTopGainersTemplate({ memeSubText: e.target.value })} placeholder="ข้อความรอง" />
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3">
+                  <input className="input-field text-sm" value={topGainersTemplate.creditText} onChange={e => updateTopGainersTemplate({ creditText: e.target.value })} placeholder="เครดิตเพจ" />
+                  <input className="input-field text-sm" value={topGainersTemplate.savedName} onChange={e => updateTopGainersTemplate({ savedName: e.target.value })} placeholder="ชื่อแม่แบบ" />
+                  <button type="button" onClick={saveTopGainersTemplate} className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-black text-white hover:bg-cyan-500">
+                    บันทึกแม่แบบ
+                  </button>
+                </div>
+              </div>
             </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-              <div>
-                <label className="text-[10px] font-bold text-gray-400 block mb-1">
-                  {selectedVisualTemplate.format === 'quote' ? 'ชุดสี Quote' : 'ชุดสีแบบ Top Gainers'}
-                </label>
-                <select
-                  className="input-field text-xs py-1.5 w-full"
-                  value={visualTemplateSettings.paletteId}
-                  onChange={e => applyVisualTemplateToAllContent(selectedVisualTemplateId, { paletteId: e.target.value })}
-                >
-                  {YOUTUBE_FONT_PALETTES
-                    .filter(p => p.id.startsWith('tg-'))
-                    .map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-[10px] font-bold text-gray-400 block mb-1">ภาพต้นทาง</label>
-                <select
-                  className="input-field text-xs py-1.5 w-full"
-                  value={visualTemplateSettings.imageMode}
-                  onChange={e => applyVisualTemplateToAllContent(selectedVisualTemplateId, { imageMode: e.target.value as BulkArticleItem['imageSourceMode'] })}
-                >
-                  {IMAGE_SOURCE_MODE_OPTIONS.map(opt => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-[10px] font-bold text-gray-400 block mb-1">สัดส่วนรูป</label>
-                <select
-                  className="input-field text-xs py-1.5 w-full"
-                  value={visualTemplateSettings.ratio}
-                  onChange={e => applyVisualTemplateToAllContent(selectedVisualTemplateId, { ratio: e.target.value })}
-                >
-                  <option value="1:1">1:1 (Square)</option>
-                  <option value="16:9">16:9 (Landscape)</option>
-                  <option value="9:16">9:16 (Portrait)</option>
-                </select>
-              </div>
-
-              <label className="flex items-center justify-between gap-3 rounded-lg border border-gray-700 bg-black/25 px-3 py-2">
-                <span>
-                  <span className="block text-[10px] font-bold text-gray-400">คงรูปเดิมไว้</span>
-                  <span className="block text-[10px] text-gray-500">แปะพาดหัวทับรูป ไม่ให้ AI วาดใหม่</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => applyVisualTemplateToAllContent(selectedVisualTemplateId, { decorateOriginalPhoto: !visualTemplateSettings.decorateOriginalPhoto })}
-                  disabled={visualTemplateSettings.imageMode === 'ai'}
-                  className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-40 ${
-                    visualTemplateSettings.decorateOriginalPhoto && visualTemplateSettings.imageMode !== 'ai' ? 'bg-cyan-500' : 'bg-gray-700'
-                  }`}
-                >
-                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                    visualTemplateSettings.decorateOriginalPhoto && visualTemplateSettings.imageMode !== 'ai' ? 'translate-x-6' : 'translate-x-1'
-                  }`} />
-                </button>
-              </label>
+          ) : (
+            <div className="mt-4 rounded-xl border border-gray-700 bg-black/25 p-4 text-sm text-gray-400">
+              เลือก {selectedVisualTemplate.label} แล้ว ระบบจะใช้ preset ให้ก่อน ส่วนหน้าปรับแต่งละเอียดของแม่แบบนี้จะซ่อนไว้ก่อน
             </div>
-
-            <div className="mt-3 rounded-lg border border-gray-700/70 bg-black/25 p-2 text-[11px] leading-relaxed text-gray-400">
-              ใช้สไตล์ภาพ: <span className="font-bold text-cyan-200">{getImagePromptStyleName(selectedVisualTemplate.promptStyleId)}</span>
-              {' '}· palette: <span className="font-bold text-white">{YOUTUBE_FONT_PALETTES.find(p => p.id === visualTemplateSettings.paletteId)?.name || visualTemplateSettings.paletteId}</span>
-              {' '}· ภาพต้นทาง: <span className="font-bold text-white">{IMAGE_SOURCE_MODE_OPTIONS.find(opt => opt.id === visualTemplateSettings.imageMode)?.label}</span>
-            </div>
-          </div>
+          )}
 
           <div className="mt-4 rounded-xl border border-amber-500/25 bg-amber-950/10 p-3">
             <div className="mb-3">
