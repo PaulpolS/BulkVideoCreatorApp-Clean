@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import * as XLSX from 'xlsx';
-import { getActiveOpenRouterKey, getActiveKieKey } from '../../hooks/useApiSettings';
+import { getActiveOpenRouterKey, getActiveKieKey, getActiveDropboxCreds } from '../../hooks/useApiSettings';
 
 type LazadaItem = {
   id: string;
@@ -53,6 +53,7 @@ export const LazadaTab: React.FC = () => {
 
   const [viewMode, setViewMode] = useState<'new' | 'saved'>('new');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isSavingToStock, setIsSavingToStock] = useState(false);
   const [generatingItemId, setGeneratingItemId] = useState<string | null>(null);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
 
@@ -791,7 +792,7 @@ CRITICAL: The product must look real and grounded — casting natural shadows on
   const exportToDropboxAndCSV = async () => {
     if (selectedItems.size === 0) return alert('❌ กรุณาเลือกสินค้าที่ต้องการส่งออกอย่างน้อย 1 รายการ (ติ๊กถูกที่มุมซ้ายบนของรูป)');
     
-    const dbxKey = localStorage.getItem('dropbox_api_key');
+    const dbxKey = getActiveDropboxCreds().accessToken;
     if (!dbxKey) return alert('❌ กรุณาเชื่อมต่อ Dropbox ในหน้าตั้งค่าโปรแกรมก่อน');
     
     const currentClusters = viewMode === 'new' ? clusters : savedClusters;
@@ -944,6 +945,68 @@ CRITICAL: The product must look real and grounded — casting natural shadows on
     }
     
     setIsProcessing(false);
+  };
+
+  const saveSelectedToContentStock = async () => {
+    if (selectedItems.size === 0) return alert('❌ กรุณาเลือกสินค้าที่ต้องการเก็บเข้าคลัง Content อย่างน้อย 1 รายการ');
+
+    const currentClusters = viewMode === 'new' ? clusters : savedClusters;
+    if (currentClusters.length === 0) return alert('ไม่มีรายการสินค้า');
+
+    const stockItems: any[] = [];
+    for (const cluster of currentClusters) {
+      for (const item of cluster.items) {
+        if (!selectedItems.has(item.id)) continue;
+        const generatedImage = generatedAds[item.id] || generatedReviews[item.id] || '';
+        const images = [generatedImage, item.image].filter(Boolean);
+        stockItems.push({
+          title: item.shortName || item.name,
+          rawArticle: [
+            `สินค้า: ${item.name}`,
+            `หมวดหมู่: ${cluster.categoryName || item.category || 'Lazada'}`,
+            item.price ? `ราคา: ${item.price}` : '',
+            item.sales ? `ยอดขาย/สต็อก: ${item.sales}` : '',
+            item.commission ? `ค่าคอม: ${item.commission}` : '',
+            generatedImage ? `รูปที่สร้างแล้ว: ${generatedImage}` : '',
+            '',
+            `Affiliate Link: ${item.link}`,
+          ].filter(Boolean).join('\n'),
+          sourceUrl: item.link || `lazada-product://${item.id}`,
+          newsScore: item.sales ? 8 : 6,
+          evergreenScore: 7,
+          tags: Array.from(new Set(['lazada', 'affiliate', cluster.categoryName, item.category].filter(Boolean))),
+          domain: 'lazada',
+          createdAt: new Date().toISOString(),
+          images,
+          thumbnail: generatedImage || item.image || '',
+          sourceType: 'lazada',
+          productName: item.name,
+          price: item.price || '',
+          sales: item.sales || '',
+          commission: item.commission || '',
+          categoryName: cluster.categoryName,
+        });
+      }
+    }
+
+    if (stockItems.length === 0) return alert('ไม่พบสินค้าที่เลือกในกลุ่มปัจจุบัน');
+
+    setIsSavingToStock(true);
+    addLog(`📦 กำลังเก็บสินค้า ${stockItems.length} รายการเข้าคลัง Content...`);
+    try {
+      const res = await fetch('/api/article-stock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add-batch', items: stockItems }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'บันทึกเข้าคลัง Content ไม่สำเร็จ');
+      addLog(`เก็บเข้าคลัง Content แล้ว: เพิ่ม ${data.added ?? 0}, อัปเดต ${data.updated ?? 0}, ซ้ำ ${data.duplicates ?? 0}`, 'success');
+    } catch (err: any) {
+      addLog(`เก็บเข้าคลัง Content ไม่สำเร็จ: ${err.message || String(err)}`, 'error');
+    } finally {
+      setIsSavingToStock(false);
+    }
   };
 
   const executeBulkGeneration = async (itemsList: LazadaItem[]) => {
@@ -1371,6 +1434,14 @@ CRITICAL: The product must look real and grounded — casting natural shadows on
                  className={`text-xs font-bold px-4 py-1.5 ${isProcessing ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'} text-white rounded-lg shadow-sm transition-colors flex items-center gap-1.5`}
               >
                  <span>📥</span> {isProcessing ? 'กำลังส่งออก...' : 'ส่งออกรูปเข้า Dropbox + โหลด CSV'}
+              </button>
+              <button
+                 onClick={saveSelectedToContentStock}
+                 disabled={isSavingToStock || selectedItems.size === 0}
+                 className="text-xs font-bold px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
+                 title="เก็บสินค้าที่เลือกเข้า คลัง Content กลาง ก่อนนำไปสร้างโพสต์"
+              >
+                 <span>📦</span> {isSavingToStock ? 'กำลังเก็บ...' : `เก็บเข้าคลัง Content${selectedItems.size > 0 ? ` (${selectedItems.size})` : ''}`}
               </button>
             </div>
             

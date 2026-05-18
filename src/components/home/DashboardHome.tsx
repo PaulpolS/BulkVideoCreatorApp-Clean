@@ -14,12 +14,65 @@ interface GuideItem {
   steps: string[];
 }
 
+interface ModuleAuditItem {
+  id: TabId;
+  area: string;
+  ownerFile: string;
+  status: 'organized' | 'needs-split' | 'legacy';
+  note: string;
+}
+
+const MODULE_AUDIT_ITEMS: ModuleAuditItem[] = [
+  {
+    id: 'news',
+    area: 'หา Content / Discovery Hub',
+    ownerFile: 'NewsScraperTab.tsx',
+    status: 'needs-split',
+    note: 'รวม RSS, YouTube, GitHub และเครื่องมือค้นหาไว้ในไฟล์ใหญ่ ควรแตกเป็น sub-tabs ต่อ',
+  },
+  {
+    id: 'articlestock',
+    area: 'คลัง Content กลาง',
+    ownerFile: 'ArticleStockTab.tsx',
+    status: 'organized',
+    note: 'เริ่มรวมแหล่งที่มาและสถานะ Content แล้ว เหมาะเป็นศูนย์กลางก่อนส่งไปผลิต',
+  },
+  {
+    id: 'aipage',
+    area: 'สร้าง Content ลงเพจ',
+    ownerFile: 'AIPagePostGeneratorTab.tsx',
+    status: 'needs-split',
+    note: 'ไฟล์ใหญ่ที่สุดของโปรเจค ควรแยกเป็น queue, image tools, article tools และ bulk actions',
+  },
+  {
+    id: 'clone',
+    area: 'โคลนสมอง / Prompt Lab',
+    ownerFile: 'CloneTab.tsx',
+    status: 'needs-split',
+    note: 'มี overview แล้ว แต่ยังควรแตก Image Style, Short Clip Brain, Caption Brain และ Content Factory',
+  },
+  {
+    id: 'singleclip',
+    area: 'ตัด/สุ่มต่อคลิป',
+    ownerFile: 'SingleClipEditorTab.tsx',
+    status: 'organized',
+    note: 'หน้าที่ชัดขึ้นหลังเพิ่ม Video Production Hub ใช้เป็นทางหลักของงานตัดต่อไฟล์ในเครื่อง',
+  },
+  {
+    id: 'bulk',
+    area: 'Bulk Video Creator เก่า',
+    ownerFile: 'App.tsx + VideoEditor.tsx',
+    status: 'legacy',
+    note: 'เก็บไว้เพื่อรองรับงานเดิม ไม่ควรเพิ่มฟีเจอร์ใหม่ใน workflow นี้ถ้าไม่จำเป็น',
+  },
+];
+
 const TOOL_GUIDES: GuideItem[] = [
   {
     id: 'singleclip',
     icon: '✂️',
-    title: 'คัตชนคลิป (Single Clip)',
-    desc: 'ตัดต่อคลิปเดี่ยว ใส่เอฟเฟกต์ ใส่เพลง ประกอบฉากได้อย่างรวดเร็ว',
+    title: 'ตัด/สุ่มต่อคลิป',
+    desc: 'ตัดคลิปด้วยสูตร FFmpeg หรือสุ่มต่อคลิปจากโฟลเดอร์ให้ได้ความยาวที่ต้องการ',
     color: '#6366f1',
     steps: [
       'เลือกไฟล์คลิปต้นฉบับ (.mp4)',
@@ -135,7 +188,7 @@ const TOOL_GUIDES: GuideItem[] = [
   {
     id: 'assets',
     icon: '📂',
-    title: 'คลังแสง (Assets)',
+    title: 'คลัง Assets',
     desc: 'จัดการไฟล์ Assets ต่างๆ เสียง เพลง ฟุตเทจ สำหรับใช้งานในโปรเจกต์',
     color: '#8b5cf6',
     steps: [
@@ -162,6 +215,18 @@ const TOOL_GUIDES: GuideItem[] = [
 
 export function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const [expandedGuide, setExpandedGuide] = useState<TabId | null>(null);
+  const workflowGroups = NAV_GROUPS.filter(group => group.label !== 'หน้าหลัก');
+  const sidebarToolCount = NAV_GROUPS.reduce((total, group) => total + group.items.length, 0);
+  const statusLabel: Record<ModuleAuditItem['status'], string> = {
+    organized: 'จัดแล้ว',
+    'needs-split': 'รอแยกไฟล์',
+    legacy: 'Legacy',
+  };
+  const statusColor: Record<ModuleAuditItem['status'], string> = {
+    organized: '#10b981',
+    'needs-split': '#f59e0b',
+    legacy: '#64748b',
+  };
 
   const now = new Date();
   const hour = now.getHours();
@@ -176,23 +241,70 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
           <div className="dash-hero-text">
             <h1 className="dash-hero-greeting">{greeting}</h1>
             <p className="dash-hero-date">{dateStr}</p>
-            <p className="dash-hero-subtitle">เลือกเครื่องมือด้านล่าง หรือกดเมนูทางซ้ายเพื่อเริ่มทำงานได้เลย</p>
+            <p className="dash-hero-subtitle">ทำงานตามลำดับใหม่: หา Content → เก็บเข้าคลัง → สร้างงาน → โคลนสมอง → ตัดคลิป → จัดการระบบ</p>
           </div>
           <div className="dash-hero-stats">
             <div className="dash-stat">
-              <span className="dash-stat-num">{TOOL_GUIDES.length}</span>
+              <span className="dash-stat-num">{sidebarToolCount}</span>
               <span className="dash-stat-label">เครื่องมือ</span>
             </div>
             <div className="dash-stat">
-              <span className="dash-stat-num">∞</span>
-              <span className="dash-stat-label">ความเป็นไปได้</span>
+              <span className="dash-stat-num">{workflowGroups.length}</span>
+              <span className="dash-stat-label">หมวดงาน</span>
             </div>
           </div>
         </div>
       </div>
 
+      <h2 className="dash-section-title">🧭 Workflow ใหม่ของโปรแกรม</h2>
+      <div className="dash-workflow-grid">
+        {workflowGroups.map((group, index) => (
+          <section key={group.label} className="dash-workflow-card">
+            <div className="dash-workflow-head">
+              <span className="dash-workflow-step">{index + 1}</span>
+              <span className="dash-workflow-icon">{group.icon}</span>
+              <h3>{group.label}</h3>
+            </div>
+            <div className="dash-workflow-items">
+              {group.items.map(item => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className="dash-workflow-chip"
+                  style={{ '--tool-color': item.color } as React.CSSProperties}
+                  onClick={() => onNavigate(item.id)}
+                >
+                  <span>{item.icon}</span>
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+
+      <h2 className="dash-section-title">🧩 แผนที่โมดูลที่ควรรู้</h2>
+      <div className="dash-module-map">
+        {MODULE_AUDIT_ITEMS.map(item => (
+          <button
+            key={item.id}
+            type="button"
+            className="dash-module-card"
+            onClick={() => onNavigate(item.id)}
+            style={{ '--status-color': statusColor[item.status] } as React.CSSProperties}
+          >
+            <div className="dash-module-head">
+              <span className="dash-module-area">{item.area}</span>
+              <span className="dash-module-status">{statusLabel[item.status]}</span>
+            </div>
+            <div className="dash-module-file">{item.ownerFile}</div>
+            <p>{item.note}</p>
+          </button>
+        ))}
+      </div>
+
       {/* Quick Access Grid */}
-      <h2 className="dash-section-title">⚡ เครื่องมือทั้งหมด & คู่มือการใช้งาน</h2>
+      <h2 className="dash-section-title">⚡ คู่มือเครื่องมือหลักที่ใช้บ่อย</h2>
       <div className="dash-tools-grid">
         {TOOL_GUIDES.map((tool) => {
           const isExpanded = expandedGuide === tool.id;

@@ -1,10 +1,15 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Card } from '../ui/Card';
 import { useYtQueueStore } from '../../hooks/useYtQueueStore';
-import { NumInput } from '../ui/NumInput';
 import { globalTaskStore } from '../../hooks/useBackgroundTasks';
 import { GithubFinderTab } from './GithubFinderTab';
 import { CelebrityTeachingsTab } from './CelebrityTeachingsTab';
+import { DiscoveryHubHeader, DiscoveryModeId } from './DiscoveryHubHeader';
+import { YoutubeKeywordSearchPanel } from './YoutubeKeywordSearchPanel';
+import { YoutubeExtractQueuePanel } from './YoutubeExtractQueuePanel';
+import { RssSourceScannerPanel } from './RssSourceScannerPanel';
+import { RssResultsHeader } from './RssResultsHeader';
+import { RssArticleList } from './RssArticleList';
 import { getOpenRouterKeyCandidates as getOpenRouterKeyCandidatesShared, getActiveOpenRouterKeyAsync } from '../../hooks/useApiSettings';
 
 interface ArticleItem {
@@ -18,7 +23,6 @@ interface ArticleItem {
   tags?: string[];
   rawText?: string;
 }
-
 
 interface NewsScraperProps {
   onSendToStock: (data: any) => void;
@@ -141,7 +145,7 @@ const TITLES_TRANSLATE_PROMPT = `หน้าที่ของคุณคื�
 }`;
 
 export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSendToAIPage, initialYoutubeUrls, onYoutubeUrlsConsumed }) => {
-  const [activeMode, setActiveMode] = useState<'rss' | 'youtube' | 'github' | 'celebrity'>('rss');
+  const [activeMode, setActiveMode] = useState<DiscoveryModeId>('rss');
 
   // RSS states
   const [url, setUrl] = useState('');
@@ -211,12 +215,18 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
   const handleProcessAll = () => ytQueueStore.processAll(false);
   const handleProcessAllAndSave = () => ytQueueStore.processAll(true);
 
+  const addUrlsToYoutubeQueue = (urls: string[]) => {
+    const newIds = ytQueueStore.addUrls(urls);
+    setYtQueueSelectedIds(prev => new Set([...prev, ...newIds]));
+    return newIds.length;
+  };
+
   const handleBatchSaveToStock = async () => {
     setIsBatchSaving(true);
     const result = await ytQueueStore.batchSaveToStock();
     setIsBatchSaving(false);
     if (result?.success) {
-      alert(`✅ บันทึกเข้าคลังบทความแล้ว! เพิ่ม ${result.added ?? 0} คลิป (อัปเดต ${result.updated ?? 0})`);
+      alert(`✅ บันทึกเข้าคลัง Content แล้ว! เพิ่ม ${result.added ?? 0} คลิป (อัปเดต ${result.updated ?? 0})`);
     } else if (result?.error) {
       alert(`❌ บันทึกไม่สำเร็จ: ${result.error}`);
     }
@@ -312,7 +322,7 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
           : data.updated > 0
             ? 'อัปเดตรายการเดิมแล้ว'
             : 'มีอยู่แล้ว';
-        alert(`✅ เก็บเข้าคลังบทความแล้ว! (${resultText})`);
+        alert(`✅ เก็บเข้าคลัง Content แล้ว! (${resultText})`);
       }
       else throw new Error(data.error);
     } catch (e: any) {
@@ -915,8 +925,8 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
         mappedData = writeJsonRaw;
       }
 
-      // Step 4: ส่งเข้าคลังแสง
-      addLog(`📥 กำลังส่งเข้าคลังแสง (Content Stock)...`);
+      // Legacy one-off processor still sends to the older Bulk Content Stock.
+      addLog(`📥 กำลังส่งเข้า Bulk Content Stock เก่า...`);
       const newStockData = {
         title: scoreParsed.ชื่อข่าว || article.title,
         detail: mappedData,
@@ -933,7 +943,7 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
       
       onSendToStock([newStockData]);
       addLog(`🎉 เสร็จสมบูรณ์! ข้อความพร้อมถูกนำไปปั้นวิดีโอแล้ว`);
-      finishNewsLogTask(processTaskId, 'เสร็จสมบูรณ์ พร้อมส่งเข้าคลังบทความ');
+      finishNewsLogTask(processTaskId, 'เสร็จสมบูรณ์ พร้อมส่งต่อเข้าคลัง/สร้างคอนเทนต์');
 
     } catch (e: any) {
       addLog(`❌ เกิดข้อผิดพลาดระหว่าง AI Process: ${e.message}`);
@@ -955,37 +965,11 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
   return (
     <div className="w-full max-w-[1400px] mx-auto animate-fade-in space-y-4">
 
-      {/* Mode Toggle */}
-      <div className="flex gap-2 p-1 bg-gray-800/60 rounded-xl w-fit">
-        <button
-          onClick={() => setActiveMode('rss')}
-          className={`px-5 py-2.5 rounded-lg text-sm font-bold transition-all ${activeMode === 'rss' ? 'bg-red-600 text-white shadow-lg shadow-red-500/20' : 'text-gray-400 hover:text-white'}`}
-        >
-          🗞️ ดูดข่าว RSS
-        </button>
-        <button
-          onClick={() => setActiveMode('youtube')}
-          className={`px-5 py-2.5 rounded-lg text-sm font-bold transition-all ${activeMode === 'youtube' ? 'bg-red-600 text-white shadow-lg shadow-red-500/20' : 'text-gray-400 hover:text-white'}`}
-        >
-          🎬 YouTube Script + รูปภาพ
-        </button>
-        <button
-          onClick={() => setActiveMode('github')}
-          className={`px-5 py-2.5 rounded-lg text-sm font-bold transition-all ${activeMode === 'github' ? 'bg-violet-600 text-white shadow-lg shadow-violet-500/20' : 'text-gray-400 hover:text-white'}`}
-        >
-          🐙 หาของดีจาก Github
-        </button>
-        <button
-          onClick={() => setActiveMode('celebrity')}
-          className={`px-5 py-2.5 rounded-lg text-sm font-bold transition-all ${activeMode === 'celebrity' ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-500/20' : 'text-gray-400 hover:text-white'}`}
-        >
-          คำสอนจากคนดัง
-        </button>
-      </div>
+      <DiscoveryHubHeader activeMode={activeMode} onModeChange={setActiveMode} />
 
       <Card className="p-4">
         <div className="flex items-center justify-between gap-3 mb-2">
-          <h3 className="text-sm font-bold text-gray-200">Log กลาง</h3>
+          <h3 className="text-sm font-bold text-gray-200">Discovery Log</h3>
           {logs.length > 0 && (
             <button onClick={() => setLogs([])} className="text-[10px] px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-300">
               ล้าง Log
@@ -1004,366 +988,51 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
       {/* YouTube Mode */}
       {activeMode === 'youtube' && (
         <div className="space-y-4">
-          <Card>
-            <h2 className="text-xl font-bold flex items-center gap-2 mb-4">
-              <span className="text-2xl">🎬</span> ดึง Script + แคปรูปจาก YouTube
-            </h2>
-            <p className="text-xs text-gray-400 mb-4">วาง URL คลิป YouTube แล้วระบบจะดึง Script (คำบรรยาย) และแคปรูปภาพสุ่มกระจายตลอดคลิป — ฟรี ไม่มีค่า API</p>
+          <YoutubeKeywordSearchPanel
+            onAddUrlsToQueue={addUrlsToYoutubeQueue}
+            onUseSingleUrl={setYtUrl}
+            onLog={addLog}
+          />
 
-            <div className="flex gap-2 flex-wrap">
-              <input
-                type="text"
-                value={ytUrl}
-                onChange={e => setYtUrl(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleYoutubeExtract()}
-                placeholder="https://www.youtube.com/watch?v=..."
-                className="input-field flex-1 min-w-[200px] text-sm"
-              />
-              <div className="flex items-center gap-2 bg-gray-800/60 border border-gray-700 rounded-lg px-3">
-                <label className="text-xs text-gray-400 whitespace-nowrap">🖼️ จำนวนรูป</label>
-                <NumInput
-                  min={1} max={30}
-                  value={ytQueueStore.frameCount}
-                  onChange={n => ytQueueStore.setFrameCount(n)}
-                  className="w-14 bg-transparent text-sm font-bold text-white text-center outline-none"
-                />
-              </div>
-              <button
-                onClick={handleYoutubeExtract}
-                disabled={isYtLoading || !ytUrl.trim()}
-                className="px-5 py-2.5 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-sm font-bold rounded-lg transition-all flex items-center gap-2 whitespace-nowrap"
-              >
-                {isYtLoading ? '⏳ กำลังดึง...' : '🚀 ดึง Script + รูปภาพ'}
-              </button>
-            </div>
-
-            {isYtLoading && (
-              <div className="mt-4 p-4 bg-black/30 rounded-lg border border-gray-700 text-sm text-gray-400 animate-pulse">
-                ⏳ กำลังดึง transcript และแคปรูปจากคลิป... อาจใช้เวลา 1-2 นาที
-              </div>
-            )}
-
-            {ytError && (
-              <div className="mt-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
-                ❌ {ytError}
-              </div>
-            )}
-          </Card>
-
-          {/* === Queue Panel === */}
-          {ytQueueStore.items.length > 0 && (
-            <Card>
-              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-                <h3 className="font-bold text-gray-200 flex items-center gap-2">
-                  📋 คิวดึง YouTube
-                  <span className="text-[10px] font-normal bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded-full border border-cyan-500/30">
-                    {ytQueueStore.items.filter(q => q.status === 'completed').length}/{ytQueueStore.items.length} เสร็จ
-                  </span>
-                  {ytQueueStore.isRunning && (
-                    <span className="text-[10px] font-normal bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full border border-amber-500/30 animate-pulse">
-                      กำลังทำงาน...
-                    </span>
-                  )}
-                </h3>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button onClick={selectAllQueue} className="text-[10px] px-2.5 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg transition-all">☑ เลือกทั้งหมด</button>
-                  <button onClick={deselectAllQueue} className="text-[10px] px-2.5 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg transition-all">☐ ยกเลิก</button>
-                  {ytQueueStore.items.some(q => q.status === 'completed') && (
-                    <button onClick={clearCompletedQueue} className="text-[10px] px-2.5 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg transition-all">🧹 ล้างที่เสร็จแล้ว</button>
-                  )}
-                </div>
-              </div>
-
-              {/* Queue Items */}
-              <div className="space-y-2 max-h-[350px] overflow-y-auto pr-1 custom-scrollbar mb-4">
-                {ytQueueStore.items.map((item, idx) => {
-                  const isSelected = ytQueueSelectedIds.has(item.id);
-                  const isExpanded = expandedQueueId === item.id;
-                  const statusIcon = item.status === 'completed' ? '✅' : item.status === 'running' ? '🔄' : item.status === 'error' ? '❌' : '⏳';
-                  const statusColor = item.status === 'completed' ? 'border-green-500/30 bg-green-900/10' : item.status === 'running' ? 'border-amber-500/30 bg-amber-900/10 animate-pulse' : item.status === 'error' ? 'border-red-500/30 bg-red-900/10' : 'border-gray-700/50';
-                  return (
-                    <div key={item.id} className={`rounded-lg border p-3 transition-all ${statusColor}`}>
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => toggleQueueSelect(item.id)}
-                          className="w-4 h-4 accent-cyan-500 cursor-pointer flex-shrink-0"
-                          disabled={ytQueueStore.isRunning}
-                        />
-                        <span className="text-sm flex-shrink-0">{statusIcon}</span>
-                        <span className="text-xs text-gray-400 flex-shrink-0 w-5">{idx + 1}.</span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs text-gray-200 truncate font-medium">
-                            {item.result?.videoTitle || item.url}
-                          </p>
-                          {item.result?.videoTitle && (
-                            <p className="text-[10px] text-gray-500 truncate">{item.url}</p>
-                          )}
-                          {item.error && (
-                            <p className="text-[10px] text-red-400 mt-0.5">❌ {item.error}</p>
-                          )}
-                          {item.result && (
-                            <div className="flex items-center gap-2 mt-1">
-                              <span className="text-[9px] text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded">📝 {item.result.transcript.length.toLocaleString()} ตัวอักษร</span>
-                              <span className="text-[9px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">🖼️ {item.result.screenshotUrls.length} รูป</span>
-                              {item.result.channelName && <span className="text-[9px] text-gray-400">📺 {item.result.channelName}</span>}
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1.5 flex-shrink-0">
-                          {item.result && (
-                            <button
-                              onClick={() => setExpandedQueueId(isExpanded ? null : item.id)}
-                              className="text-[10px] px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-all"
-                            >
-                              {isExpanded ? '▲ ซ่อน' : '▼ ดู'}
-                            </button>
-                          )}
-                          {!ytQueueStore.isRunning && (
-                            <button
-                              onClick={() => removeQueueItem(item.id)}
-                              className="text-red-500 text-xs px-1.5 py-0.5 hover:bg-red-500/10 rounded transition-all"
-                            >✕</button>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Expanded: show transcript preview + images */}
-                      {isExpanded && item.result && (
-                        <div className="mt-3 space-y-2 border-t border-gray-700/30 pt-3">
-                          {item.result.transcript && (
-                            <div className="bg-black/30 rounded-lg border border-gray-700/50 p-2 max-h-[150px] overflow-y-auto custom-scrollbar">
-                              <pre className="text-[10px] text-gray-400 whitespace-pre-wrap font-sans leading-relaxed">{item.result.transcript.substring(0, 2000)}{item.result.transcript.length > 2000 ? '...' : ''}</pre>
-                            </div>
-                          )}
-                          {item.result.screenshotUrls.length > 0 && (
-                            <div className="flex gap-1.5 flex-wrap">
-                              {item.result.screenshotUrls.slice(0, 8).map((img, ii) => (
-                                <a key={ii} href={img} target="_blank" rel="noreferrer">
-                                  <img src={img} alt={`frame ${ii + 1}`} className="h-12 w-20 object-cover rounded border border-gray-700/50 hover:border-cyan-500 transition-all" />
-                                </a>
-                              ))}
-                              {item.result.screenshotUrls.length > 8 && (
-                                <div className="h-12 w-12 rounded border border-gray-700/50 bg-black/40 flex items-center justify-center text-[10px] text-gray-400">
-                                  +{item.result.screenshotUrls.length - 8}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex flex-wrap gap-2 border-t border-gray-700/30 pt-3">
-                {/* Start buttons — show when NOT running */}
-                {!ytQueueStore.isRunning && !ytQueueStore.isPaused && (
-                  <>
-                    <button
-                      onClick={handleProcessSelected}
-                      disabled={ytQueueSelectedIds.size === 0}
-                      className="px-4 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg transition-all flex items-center gap-1.5"
-                    >
-                      🚀 ดึง {ytQueueSelectedIds.size} คลิปที่เลือก
-                    </button>
-                    <button
-                      onClick={handleProcessAll}
-                      disabled={ytQueueStore.items.every(q => q.status === 'completed')}
-                      className="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg transition-all flex items-center gap-1.5"
-                    >
-                      🚀 ดึงทั้งหมด {ytQueueStore.items.filter(q => q.status !== 'completed').length} คลิป
-                    </button>
-                    <button
-                      onClick={handleProcessAllAndSave}
-                      disabled={isBatchSaving || ytQueueStore.items.every(q => q.status === 'completed')}
-                      className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 shadow-lg shadow-emerald-500/20"
-                    >
-                      🎬 ดึง Script+รูป {ytQueueStore.items.filter(q => q.status !== 'completed').length} คลิป แล้วบันทึกเข้าคลัง
-                    </button>
-                  </>
-                )}
-
-                {/* Control buttons — show when running */}
-                {ytQueueStore.isRunning && (
-                  <>
-                    <button
-                      onClick={() => ytQueueStore.requestPause()}
-                      className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-lg transition-all flex items-center gap-1.5"
-                    >
-                      ⏸️ พักการทำงาน
-                    </button>
-                    <button
-                      onClick={() => ytQueueStore.requestStop()}
-                      className="px-4 py-2 bg-red-700 hover:bg-red-600 text-white text-xs font-bold rounded-lg transition-all flex items-center gap-1.5"
-                    >
-                      ⛔ หยุดทั้งหมด
-                    </button>
-                    <span className="text-xs text-gray-400 flex items-center animate-pulse">⏳ กำลังดึง...</span>
-                  </>
-                )}
-
-                {/* Resume button — show when paused */}
-                {ytQueueStore.isPaused && !ytQueueStore.isRunning && (
-                  <>
-                    <button
-                      onClick={() => ytQueueStore.resume()}
-                      className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 shadow-lg shadow-green-500/20"
-                    >
-                      ▶️ ทำต่อ ({ytQueueStore.items.filter(q => q.status === 'pending').length} คลิปที่เหลือ)
-                    </button>
-                    <button
-                      onClick={() => ytQueueStore.requestStop()}
-                      className="px-4 py-2 bg-red-700 hover:bg-red-600 text-white text-xs font-bold rounded-lg transition-all flex items-center gap-1.5"
-                    >
-                      ⛔ หยุดเลย
-                    </button>
-                    <span className="text-xs text-amber-400 flex items-center">⏸️ พักอยู่</span>
-                  </>
-                )}
-
-                {/* Save button — always show when there are completed items */}
-                {ytQueueStore.items.some(q => q.status === 'completed') && (
-                  <button
-                    onClick={handleBatchSaveToStock}
-                    disabled={isBatchSaving}
-                    className="ml-auto px-4 py-2 bg-cyan-700 hover:bg-cyan-600 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 shadow-lg shadow-cyan-500/20"
-                  >
-                    {isBatchSaving ? '⏳ กำลังบันทึก...' : `📦 บันทึก ${ytQueueStore.items.filter(q => q.status === 'completed').length} คลิปเข้าคลัง`}
-                  </button>
-                )}
-              </div>
-            </Card>
-          )}
-
-          {/* Also allow adding single URL to queue */}
-          {ytUrl.trim() && !ytQueueStore.items.some(q => q.url === ytUrl.trim()) && (
-            <div className="flex justify-end -mt-2">
-              <button
-                onClick={() => {
-                  const ids = ytQueueStore.addUrls([ytUrl.trim()]);
-                  setYtQueueSelectedIds(prev => new Set([...prev, ...ids]));
-                  setYtUrl('');
-                }}
-                className="text-[10px] px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg transition-all"
-              >
-                ➕ เพิ่มเข้าคิวแทน
-              </button>
-            </div>
-          )}
-
-          {ytResult && (
-            <>
-              {/* Video Info */}
-              <Card>
-                <div className="flex items-start gap-4">
-                  {ytResult.channelAvatar && (
-                    <img src={ytResult.channelAvatar} alt="thumbnail" className="w-32 h-20 object-cover rounded-lg flex-shrink-0" />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-bold text-gray-100 text-base leading-snug mb-1">{ytResult.videoTitle}</h3>
-                    <p className="text-sm text-gray-400">📺 {ytResult.channelName}</p>
-                    <p className={`text-xs ${ytResult.channelLogoUrl ? 'text-emerald-400' : 'text-amber-400'}`}>
-                      โลโก้ช่อง: {ytResult.channelLogoUrl ? 'ดึงได้แล้ว' : 'ยังไม่ได้จาก yt-dlp'}
-                    </p>
-                    {typeof ytResult.subscriberCount === 'number' && (
-                      <p className="text-xs text-gray-500">ผู้ติดตาม: {ytResult.subscriberCount.toLocaleString()}</p>
-                    )}
-                    <a href={ytUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline break-all mt-1 block">{ytUrl}</a>
-                  </div>
-                </div>
-              </Card>
-
-              {/* Transcript */}
-              <Card>
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-bold text-gray-200 flex items-center gap-2">📝 Script / คำบรรยาย
-                    <span className="text-[10px] font-normal text-gray-500">({ytResult.transcript.length.toLocaleString()} ตัวอักษร)</span>
-                  </h3>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => { navigator.clipboard.writeText(ytResult.transcript); }}
-                      className="text-xs px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-lg transition-all"
-                    >
-                      📋 คัดลอก
-                    </button>
-                    <button
-                      onClick={handleSaveYtToStock}
-                      disabled={isSavingYt}
-                      className="text-xs px-3 py-1.5 bg-cyan-700 hover:bg-cyan-600 disabled:opacity-50 text-white font-bold rounded-lg transition-all"
-                    >
-                      {isSavingYt ? '⏳...' : `📦 เก็บเข้าคลัง${ytSelectedImages.size > 0 ? ` + ${ytSelectedImages.size} รูป` : ''}`}
-                    </button>
-                  </div>
-                </div>
-                {ytResult.transcript ? (
-                  <div className="bg-black/30 rounded-lg border border-gray-700/50 p-3 max-h-[300px] overflow-y-auto custom-scrollbar">
-                    <pre className="text-xs text-gray-300 whitespace-pre-wrap font-sans leading-relaxed">{ytResult.transcript}</pre>
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500 italic">⚠️ ดึง Script ไม่ได้ — คลิปนี้อาจไม่มี subtitle หรือปิดการเข้าถึง</p>
-                )}
-              </Card>
-
-              {/* Screenshots */}
-              {ytResult.screenshotUrls.length > 0 && (
-                <Card>
-                  <div className="flex flex-wrap items-center gap-2 mb-3">
-                    <h3 className="font-bold text-gray-200 flex items-center gap-2">
-                      🖼️ รูปภาพจากคลิป
-                      <span className="text-[10px] font-normal text-gray-500">({ytResult.screenshotUrls.length} รูป)</span>
-                    </h3>
-                    <span className="text-[10px] text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 px-2 py-0.5 rounded-full">
-                      เลือก {ytSelectedImages.size}/{ytResult.screenshotUrls.length} รูป
-                    </span>
-                    <div className="flex gap-1.5 ml-auto">
-                      <button onClick={selectAllYtImages} className="text-[10px] px-2.5 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg transition-all">☑ เลือกทั้งหมด</button>
-                      <button onClick={deselectAllYtImages} className="text-[10px] px-2.5 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg transition-all">☐ ยกเลิก</button>
-                      <button
-                        onClick={handleYoutubeExtract}
-                        disabled={isYtLoading}
-                        className="text-[10px] px-2.5 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-gray-300 rounded-lg transition-all"
-                      >
-                        🔀 สุ่มรูปใหม่
-                      </button>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-                    {ytResult.screenshotUrls.map((imgUrl, i) => {
-                      const isSelected = ytSelectedImages.has(imgUrl);
-                      return (
-                        <div
-                          key={i}
-                          onClick={() => toggleYtImage(imgUrl)}
-                          className={`group relative aspect-video overflow-hidden rounded-lg border-2 cursor-pointer transition-all ${isSelected ? 'border-cyan-400 shadow-lg shadow-cyan-500/20' : 'border-gray-700/50 hover:border-gray-500'}`}
-                        >
-                          <img src={imgUrl} alt={`frame ${i + 1}`} className="w-full h-full object-cover" />
-                          <div className={`absolute inset-0 transition-all ${isSelected ? 'bg-cyan-500/10' : 'bg-transparent group-hover:bg-white/5'}`} />
-                          {/* Checkbox overlay */}
-                          <div className={`absolute top-1.5 left-1.5 w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${isSelected ? 'bg-cyan-500 border-cyan-400' : 'bg-black/50 border-gray-500'}`}>
-                            {isSelected && <span className="text-white text-[10px] font-black">✓</span>}
-                          </div>
-                          <span className="absolute bottom-1 right-1 text-[9px] bg-black/70 text-white px-1 py-0.5 rounded">#{i + 1}</span>
-                          <a
-                            href={imgUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            onClick={e => e.stopPropagation()}
-                            className="absolute top-1.5 right-1.5 text-[9px] bg-black/60 hover:bg-black/80 text-white px-1.5 py-0.5 rounded transition-all opacity-0 group-hover:opacity-100"
-                          >
-                            🔗
-                          </a>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </Card>
-              )}
-            </>
-          )}
+          <YoutubeExtractQueuePanel
+            ytUrl={ytUrl}
+            setYtUrl={setYtUrl}
+            isYtLoading={isYtLoading}
+            ytError={ytError}
+            frameCount={ytQueueStore.frameCount}
+            setFrameCount={n => ytQueueStore.setFrameCount(n)}
+            handleYoutubeExtract={handleYoutubeExtract}
+            items={ytQueueStore.items}
+            isRunning={ytQueueStore.isRunning}
+            isPaused={ytQueueStore.isPaused}
+            selectedIds={ytQueueSelectedIds}
+            expandedQueueId={expandedQueueId}
+            setExpandedQueueId={setExpandedQueueId}
+            isBatchSaving={isBatchSaving}
+            selectAllQueue={selectAllQueue}
+            deselectAllQueue={deselectAllQueue}
+            clearCompletedQueue={clearCompletedQueue}
+            toggleQueueSelect={toggleQueueSelect}
+            removeQueueItem={removeQueueItem}
+            handleProcessSelected={handleProcessSelected}
+            handleProcessAll={handleProcessAll}
+            handleProcessAllAndSave={handleProcessAllAndSave}
+            requestPause={() => ytQueueStore.requestPause()}
+            requestStop={() => ytQueueStore.requestStop()}
+            resume={() => ytQueueStore.resume()}
+            handleBatchSaveToStock={handleBatchSaveToStock}
+            addCurrentUrlToQueue={() => {
+              addUrlsToYoutubeQueue([ytUrl.trim()]);
+              setYtUrl('');
+            }}
+            ytResult={ytResult}
+            ytSelectedImages={ytSelectedImages}
+            isSavingYt={isSavingYt}
+            handleSaveYtToStock={handleSaveYtToStock}
+            selectAllYtImages={selectAllYtImages}
+            deselectAllYtImages={deselectAllYtImages}
+            toggleYtImage={toggleYtImage}
+          />
         </div>
       )}
 
@@ -1382,126 +1051,27 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
       {/* RSS Mode */}
       {activeMode === 'rss' && (
       <div className="space-y-4">
-        <Card>
-          <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-            <h3 className="text-lg font-bold flex items-center gap-2">
-              <span>📅</span> แหล่งข่าวที่ดูดแล้ววันนี้
-            </h3>
-            <span className="text-[10px] text-gray-500 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-full">{new Date().toLocaleDateString('th-TH')}</span>
-          </div>
-
-          {scrapedToday.length === 0 ? (
-            <div className="text-sm text-gray-500">
-              ยังไม่มีการดูดข่าวในวันนี้
-            </div>
-          ) : (
-            <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-1">
-              {scrapedToday.map((item, idx) => (
-                <a
-                  key={idx}
-                  href={item.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="min-w-[220px] max-w-[280px] rounded-lg border border-gray-200 bg-gray-50 p-3 transition-colors hover:border-blue-400 dark:border-gray-700 dark:bg-gray-800/50"
-                  title={item.url}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="truncate text-sm font-bold text-blue-600 dark:text-blue-400">{item.name}</span>
-                    <span className="shrink-0 text-[10px] text-gray-500">{item.time}</span>
-                  </div>
-                  <div className="mt-1 truncate text-[10px] text-gray-400">{item.url}</div>
-                </a>
-              ))}
-            </div>
-          )}
-        </Card>
-
-      <div className="space-y-4">
-        <Card>
-          <div className="mb-4">
-            <h2 className="text-xl font-bold flex items-center gap-2">
-              <span className="text-2xl">🗞️</span> ดูดข่าว RSS เข้าคลังบทความ
-            </h2>
-          </div>
-          
-          <div className="mb-4 bg-gray-50 dark:bg-gray-800/50 p-4 rounded-xl border border-gray-100 dark:border-gray-700">
-            <h3 className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-3">📚 แหล่งข่าวแนะนำ (จิ้มเพื่อดูด)</h3>
-            <div className="flex flex-wrap gap-2">
-              {SITE_LIBRARY.map((site, i) => {
-                const isSelected = selectedSites.has(site.url);
-                return (
-                  <button
-                    key={i}
-                    onClick={() => toggleSiteSelect(site.url)}
-                    className={`px-3 py-1.5 text-xs font-medium border rounded-lg shadow-sm transition-all flex items-center gap-1 ${
-                      isSelected 
-                        ? 'bg-blue-600 text-white border-blue-600' 
-                        : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:border-blue-500 hover:text-blue-600'
-                    }`}
-                    title={site.cat}
-                  >
-                    {isSelected && <span className="text-xs">✓</span>}
-                    {site.name}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div>
-            <div className="flex gap-2">
-              <input 
-                type="text"
-                value={url}
-                onChange={e => setUrl(e.target.value)}
-                placeholder="วางลิงก์หน้าเว็บอื่น หรือเลือกจากแหล่งข่าวด้านบน (เลือกหลายแหล่งได้)"
-                className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-              />
-              <button 
-                onClick={handleScrape}
-                disabled={isScraping}
-                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-bold rounded-lg shadow transition-all"
-              >
-                {isScraping ? 'กำลังดูด...' : '🔍 สแกนหาข่าว'}
-              </button>
-            </div>
-          </div>
-        </Card>
+        <RssSourceScannerPanel
+          sites={SITE_LIBRARY}
+          scrapedToday={scrapedToday}
+          selectedSites={selectedSites}
+          url={url}
+          setUrl={setUrl}
+          isScraping={isScraping}
+          toggleSiteSelect={toggleSiteSelect}
+          handleScrape={handleScrape}
+        />
 
         {articles.length > 0 && (
           <div className="space-y-3 mb-3 mt-8">
-            <div className="flex flex-wrap justify-between items-center px-1 gap-4">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-3">
-                  <h3 className="font-bold text-gray-700 dark:text-gray-300 text-lg">พบ {articles.length} ข่าว</h3>
-                  {sourceCounts.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {sourceCounts.map((sc, i) => (
-                        <span key={i} className="text-[11px] font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded-full whitespace-nowrap">
-                          {sc.name}: {sc.count}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <select 
-                  value={sortBy} 
-                  onChange={(e: any) => setSortBy(e.target.value)}
-                  className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-sm font-medium"
-                >
-                  <option value="default">จัดเรียง: ตามที่ดึงมา</option>
-                  <option value="newsScore">🔥 เรียงตาม คะแนนข่าว</option>
-                  <option value="evergreenScore">🌿 เรียงตาม คะแนน Evergreen</option>
-                </select>
-              </div>
-              <button 
-                onClick={handleTranslateTitles}
-                disabled={isTranslating}
-                className="px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 disabled:opacity-50 text-white text-sm font-bold rounded-lg shadow transition-all flex items-center gap-2"
-              >
-                {isTranslating ? 'กำลังแปล...' : '🇹🇭 แปลหัวข้อเป็นไทย & ให้คะแนน'}
-              </button>
-            </div>
+            <RssResultsHeader
+              total={articles.length}
+              sourceCounts={sourceCounts}
+              sortBy={sortBy}
+              setSortBy={setSortBy}
+              isTranslating={isTranslating}
+              handleTranslateTitles={handleTranslateTitles}
+            />
 
             {/* Multi-select controls */}
             <div className="flex flex-wrap items-center gap-2 px-1 py-2 bg-cyan-50 dark:bg-cyan-900/20 rounded-lg border border-cyan-200 dark:border-cyan-800">
@@ -1523,7 +1093,7 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
                       const saveTaskId = `news_save_${Date.now()}`;
                       globalTaskStore.addTask({ id: saveTaskId, title: `📦 เก็บข่าวเข้าคลัง ${selected.length} ข่าว`, category: 'news-save', progress: `กำลังดึงเนื้อหา 0/${selected.length}...`, status: 'running' });
                       newsLogTaskIdRef.current = saveTaskId;
-                      addLog(`📦 กำลังดึงเนื้อหาและเก็บ ${selected.length} ข่าวเข้าคลังบทความ...`);
+                      addLog(`📦 กำลังดึงเนื้อหาและเก็บ ${selected.length} ข่าวเข้าคลัง Content...`);
                       const stockItems: any[] = [];
                       for (let i = 0; i < selected.length; i++) {
                         if (stopBulkRef.current) {
@@ -1554,7 +1124,8 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
                             evergreenScore: art.evergreenScore || 0,
                             tags: art.tags || [],
                             domain: art.domain,
-                            createdAt: new Date().toISOString()
+                            createdAt: new Date().toISOString(),
+                            sourceType: 'rss'
                           });
                         } catch (e: any) {
                           addLog(`⚠️ ดึงเนื้อหา ${art.title.substring(0,30)} ไม่ได้: ${e.message}`);
@@ -1567,7 +1138,8 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
                             evergreenScore: art.evergreenScore || 0,
                             tags: art.tags || [],
                             domain: art.domain,
-                            createdAt: new Date().toISOString()
+                            createdAt: new Date().toISOString(),
+                            sourceType: 'rss'
                           });
                         }
                       }
@@ -1579,11 +1151,11 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
                           body: JSON.stringify({ action: 'add-batch', items: stockItems })
                         });
                         const data = await res.json();
-                        addLog(`✅ เก็บเข้าคลังบทความสำเร็จ! เพิ่ม ${data.added} ข่าว (ซ้ำ ${data.duplicates} ข่าว)`);
+                        addLog(`✅ เก็บเข้าคลัง Content สำเร็จ! เพิ่ม ${data.added} ข่าว (ซ้ำ ${data.duplicates} ข่าว)`);
                         globalTaskStore.updateTask(saveTaskId, { progress: `✅ เพิ่ม ${data.added} ข่าว (ซ้ำ ${data.duplicates})`, status: 'completed' });
                         if (newsLogTaskIdRef.current === saveTaskId) newsLogTaskIdRef.current = null;
                       } catch (e: any) {
-                        addLog(`❌ เก็บเข้าคลังบทความล้มเหลว: ${e.message}`);
+                        addLog(`❌ เก็บเข้าคลัง Content ล้มเหลว: ${e.message}`);
                         globalTaskStore.updateTask(saveTaskId, { progress: `❌ ${e.message}`, status: 'error' });
                         if (newsLogTaskIdRef.current === saveTaskId) newsLogTaskIdRef.current = null;
                       }
@@ -1641,7 +1213,8 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
                               tags: art.tags || [],
                               domain: art.domain,
                               createdAt: new Date().toISOString(),
-                              sentToAIPageAt
+                              sentToAIPageAt,
+                              sourceType: 'rss'
                             });
                           } catch (e: any) {
                             addLog(`⚠️ ดึงเนื้อหา ${art.title.substring(0,30)} ไม่ได้: ${e.message}`);
@@ -1655,7 +1228,7 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ action: 'add-batch', items: stockItems })
                           });
-                          addLog(`📦 บันทึกลงคลังบทความด้วยเรียบร้อย`);
+                          addLog(`📦 บันทึกลงคลัง Content ด้วยเรียบร้อย`);
                         } catch(e) {}
                         addLog(`✅ ดึงเนื้อหาเสร็จ ${results.length} ข่าว → กำลังส่งไปหน้า "สร้างรูปลงเพจ AI"...`);
                         globalTaskStore.updateTask(aiSendTaskId, { progress: `✅ ส่ง ${results.length} ข่าวไป AI Page เรียบร้อย`, status: 'completed' });
@@ -1675,76 +1248,13 @@ export const NewsScraperTab: React.FC<NewsScraperProps> = ({ onSendToStock, onSe
           </div>
         )}
 
-        {sortedArticles.length > 0 && (
-          <div className="space-y-3 max-h-[800px] overflow-y-auto pr-2 custom-scrollbar">
-            {sortedArticles.map((article, i) => (
-              <div key={article.id} className={`bg-white dark:bg-gray-800 p-4 rounded-xl border transition-all flex flex-col md:flex-row gap-4 items-start md:items-center justify-between ${selectedIds.has(article.id) ? 'border-cyan-500 dark:border-cyan-500 bg-cyan-50/50 dark:bg-cyan-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-blue-400'}`}>
-                <label className="cursor-pointer flex-shrink-0 mt-1">
-                  <input type="checkbox" checked={selectedIds.has(article.id)} onChange={() => toggleSelect(article.id)} className="w-5 h-5 text-cyan-500 bg-gray-700 border-gray-600 rounded cursor-pointer" />
-                </label>
-                <div className="flex-1">
-                  <div className="flex flex-wrap items-center gap-2 mb-1">
-                     <span className="text-xs text-gray-500 font-bold">{i + 1}. {article.domain}</span>
-                     {article.score !== undefined && (
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                           article.score >= 8 ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' :
-                           article.score >= 5 ? 'bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400' :
-                           'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
-                        }`}>
-                           🔥 ข่าว: {article.score}/10
-                        </span>
-                     )}
-                     {article.evergreenScore !== undefined && (
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                           article.evergreenScore >= 8 ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400' :
-                           article.evergreenScore >= 5 ? 'bg-teal-100 text-teal-600 dark:bg-teal-900/30 dark:text-teal-400' :
-                           'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
-                        }`}>
-                           🌿 Evergreen: {article.evergreenScore}/10
-                        </span>
-                     )}
-                     {article.tags && article.tags.length > 0 && article.tags.map((tag, ti) => (
-                        <span key={ti} className="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 font-medium">#{tag}</span>
-                     ))}
-                  </div>
-                  
-                  {article.thaiTitle ? (
-                    <>
-                      <h3 className="text-[16px] font-bold text-gray-800 dark:text-gray-100 mb-1 leading-snug">
-                        {article.thaiTitle}
-                      </h3>
-                      <p className="text-[12px] text-gray-500 mb-2 truncate max-w-xl">{article.title}</p>
-                    </>
-                  ) : (
-                    <h3 className="text-[15px] font-bold text-gray-800 dark:text-gray-100 mb-2 leading-snug">
-                      {article.title}
-                    </h3>
-                  )}
-                  
-                  <a href={article.url} target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline break-all">
-                    {article.url}
-                  </a>
-                </div>
-                
-                <button 
-                  onClick={() => handleProcessArticle(article)}
-                  disabled={processingId !== null}
-                  className={`min-w-[120px] px-4 py-2 rounded-lg font-bold text-sm shadow flex items-center justify-center transition-all ${
-                    processingId === article.id 
-                    ? 'bg-amber-500 text-white animate-pulse cursor-not-allowed'
-                    : processingId !== null
-                      ? 'bg-gray-100 text-gray-400 dark:bg-gray-800 border cursor-not-allowed'
-                      : 'bg-green-600 hover:bg-green-700 text-white'
-                  }`}
-                >
-                  {processingId === article.id ? 'กำลังปั่นข่าว ⚙️' : '📦 โยนเข้าคลังบทความ'}
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
+        <RssArticleList
+          articles={sortedArticles}
+          selectedIds={selectedIds}
+          processingId={processingId}
+          toggleSelect={toggleSelect}
+          handleProcessArticle={handleProcessArticle}
+        />
       </div>
       )}
 

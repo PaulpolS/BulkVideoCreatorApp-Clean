@@ -2026,6 +2026,55 @@ OUTPUT FORMAT:
     }
   };
 
+  const promptLabSections = [
+    {
+      id: 'clone-image-style',
+      icon: '🖼️',
+      title: 'Image Style Cloner',
+      desc: 'แกะสไตล์ภาพ เลเยอร์ ฟอนต์ และบันทึกเป็นแม่พิมพ์',
+      metric: `${gallery.length} สไตล์`,
+    },
+    {
+      id: 'short-clip-brain',
+      icon: '🎬',
+      title: 'Short Clip Brain',
+      desc: 'แกะสูตรเปิดคลิป มุมกล้อง ตัวละคร และโครง Storyboard',
+      metric: `${shortReferenceSets.length} ชุดอ้างอิง`,
+    },
+    {
+      id: 'caption-brain',
+      icon: '🧠',
+      title: 'Caption Brain',
+      desc: 'แกะน้ำเสียงเพจจากตัวอย่างแคปชั่น แล้วบันทึกเป็นสมอง',
+      metric: `${savedBrains.length} สมอง`,
+    },
+    {
+      id: 'copywriting-library',
+      icon: '📰',
+      title: 'Copywriting Library',
+      desc: 'รวมสูตรพาดหัวและสไตล์การเขียนที่แกะไว้',
+      metric: `${headlinePacks.length + writingStyles.length} ชุด`,
+    },
+    {
+      id: 'style-gallery',
+      icon: '📁',
+      title: 'Style Gallery',
+      desc: 'คลังแม่พิมพ์ภาพที่พร้อมหยิบไปสร้างงานต่อ',
+      metric: `${gallery.length} รูป`,
+    },
+    {
+      id: 'style-content-factory',
+      icon: '🎯',
+      title: 'Prompt Content Factory',
+      desc: 'นำสมอง + สไตล์ภาพ + เนื้อหา มาสร้าง prompt เป็นชุด',
+      metric: `${s4GeneratedPrompts.length} prompt`,
+    },
+  ];
+
+  const scrollToPromptLabSection = (id: string) => {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   // ─── UI ──────────────────────────────────────────────────────────
   return (
     <div className="space-y-6 animate-fade-in pb-20">
@@ -2044,10 +2093,49 @@ OUTPUT FORMAT:
         </div>
       </div>
 
+      <div className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl p-6 shadow-sm overflow-hidden relative">
+        <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-5 mb-5">
+          <div>
+            <div className="text-xs font-black uppercase tracking-[0.18em] text-indigo-400 mb-2">Prompt Lab</div>
+            <h1 className="text-3xl font-black mb-2">🧠 โคลนสมอง / Prompt Lab</h1>
+            <p className="text-sm opacity-70 max-w-3xl leading-relaxed">
+              รวมเครื่องมือแกะสไตล์ภาพ แกะโครงคลิป แกะน้ำเสียงเพจ และสร้าง prompt ต่อเป็นชุดในที่เดียว เพื่อให้รู้ชัดว่าแต่ละสมองใช้ทำอะไร
+            </p>
+          </div>
+          <div className="rounded-xl border px-4 py-3 text-xs leading-relaxed max-w-md" style={{ borderColor: 'var(--border-color)', backgroundColor: 'rgba(99,102,241,0.08)' }}>
+            <div className="font-bold text-indigo-300 mb-1">Workflow แนะนำ</div>
+            <div className="opacity-75">แกะต้นแบบ → บันทึกสมอง/สไตล์ → เลือกจากคลัง → สร้าง prompt/content → ส่งต่อไปผลิตงานจริง</div>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          {promptLabSections.map(section => (
+            <button
+              key={section.id}
+              onClick={() => scrollToPromptLabSection(section.id)}
+              className="text-left rounded-xl border p-4 hover:border-indigo-400 hover:bg-indigo-500/10 transition-all group"
+              style={{ borderColor: 'var(--border-color)', backgroundColor: 'rgba(255,255,255,0.02)' }}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3 min-w-0">
+                  <span className="text-2xl shrink-0">{section.icon}</span>
+                  <div className="min-w-0">
+                    <div className="font-black text-sm group-hover:text-indigo-300 transition-colors">{section.title}</div>
+                    <div className="text-xs opacity-65 leading-relaxed mt-1">{section.desc}</div>
+                  </div>
+                </div>
+                <span className="shrink-0 text-[10px] font-bold px-2 py-1 rounded-full border opacity-80" style={{ borderColor: 'var(--border-color)' }}>
+                  {section.metric}
+                </span>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* ── SECTION 1: โคลนนิ่งเพจ ── */}
-      <div className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl p-8 shadow-sm">
+      <div id="clone-image-style" className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl p-8 shadow-sm scroll-mt-6">
         <h2 className="text-2xl font-bold mb-2 flex items-center gap-2">
-          <span className="text-3xl">🖼️</span> ระบบโคลนรูปอัจฉริยะ (Inverse Image)
+          <span className="text-3xl">🖼️</span> Image Style Cloner / แกะสไตล์ภาพ
         </h2>
         <p className="text-sm opacity-70 mb-6">อัพโหลดรูปภาพต้นแบบ ระบบจะแกะแบบแปลน (สไตล์, เลเยอร์, ฟอนต์) และสร้าง Prompt</p>
 
@@ -2199,11 +2287,11 @@ OUTPUT FORMAT:
       </div>
 
       {/* ── SECTION 1.5: Short Clip Structure Clone ── */}
-      <div className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl p-8 shadow-sm">
+      <div id="short-clip-brain" className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl p-8 shadow-sm scroll-mt-6">
         <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4 mb-6">
           <div>
             <h2 className="text-2xl font-bold mb-2 flex items-center gap-2">
-              <span className="text-3xl">🎬</span> ลอกโครงสร้างคลิปสั้น
+              <span className="text-3xl">🎬</span> Short Clip Brain / แกะโครงสร้างคลิปสั้น
             </h2>
             <p className="text-sm opacity-70 max-w-4xl">
               อัปโหลดรูปหน้าปกรวมและคลิปตัวอย่างของช่องต้นแบบ ระบบจะแกะฉาก มุมกล้อง ตัวละคร แพทเทิร์นเปิดคลิป ความเสี่ยงซ้ำ และบันทึกเป็นสมองสำหรับสร้าง Prompt ใหม่ที่ไม่ลอกตรงๆ
@@ -2819,9 +2907,9 @@ OUTPUT FORMAT:
       </div>
 
       {/* ── SECTION 2: Brain Studio ── */}
-      <div className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl p-8 shadow-sm">
+      <div id="caption-brain" className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl p-8 shadow-sm scroll-mt-6">
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-2xl font-bold flex items-center gap-2"><span className="text-3xl">🧠</span> สร้างสมอง (Brain Studio)</h2>
+          <h2 className="text-2xl font-bold flex items-center gap-2"><span className="text-3xl">🧠</span> Caption Brain Studio / แกะสมองการเขียน</h2>
         </div>
         <p className="text-sm opacity-70 mb-6">วางตัวอย่างแคปชั่นจากเพจ แต่ละกล่องคือตัวอย่างแยกกัน 1 กล่อง = 1 ตัวอย่าง — AI จะแกะสไตล์และสร้าง System Prompt</p>
 
@@ -3028,9 +3116,9 @@ OUTPUT FORMAT:
       </div>
 
       {/* ── SECTION 3: Headline & Writing Style Studio ── */}
-      <div className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl p-8 shadow-sm">
+      <div id="copywriting-library" className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl p-8 shadow-sm scroll-mt-6">
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-2xl font-bold flex items-center gap-2"><span className="text-3xl">📰</span> สไตล์พาดหัว & การเขียน (Headline & Writing Style)</h2>
+          <h2 className="text-2xl font-bold flex items-center gap-2"><span className="text-3xl">📰</span> Copywriting Library / พาดหัว & สไตล์การเขียน</h2>
         </div>
         <p className="text-sm opacity-70 mb-6">วางตัวอย่างพาดหัวหรือบทความจากเพจต้นแบบ → AI แกะสูตร → บันทึกไว้ใช้ในหน้า "สร้างรูปลงเพจ AI" (ข้อมูลบันทึกลงไฟล์ Git-syncable)</p>
 
@@ -3261,8 +3349,8 @@ ${wsPasteText}
       </div>
 
       {/* ── SECTION 4: Style Gallery ── */}
-      <div className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl p-8 shadow-sm">
-        <h3 className="text-xl font-bold mb-6">📁 คลังสไตล์ส่วนตัว (Saved Styles)</h3>
+      <div id="style-gallery" className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl p-8 shadow-sm scroll-mt-6">
+        <h3 className="text-xl font-bold mb-6">📁 Style Gallery / คลังสไตล์ภาพ</h3>
         {gallery.length === 0 ? (
           <div className="text-center py-10 opacity-50 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl">ยังไม่มีสไตล์ที่บันทึกไว้ ลองโคลนรูปข้างบนดูสิ!</div>
         ) : (
@@ -3286,9 +3374,9 @@ ${wsPasteText}
       </div>
 
       {/* ── SECTION 5: สร้างคอนเทนต์จากสไตล์ ── */}
-      <div ref={section4Ref} className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl p-8 shadow-sm">
+      <div id="style-content-factory" ref={section4Ref} className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl p-8 shadow-sm scroll-mt-6">
         <h2 className="text-2xl font-bold mb-2 flex items-center gap-2">
-          <span className="text-3xl">🎯</span> สร้างคอนเทนต์จากสไตล์ (Content Factory)
+          <span className="text-3xl">🎯</span> Prompt Content Factory / สร้าง Prompt จากสไตล์
         </h2>
         <p className="text-sm opacity-70 mb-6">เลือกลายเส้นจากคลังรูป + เลือกประเภทคอนเทนต์ + กรอกเนื้อหา → AI สร้าง Prompt พร้อมใช้งานทีเดียวหลายรูป</p>
 

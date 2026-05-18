@@ -251,15 +251,20 @@ export function ApiKeyQuickBar() {
     }
   };
 
+  const openAdvancedSettings = () => {
+    setIsOpen(false);
+    window.dispatchEvent(new CustomEvent('open-api-advanced-settings'));
+  };
+
   return (
     <div className="api-key-quick">
       <button
         type="button"
         className={`api-key-quick-trigger ${hasOpenRouterKey ? 'ready' : 'missing'}`}
         onClick={() => setIsOpen(prev => !prev)}
-        title="แก้ API key แบบเร็ว ใช้ได้ทุกหน้า"
+        title="API พร้อมใช้: แก้คีย์หลักแบบเร็ว ใช้ได้ทุกหน้า"
       >
-        <span>🔑 API</span>
+        <span>🔑 API พร้อมใช้</span>
         <small>{hasOpenRouterKey ? 'พร้อมใช้' : 'ใส่คีย์'}</small>
       </button>
 
@@ -267,7 +272,7 @@ export function ApiKeyQuickBar() {
         <div className="api-key-quick-panel">
           <div className="api-key-quick-head">
             <div>
-              <strong>API Key กลาง</strong>
+              <strong>API พร้อมใช้</strong>
               <p>แก้ตรงนี้แล้วทุกหน้าจะใช้คีย์ชุดเดียวกัน</p>
             </div>
             <button type="button" onClick={() => setIsOpen(false)} aria-label="ปิด">×</button>
@@ -309,6 +314,9 @@ export function ApiKeyQuickBar() {
                 {isTesting ? 'กำลังเช็ก...' : 'เช็กเครดิต'}
               </button>
             )}
+            <button type="button" className="api-key-quick-secondary" onClick={openAdvancedSettings}>
+              โปรไฟล์ขั้นสูง
+            </button>
             <button type="button" className="api-key-quick-save" onClick={saveKey} disabled={isSaving}>
               {isSaving ? 'กำลังบันทึก...' : 'บันทึกคีย์'}
             </button>

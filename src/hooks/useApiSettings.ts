@@ -107,6 +107,7 @@ function _syncServerProfilesToLocalStorage(profiles: ApiProfile[]): void {
   if (active.dropboxKey)    localStorage.setItem('dropbox_api_key', active.dropboxKey);
   if (active.kieKey)        localStorage.setItem('kie_api_key', active.kieKey);
   if (active.googleKey)     localStorage.setItem('google_api_key', active.googleKey);
+  if (active.apifyKey)      localStorage.setItem('apify_api_key', active.apifyKey);
   if (active.giphyKey)      localStorage.setItem('giphy_api_key', active.giphyKey);
 
   _refreshCacheFromStorage();

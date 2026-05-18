@@ -2399,6 +2399,142 @@ input[type=number] {
   margin-bottom: 32px;
 }
 
+.dash-workflow-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+  margin-bottom: 32px;
+}
+
+.dash-workflow-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.dash-workflow-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.dash-workflow-step {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.dash-workflow-icon {
+  font-size: 1.15rem;
+}
+
+.dash-workflow-head h3 {
+  font-size: 0.9rem;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.dash-workflow-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dash-workflow-chip {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid color-mix(in srgb, var(--tool-color) 28%, var(--border-color));
+  background: color-mix(in srgb, var(--tool-color) 9%, transparent);
+  color: var(--text-main);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+}
+
+.dash-workflow-chip:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--tool-color) 55%, var(--border-color));
+  background: color-mix(in srgb, var(--tool-color) 16%, transparent);
+}
+
+.dash-module-map {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+  margin-bottom: 32px;
+}
+
+.dash-module-card {
+  text-align: left;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--status-color);
+  border-radius: 14px;
+  padding: 15px;
+  color: var(--text-main);
+  cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+}
+
+.dash-module-card:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--status-color) 36%, var(--border-color));
+  background: color-mix(in srgb, var(--status-color) 8%, var(--bg-card));
+}
+
+.dash-module-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 7px;
+}
+
+.dash-module-area {
+  font-size: 0.86rem;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.dash-module-status {
+  flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--status-color) 50%, var(--border-color));
+  color: var(--status-color);
+  background: color-mix(in srgb, var(--status-color) 10%, transparent);
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 0.64rem;
+  font-weight: 800;
+}
+
+.dash-module-file {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.68rem;
+  opacity: 0.48;
+  margin-bottom: 9px;
+}
+
+.dash-module-card p {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.55;
+  opacity: 0.68;
+}
+
 .dash-tool-card {
   background: var(--bg-card);
   border: 1px solid var(--border-color);

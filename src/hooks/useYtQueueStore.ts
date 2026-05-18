@@ -19,6 +19,35 @@ export interface YtQueueItem {
 
 const STORAGE_KEY = 'yt_queue_state';
 
+function normalizeQueueItem(item: any, index = 0): YtQueueItem {
+  const rawStatus = item?.status;
+  const status: YtQueueItem['status'] =
+    rawStatus === 'completed' || rawStatus === 'error' || rawStatus === 'pending'
+      ? rawStatus
+      : 'pending';
+  const result = item?.result && typeof item.result === 'object'
+    ? {
+        videoTitle: String(item.result.videoTitle || ''),
+        channelName: String(item.result.channelName || ''),
+        channelAvatar: String(item.result.channelAvatar || ''),
+        channelLogoUrl: String(item.result.channelLogoUrl || ''),
+        subscriberCount: typeof item.result.subscriberCount === 'number' ? item.result.subscriberCount : undefined,
+        transcript: String(item.result.transcript || ''),
+        screenshotUrls: Array.isArray(item.result.screenshotUrls)
+          ? item.result.screenshotUrls.map((url: any) => String(url || '')).filter(Boolean)
+          : [],
+      }
+    : undefined;
+
+  return {
+    id: String(item?.id || `ytq_restored_${Date.now()}_${index}`),
+    url: String(item?.url || ''),
+    status: rawStatus === 'running' ? 'pending' : status,
+    error: item?.error ? String(item.error) : undefined,
+    result,
+  };
+}
+
 class YtQueueStore {
   items: YtQueueItem[] = [];
   isRunning = false;
@@ -34,10 +63,9 @@ class YtQueueStore {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        this.items = (parsed.items || []).map((item: YtQueueItem) => ({
-          ...item,
-          status: item.status === 'running' ? 'pending' : item.status,
-        }));
+        this.items = Array.isArray(parsed.items)
+          ? parsed.items.map((item: any, index: number) => normalizeQueueItem(item, index)).filter((item: YtQueueItem) => item.url)
+          : [];
         this.frameCount = parsed.frameCount || 10;
       }
     } catch (e) {}
@@ -238,7 +266,7 @@ class YtQueueStore {
     if (completedItems.length === 0) return;
 
     if (this.taskId) {
-      globalTaskStore.updateTask(this.taskId, { progress: `📦 กำลังบันทึก ${completedItems.length} คลิปเข้าคลังบทความ...` });
+      globalTaskStore.updateTask(this.taskId, { progress: `📦 กำลังบันทึก ${completedItems.length} คลิปเข้าคลัง Content...` });
     }
 
     try {
@@ -266,7 +294,7 @@ class YtQueueStore {
       });
       const data = await res.json();
       if (data.success) {
-        const msg = `✅ บันทึกเข้าคลังบทความแล้ว! เพิ่ม ${data.added ?? 0} คลิป (อัปเดต ${data.updated ?? 0})`;
+        const msg = `✅ บันทึกเข้าคลัง Content แล้ว! เพิ่ม ${data.added ?? 0} คลิป (อัปเดต ${data.updated ?? 0})`;
         if (this.taskId) globalTaskStore.updateTask(this.taskId, { progress: msg });
         return { success: true, added: data.added, updated: data.updated };
       } else {

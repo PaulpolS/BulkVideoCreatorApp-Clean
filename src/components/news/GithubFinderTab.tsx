@@ -904,16 +904,13 @@ ${repo.html_url}"
   const plannedRepoTotal = selectedTopicCount * reposPerTopic;
 
   const [sendLog, setSendLog] = useState('');
+  const [isSavingToStock, setIsSavingToStock] = useState(false);
 
-  const handleSendSelectedToAIPage = async () => {
-    if (!onSendToAIPage) return;
-    const selected = repos.filter(r => selectedIds.has(r.id));
-    if (!selected.length) return alert('กรุณาเลือก repo ก่อน');
+  const buildGitHubContentItems = async (selected: GithubRepo[]) => {
     const topicLabels = selectedKeywords.filter(k => k.query).map(k => k.label);
     const topicLabel = topicLabels[0] || 'GitHub';
-
-    setSendLog('⏳ กำลังดึง README ของ repo ที่เลือก...');
     const items = [];
+
     for (let i = 0; i < selected.length; i++) {
       const r = selected[i];
       setSendLog(`⏳ [${i + 1}/${selected.length}] ดึง README: ${r.full_name}`);
@@ -924,6 +921,10 @@ ${repo.html_url}"
         readmeContent = result.content;
         gifImages = result.images.filter(Boolean);
       } catch {}
+
+      const starScore = Math.min(10, Math.max(1, Math.round(Math.log10(Math.max(10, r.stargazers_count)) * 3)));
+      const todayScore = Math.min(10, Math.max(starScore, Math.round(Math.log10(Math.max(10, (r.stars_today || 0) * 10)) * 3)));
+
       items.push({
         rawArticle: `[GitHub - ${r.full_name}]
 ${r.description || ''}
@@ -936,12 +937,55 @@ ${readmeContent ? `📖 README (บางส่วน):
 ${readmeContent}` : ''}`,
         sourceUrl: r.html_url,
         title: r.full_name,
-        tags: Array.from(new Set(['github', ...topicLabels, topicLabel, ...(r.tags || [])])),
+        tags: Array.from(new Set(['github', ...topicLabels, topicLabel, ...(r.tags || []), ...(r.language ? [r.language] : [])])),
         images: gifImages,
         sourceType: 'github',
         domain: 'github.com',
+        newsScore: todayScore,
+        evergreenScore: starScore,
+        githubStars: r.stargazers_count,
+        githubStarsToday: r.stars_today || 0,
+        githubForks: r.forks_count,
+        githubLanguage: r.language || '',
+        githubTopics: r.topics,
+        createdAt: new Date().toISOString(),
       });
     }
+
+    return items;
+  };
+
+  const handleSaveSelectedToContentStock = async () => {
+    const selected = repos.filter(r => selectedIds.has(r.id));
+    if (!selected.length) return alert('กรุณาเลือก repo ก่อน');
+
+    setIsSavingToStock(true);
+    setSendLog('⏳ กำลังเก็บ repo เข้าคลัง Content...');
+    try {
+      const items = await buildGitHubContentItems(selected);
+      const res = await fetch('/api/article-stock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add-batch', items }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'บันทึกไม่สำเร็จ');
+      setSendLog(`✅ เก็บเข้าคลัง Content แล้ว: เพิ่ม ${data.added ?? 0}, อัปเดต ${data.updated ?? 0}, ซ้ำ ${data.duplicates ?? 0}`);
+      setTimeout(() => setSendLog(''), 4500);
+    } catch (err: any) {
+      setSendLog(`❌ เก็บเข้าคลังไม่สำเร็จ: ${err.message || String(err)}`);
+    } finally {
+      setIsSavingToStock(false);
+    }
+  };
+
+  const handleSendSelectedToAIPage = async () => {
+    if (!onSendToAIPage) return;
+    const selected = repos.filter(r => selectedIds.has(r.id));
+    if (!selected.length) return alert('กรุณาเลือก repo ก่อน');
+
+    setSendLog('⏳ กำลังดึง README ของ repo ที่เลือก...');
+    const items = await buildGitHubContentItems(selected);
     setSendLog('');
     onSendToAIPage(items);
   };
@@ -1381,6 +1425,14 @@ ${readmeContent}` : ''}`,
                   className="text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded font-medium transition-all flex items-center gap-1"
                 >
                   ⬇ โหลด CSV (repos)
+                </button>
+                <button
+                  onClick={handleSaveSelectedToContentStock}
+                  disabled={isSavingToStock}
+                  className="text-xs px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded font-medium transition-all flex items-center gap-1"
+                  title="บันทึก repo ที่เลือกเข้า คลัง Content กลาง ก่อนส่งไปสร้างโพสต์"
+                >
+                  {isSavingToStock ? '⏳ กำลังเก็บ...' : '📦 เก็บเข้าคลัง Content'}
                 </button>
                 <button
                   onClick={isGenerating ? () => { stopRef.current = true; } : handleGeneratePosts}

@@ -438,7 +438,7 @@ export function YoutubeChannelFinder() {
       category: 'article-stock',
       progress: `รอคิวบันทึก ${videos.length} คลิป`,
     }, async (task) => {
-      task.log(`เตรียมส่ง ${videos.length} คลิปเข้าคลังบทความ`);
+      task.log(`เตรียมส่ง ${videos.length} คลิปเข้าคลัง Content`);
       const items = videos.map(v => ({
         title: v.title,
         rawArticle: [v.title, v.description].filter(Boolean).join('\n\n'),
@@ -646,7 +646,7 @@ export function YoutubeChannelFinder() {
                   className="ml-auto rounded px-3 py-1.5 text-[10px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
                   style={{ backgroundColor: '#0891b2' }}
                 >
-                  📦 ส่งเข้าคลังบทความ
+                  📦 ส่งเข้าคลัง Content
                 </button>
               </div>
               <div className="max-h-96 overflow-y-auto">
@@ -741,7 +741,7 @@ export function YoutubeChannelFinder() {
                           disabled={(selectedVideoIds[channel.id]?.size || 0) === 0}
                           className="px-3 py-1.5 rounded-lg text-xs font-bold text-white disabled:opacity-40 disabled:cursor-not-allowed"
                           style={{ backgroundColor: '#0891b2' }}
-                          title="บันทึกคลิปที่เลือกเข้าคลังบทความ โซน YouTube"
+                          title="บันทึกคลิปที่เลือกเข้าคลัง Content โซน YouTube"
                         >
                           📦 เก็บคลิป ({selectedVideoIds[channel.id]?.size || 0})
                         </button>
@@ -770,7 +770,7 @@ export function YoutubeChannelFinder() {
                 {expandedId === channel.id && channel.videos && channel.videos.length > 0 && (
                   <div className="border-t" style={{ borderColor: 'var(--border-color)' }}>
                     <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b" style={{ borderColor: 'var(--border-color)', backgroundColor: 'var(--bg-card)' }}>
-                      <span className="text-xs font-bold" style={{ color: 'var(--text-main)' }}>เลือกคลิปเก็บเข้าคลังบทความ</span>
+                      <span className="text-xs font-bold" style={{ color: 'var(--text-main)' }}>เลือกคลิปเก็บเข้าคลัง Content</span>
                       <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ backgroundColor: 'rgba(8,145,178,0.15)', color: '#22d3ee' }}>
                         เลือกแล้ว {selectedVideoIds[channel.id]?.size || 0}/{channel.videos.length}
                       </span>
@@ -786,7 +786,7 @@ export function YoutubeChannelFinder() {
                         className="ml-auto text-[10px] px-3 py-1.5 rounded font-bold text-white disabled:opacity-40 disabled:cursor-not-allowed"
                         style={{ backgroundColor: '#0891b2' }}
                       >
-                        📦 ส่งเข้าคลังบทความ
+                        📦 ส่งเข้าคลัง Content
                       </button>
                     </div>
                     <div className="max-h-96 overflow-y-auto">

@@ -4262,14 +4262,14 @@ const fileSaverPlugin = (): Plugin => ({
       req.on('data', chunk => { body += chunk.toString(); });
       req.on('end', async () => {
         try {
-          const { keyword, limit = 30, days = 30 } = JSON.parse(body);
+          const { keyword, limit = 12, days = 30 } = JSON.parse(body);
           const q = String(keyword || '').trim();
-          const resultLimit = Math.max(1, Math.min(100, Number(limit) || 30));
+          const resultLimit = Math.max(1, Math.min(50, Number(limit) || 12));
           const dayWindow = Math.max(1, Math.min(365, Number(days) || 30));
           if (!q) throw new Error('Missing keyword');
 
           const { execFileSync } = require('child_process');
-          const searchLimit = Math.max(resultLimit * 2, Math.min(60, resultLimit * 5));
+          const searchLimit = Math.min(35, Math.max(resultLimit + 4, Math.ceil(resultLimit * 1.4)));
           const cutoff = Date.now() - dayWindow * 24 * 60 * 60 * 1000;
           const cutoffDate = new Date(cutoff).toISOString().slice(0, 10).replace(/-/g, '');
           const seen = new Set<string>();
@@ -4369,7 +4369,7 @@ const fileSaverPlugin = (): Plugin => ({
 
           if (rows.length === 0) {
             try {
-              parsePrintedRows(runSearch(`ytsearchdate${Math.max(resultLimit, 30)}:${q}`, false));
+              parsePrintedRows(runSearch(`ytsearchdate${Math.max(resultLimit, 15)}:${q}`, false));
             } catch (e: any) {
               console.warn('[YT keyword direct] unfiltered fallback failed:', e?.message || e);
             }

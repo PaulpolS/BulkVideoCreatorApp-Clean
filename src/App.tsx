@@ -25,6 +25,7 @@ import { SystemCleanerTab } from './components/cleaner/SystemCleanerTab';
 import { SecurityScannerTab } from './components/scanner/SecurityScannerTab';
 import { VideoPromptGeneratorTab } from './components/prompt/VideoPromptGeneratorTab';
 import AutoVideoEditorTab from './components/video/AutoVideoEditorTab';
+import { VideoWorkflowGuide } from './components/video/VideoWorkflowGuide';
 import { OnlineCourseTab } from './components/course/OnlineCourseTab';
 import { AIPagePostGeneratorTab } from './components/prompt/AIPagePostGeneratorTab';
 import { CanvasEditorTab } from './components/canvas/CanvasEditorTab';
@@ -136,30 +137,30 @@ function App() {
 
   const TAB_TITLES: Record<TabId, string> = {
     home: '📋 Dashboard',
-    singleclip: '✂️ คัตชนคลิป',
-    bulk: '📹 Bulk Video Creator',
-    financial: '🎙️ สตูดิโอเล่าเรื่อง',
-    stockclip: '🎞️ ทำคลิปStock',
-    news: '🔍 ค้นหาContent น่าสนใจ',
-    assets: '📂 คลังแสง',
+    singleclip: '✂️ ตัด/สุ่มต่อคลิป',
+    bulk: '📹 Bulk Video Creator เก่า (Legacy)',
+    financial: '🎙️ Documentary Studio',
+    stockclip: '🎞️ คลิป Stock จากเสียง',
+    news: '🔍 หา Content: RSS / YouTube / GitHub',
+    assets: '📂 คลัง Assets',
     avatar: '👨‍🎨 อวาตาร์ PNGTuber',
-    clone: '🖼️ โคลนนิ่งเพจ',
+    clone: '🧠 โคลนสมอง / สไตล์เพจ',
     automator: '🚀 รันบอท Flow',
-    lazada: '🛒 Lazada Affiliate',
+    lazada: '🛒 Lazada Affiliate Content',
     horoscope: '🔮 ดวงรายวัน',
     tracking: '📊 ติดตามงาน',
-    radar: '🕵️‍♂️ เรดาร์คู่แข่ง',
+    radar: '🕵️‍♂️ หา Content: Radar คู่แข่ง',
     cleaner: '🧹 ล้างขยะประหยัดพื้นที่',
     scanner: '🛡️ แสกนไวรัสบนเครื่อง',
-    prompt: '🔥 SORA-2 Prompt Generator',
+    prompt: '🔥 Video Prompt Lab',
     canvas: '🎨 Canvas Editor',
     autoeditor: '🎬 AI Auto-Video Editor',
     course: '🎓 สร้างคอร์สออนไลน์',
     aipage: '🤖 สร้างContentลงเพจ',
-    articlestock: '📦 คลังบทความ',
+    articlestock: '📦 คลัง Content',
     pagestock: '📮 ทำStockลงเพจ',
     topgainers: '📈 Top Gainers Factory',
-    fbtoken: '🔑 เฟสบุ๊ค Token Manager',
+    fbtoken: '🔵 Facebook Token Manager',
     storyarchitect: '📚 AI Storyboard Architect',
   };
 
@@ -179,7 +180,7 @@ function App() {
           <h2 className="app-topbar-title">{TAB_TITLES[activeTab]}</h2>
           <div className="app-topbar-actions">
             <ApiKeyQuickBar />
-            <GlobalSettings />
+            <GlobalSettings hideTrigger />
             <ThemeSwitcher />
           </div>
         </header>
@@ -193,6 +194,7 @@ function App() {
           )}
           {visitedTabs.has('singleclip') && (
             <div className={activeTab !== 'singleclip' ? 'hidden' : ''}>
+              <VideoWorkflowGuide currentTab="singleclip" onNavigate={setActiveTab} />
               <SingleClipEditorTab />
             </div>
           )}
@@ -208,6 +210,9 @@ function App() {
           )}
           {visitedTabs.has('bulk') && (
             <div className={activeTab !== 'bulk' ? 'hidden' : 'grid grid-cols-1 lg:grid-cols-4 gap-6'}>
+              <div className="lg:col-span-4">
+                <VideoWorkflowGuide currentTab="bulk" onNavigate={setActiveTab} />
+              </div>
               <div className="lg:col-span-1 space-y-6">
                 <AIContentGenerator onContentGenerated={handleContentGenerated} />
                 <ContentStock
@@ -251,11 +256,13 @@ function App() {
           )}
           {visitedTabs.has('financial') && (
             <div className={activeTab !== 'financial' ? 'hidden' : ''}>
+              <VideoWorkflowGuide currentTab="financial" onNavigate={setActiveTab} />
               <FinancialDocumentaryTab />
             </div>
           )}
           {visitedTabs.has('stockclip') && (
             <div className={activeTab !== 'stockclip' ? 'hidden' : ''}>
+              <VideoWorkflowGuide currentTab="stockclip" onNavigate={setActiveTab} />
               <StockClipTab />
             </div>
           )}
@@ -306,6 +313,7 @@ function App() {
           )}
           {visitedTabs.has('autoeditor') && (
             <div className={activeTab !== 'autoeditor' ? 'hidden' : ''}>
+              <VideoWorkflowGuide currentTab="autoeditor" onNavigate={setActiveTab} />
               <AutoVideoEditorTab />
             </div>
           )}

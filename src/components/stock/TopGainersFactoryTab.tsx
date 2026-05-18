@@ -159,6 +159,7 @@ export function TopGainersFactoryTab() {
   });
   const [isRunning, setIsRunning] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isSavingToStock, setIsSavingToStock] = useState(false);
   const [isDownloadingMemes, setIsDownloadingMemes] = useState(false);
   const [isCheckingMemes, setIsCheckingMemes] = useState(false);
   const [memeLibraryDir, setMemeLibraryDir] = useState('');
@@ -414,6 +415,53 @@ export function TopGainersFactoryTab() {
     }
   };
 
+  const saveResultsToContentStock = async () => {
+    if (!results?.rows?.length) return;
+    setIsSavingToStock(true);
+    setError('');
+    try {
+      const modeLabel = MODE_OPTIONS.find(opt => opt.value === mode)?.label || mode;
+      const items = results.rows.map(row => ({
+        title: `${row.symbol} - ${modeLabel}`,
+        rawArticle: [
+          `Stock symbol: ${row.symbol}`,
+          `Mode: ${modeLabel}`,
+          `Date: ${row.date || results.date || new Date().toISOString().slice(0, 10)}`,
+          `Config: ${row.configRef || results.configP2 || p2}`,
+          '',
+          row.caption || '',
+        ].join('\n'),
+        sourceUrl: `https://finance.yahoo.com/quote/${encodeURIComponent(row.symbol)}?content_date=${encodeURIComponent(row.date || results.date || '')}`,
+        newsScore: mode === 'gainers' || mode === 'losers' ? 9 : 7,
+        evergreenScore: mode === 'low_pe' ? 8 : 6,
+        tags: Array.from(new Set(['topgainers', 'หุ้น', 'market', mode, row.symbol, results.configP2 || p2].filter(Boolean))),
+        domain: 'finance.yahoo.com',
+        createdAt: new Date().toISOString(),
+        images: [row.previewUrl, row.imageUrl].filter(Boolean),
+        sourceType: 'topgainers',
+        thumbnail: row.previewUrl || row.imageUrl || '',
+        symbol: row.symbol,
+        stockMode: mode,
+        configRef: row.configRef,
+        localImagePath: row.localImagePath,
+      }));
+
+      const res = await fetch('/api/article-stock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add-batch', items }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'บันทึกเข้าคลัง Content ไม่สำเร็จ');
+      appendLog(`✅ เก็บ Top Gainers เข้าคลัง Content แล้ว: เพิ่ม ${data.added ?? 0}, อัปเดต ${data.updated ?? 0}, ซ้ำ ${data.duplicates ?? 0}`);
+    } catch (e: any) {
+      setError(e.message || 'บันทึกเข้าคลัง Content ไม่สำเร็จ');
+      appendLog(e.message || 'บันทึกเข้าคลัง Content ไม่สำเร็จ');
+    } finally {
+      setIsSavingToStock(false);
+    }
+  };
+
   const runFactory = async () => {
     setIsRunning(true);
     setError('');
@@ -552,6 +600,15 @@ export function TopGainersFactoryTab() {
             >
               {isExporting ? <ArrowPathIcon className="w-4 h-4 animate-spin" /> : <ArrowDownTrayIcon className="w-4 h-4" />}
               Export ลงเครื่อง
+            </button>
+            <button
+              onClick={saveResultsToContentStock}
+              disabled={!hasResults || isSavingToStock || isRunning}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold disabled:opacity-40"
+              title="เก็บผลลัพธ์หุ้นชุดนี้เข้า คลัง Content กลาง"
+            >
+              {isSavingToStock ? <ArrowPathIcon className="w-4 h-4 animate-spin" /> : <DocumentTextIcon className="w-4 h-4" />}
+              เก็บเข้าคลัง Content
             </button>
           </div>
         </div>

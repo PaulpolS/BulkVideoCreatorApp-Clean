@@ -27,6 +27,21 @@ interface StockArticle {
   ytExtracted?: boolean;
 }
 
+type SourceSummary = {
+  key: string;
+  icon: string;
+  label: string;
+  className: string;
+};
+
+type StatusSummary = {
+  key: string;
+  icon: string;
+  label: string;
+  desc: string;
+  className: string;
+};
+
 interface ArticleStockTabProps {
   onSendToAIPage?: (items: {
     rawArticle: string;
@@ -66,12 +81,93 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
   const [completedResultTotal, setCompletedResultTotal] = useState(0);
   const [showCompletedOnly, setShowCompletedOnly] = useState(false);
   const [randomPickCount, setRandomPickCount] = useState(20);
+  const [sourceFilter, setSourceFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
 
   const articleKey = (raw: string) => raw?.trim().replace(/\s+/g, ' ').slice(0, 250) ?? '';
   const getCachedEntry = (article: StockArticle) => {
     const key = articleKey(article.rawArticle);
     const entry = articleCache[key];
     return entry?.generatedArticle ? entry : null;
+  };
+
+  const getArticleSource = (article: StockArticle): SourceSummary => {
+    const type = String(article.sourceType || '').toLowerCase();
+    const tags = (article.tags || []).map(tag => String(tag).toLowerCase());
+    const domain = String(article.domain || article.sourceUrl || '').toLowerCase();
+
+    if (type === 'youtube' || tags.includes('youtube') || domain.includes('youtube.com') || domain.includes('youtu.be')) {
+      return { key: 'youtube', icon: '▶️', label: 'YouTube', className: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' };
+    }
+    if (type === 'github' || tags.includes('github') || domain.includes('github.com')) {
+      return { key: 'github', icon: '🐙', label: 'GitHub', className: 'bg-violet-500/20 text-violet-300 border-violet-500/30' };
+    }
+    if (type === 'facebook' || tags.includes('facebook') || domain.includes('facebook.com')) {
+      return { key: 'facebook', icon: '📘', label: 'Facebook', className: 'bg-blue-500/20 text-blue-300 border-blue-500/30' };
+    }
+    if (type === 'lazada' || tags.includes('lazada') || domain.includes('lazada')) {
+      return { key: 'lazada', icon: '🛒', label: 'Lazada', className: 'bg-orange-500/20 text-orange-300 border-orange-500/30' };
+    }
+    if (type === 'topgainers' || type === 'stock' || tags.includes('topgainers') || tags.includes('หุ้น')) {
+      return { key: 'market', icon: '📈', label: 'หุ้น/Market', className: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' };
+    }
+    if (type === 'rss' || type === 'news' || tags.includes('rss')) {
+      return { key: 'rss', icon: '🗞️', label: 'RSS/News', className: 'bg-red-500/20 text-red-300 border-red-500/30' };
+    }
+    return { key: type || 'manual', icon: '📄', label: type ? type : 'Manual', className: 'bg-gray-500/20 text-gray-300 border-gray-500/30' };
+  };
+
+  const getArticleStatus = (article: StockArticle): StatusSummary => {
+    const cached = getCachedEntry(article);
+    const hasGeneratedContent = !!cached || !!article.contentReadyAt;
+    const hasExtractedMaterial =
+      !!article.ytExtracted ||
+      (Array.isArray(article.images) && article.images.length > 0) ||
+      String(article.rawArticle || '').trim().length > 500;
+
+    if (completedSourceUrls.has(article.sourceUrl)) {
+      return {
+        key: 'completed',
+        icon: '✅',
+        label: 'สร้างเสร็จแล้ว',
+        desc: 'มีผลลัพธ์ใน AI Page แล้ว',
+        className: 'bg-violet-500/20 text-violet-300 border-violet-500/30',
+      };
+    }
+    if (hasGeneratedContent) {
+      return {
+        key: 'ready',
+        icon: '📝',
+        label: 'บทความพร้อม',
+        desc: 'มีบทความ/แคปชั่นที่สร้างไว้แล้ว',
+        className: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+      };
+    }
+    if (article.sentToAIPageAt) {
+      return {
+        key: 'sent',
+        icon: '🚀',
+        label: 'ส่งไปสร้างแล้ว',
+        desc: 'ถูกส่งเข้า AI Page แล้ว รอผลลัพธ์',
+        className: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
+      };
+    }
+    if (hasExtractedMaterial) {
+      return {
+        key: 'enriched',
+        icon: '🔎',
+        label: 'ดึงข้อมูลแล้ว',
+        desc: 'มี script/readme/รูป/เนื้อหายาวพอใช้ต่อ',
+        className: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
+      };
+    }
+    return {
+      key: 'found',
+      icon: '📥',
+      label: 'เก็บไว้แล้ว',
+      desc: 'วัตถุดิบเข้าคลังแล้ว ยังไม่เริ่มผลิต',
+      className: 'bg-gray-500/20 text-gray-300 border-gray-500/30',
+    };
   };
 
   // Load articles on mount
@@ -157,6 +253,26 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
   const oldNewsArticles = useMemo(() => articles.filter(isOldNews), [articles]);
   const oldNewsSentCount = useMemo(() => oldNewsArticles.filter(a => a.sentToAIPageAt).length, [oldNewsArticles]);
   const youtubeArticles = useMemo(() => articles.filter(a => a.sourceType === 'youtube' || a.tags?.includes('youtube')), [articles]);
+  const sourceSummaries = useMemo(() => {
+    const map = new Map<string, SourceSummary & { count: number }>();
+    articles.forEach(article => {
+      const source = getArticleSource(article);
+      const current = map.get(source.key);
+      map.set(source.key, { ...source, count: (current?.count || 0) + 1 });
+    });
+    return Array.from(map.values()).sort((a, b) => b.count - a.count);
+  }, [articles]);
+
+  const statusSummaries = useMemo(() => {
+    const order = ['found', 'enriched', 'sent', 'ready', 'completed'];
+    const map = new Map<string, StatusSummary & { count: number }>();
+    articles.forEach(article => {
+      const status = getArticleStatus(article);
+      const current = map.get(status.key);
+      map.set(status.key, { ...status, count: (current?.count || 0) + 1 });
+    });
+    return Array.from(map.values()).sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
+  }, [articles, articleCache, completedSourceUrls]);
 
   // Find duplicate groups — grouped by normalized sourceUrl first, then by title
   const duplicateGroups = useMemo(() => {
@@ -216,7 +332,7 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
     });
 
     if (toDeleteIds.length === 0) return;
-    if (!confirm(`จะลบ ${toDeleteIds.length} บทความซ้ำออก (เก็บไว้อันล่าสุดของแต่ละกลุ่ม) ยืนยัน?`)) return;
+    if (!confirm(`จะลบ ${toDeleteIds.length} Content ซ้ำออก (เก็บไว้อันล่าสุดของแต่ละกลุ่ม) ยืนยัน?`)) return;
 
     setIsDeletingDupes(true);
     try {
@@ -228,7 +344,7 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'Delete failed');
       setArticles(prev => prev.filter(a => !toDeleteIds.includes(a.id)));
-      alert(`✅ ลบบทความซ้ำสำเร็จ ${toDeleteIds.length} รายการ`);
+      alert(`✅ ลบ Content ซ้ำสำเร็จ ${toDeleteIds.length} รายการ`);
     } catch (e: any) {
       alert(`❌ ลบไม่สำเร็จ: ${e.message}`);
     } finally {
@@ -253,6 +369,14 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
     // Tag filter
     if (filterTag) {
       result = result.filter(a => a.tags?.includes(filterTag));
+    }
+
+    if (sourceFilter !== 'all') {
+      result = result.filter(a => getArticleSource(a).key === sourceFilter);
+    }
+
+    if (statusFilter !== 'all') {
+      result = result.filter(a => getArticleStatus(a).key === statusFilter);
     }
 
     if (showOldNewsOnly) {
@@ -289,7 +413,7 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
     // 'newest' is default order from API (already sorted by createdAt desc)
 
     return result;
-  }, [articles, searchQuery, filterTag, showOldNewsOnly, showYoutubeOnly, showContentReadyOnly, showCompletedOnly, articleCache, completedSourceUrls, sortBy]);
+  }, [articles, searchQuery, filterTag, sourceFilter, statusFilter, showOldNewsOnly, showYoutubeOnly, showContentReadyOnly, showCompletedOnly, articleCache, completedSourceUrls, sortBy]);
 
   const toggleSelect = (id: string) => setSelectedIds(prev => {
     const next = new Set(prev);
@@ -305,6 +429,8 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
     setIsScanningOldNews(true);
     setSearchQuery('');
     setFilterTag('');
+    setSourceFilter('all');
+    setStatusFilter('all');
     setShowYoutubeOnly(false);
     setSelectedIds(new Set());
     setExpandedId(null);
@@ -321,6 +447,8 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
 
   const toggleYoutubeZone = () => {
     setShowYoutubeOnly(v => !v);
+    setSourceFilter('all');
+    setStatusFilter('all');
     setShowOldNewsOnly(false);
     setSelectedIds(new Set());
   };
@@ -385,7 +513,7 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
   const handleDeleteSelected = async () => {
     if (selectedIds.size === 0) return;
     const targetIds = Array.from(selectedIds);
-    const confirmed = confirm(`ลบ ${targetIds.length} บทความออกจากคลัง?`);
+    const confirmed = confirm(`ลบ ${targetIds.length} Content ออกจากคลัง?`);
     if (!confirmed) return;
 
     setIsDeleting(true);
@@ -400,7 +528,7 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
       setArticles(prev => prev.filter(a => !targetIds.includes(a.id)));
       setSelectedIds(new Set());
     } catch (e: any) {
-      alert(`ลบบทความไม่สำเร็จ: ${e.message}`);
+      alert(`ลบ Content ไม่สำเร็จ: ${e.message}`);
     } finally {
       setIsDeleting(false);
     }
@@ -422,22 +550,89 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">📦 คลังบทความ</h1>
-          <p className="text-sm opacity-70">บทความที่เก็บไว้ถาวร — เรียงตามหมวดหมู่ พร้อมส่งไปทำโพสต์ AI ได้ทันที</p>
+          <h1 className="text-2xl font-bold flex items-center gap-2">📦 คลัง Content</h1>
+          <p className="text-sm opacity-70">ศูนย์กลางรวมวัตถุดิบจาก Radar, YouTube, RSS, GitHub และแหล่งอื่นๆ ก่อนส่งไปสร้างโพสต์/ภาพ/คลิป</p>
         </div>
         <div className="flex items-center gap-3">
           <button
             onClick={() => setShowDuplicates(v => !v)}
             className={`text-xs px-3 py-2 rounded-lg transition-all font-bold flex items-center gap-1.5 ${showDuplicates ? 'bg-orange-600 text-white' : duplicateCount > 0 ? 'bg-orange-500/20 text-orange-300 border border-orange-500/40 hover:bg-orange-500/30' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
           >
-            🔍 บทความซ้ำ {duplicateCount > 0 && <span className="bg-orange-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full">{duplicateCount}</span>}
+            🔍 Content ซ้ำ {duplicateCount > 0 && <span className="bg-orange-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full">{duplicateCount}</span>}
           </button>
           <button onClick={loadArticles} className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg transition-all">
             🔄 รีเฟรช
           </button>
           <div className="text-right">
             <div className="text-2xl font-bold text-cyan-400">{articles.length}</div>
-            <div className="text-[10px] text-gray-500">บทความทั้งหมด</div>
+            <div className="text-[10px] text-gray-500">Content ทั้งหมด</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Source Overview */}
+      <div className="card p-4 border-l-4 border-l-violet-500 bg-gradient-to-br from-[var(--bg-card)] to-violet-950/20">
+        <div className="flex flex-col lg:flex-row lg:items-center gap-4 justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-violet-300 flex items-center gap-2">🧭 แหล่งที่มาของ Content</h2>
+            <p className="text-xs text-gray-400 mt-1">
+              ใช้หน้านี้เป็นคลังกลาง: อะไรที่หาเจอควรถูกเก็บที่นี่ก่อน แล้วค่อยส่งไปสร้าง Content
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => { setSourceFilter('all'); setShowYoutubeOnly(false); setShowOldNewsOnly(false); setSelectedIds(new Set()); }}
+              className={`text-xs px-3 py-1.5 rounded-full font-bold border transition-all ${sourceFilter === 'all' && !showYoutubeOnly ? 'bg-violet-600 text-white border-violet-500' : 'bg-gray-800 text-gray-400 border-gray-700 hover:border-violet-500'}`}
+            >
+              ทั้งหมด ({articles.length})
+            </button>
+            {sourceSummaries.map(source => (
+              <button
+                key={source.key}
+                onClick={() => { setSourceFilter(sourceFilter === source.key ? 'all' : source.key); setShowYoutubeOnly(false); setShowOldNewsOnly(false); setSelectedIds(new Set()); }}
+                className={`text-xs px-3 py-1.5 rounded-full font-bold border transition-all ${sourceFilter === source.key ? source.className : 'bg-gray-800 text-gray-400 border-gray-700 hover:border-gray-500'}`}
+                title={`ดูเฉพาะ ${source.label}`}
+              >
+                {source.icon} {source.label} ({source.count})
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Workflow Status */}
+      <div className="card p-4 border-l-4 border-l-emerald-500 bg-gradient-to-br from-[var(--bg-card)] to-emerald-950/20">
+        <div className="flex flex-col lg:flex-row lg:items-center gap-4 justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-emerald-300 flex items-center gap-2">✅ สถานะงานในคลัง</h2>
+            <p className="text-xs text-gray-400 mt-1">
+              ดูทันทีว่า Content ไหนแค่เจอแล้ว, ดึงข้อมูลแล้ว, ส่งไปสร้างแล้ว, มีบทความพร้อมแล้ว หรือสร้างเสร็จจริง
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => { setStatusFilter('all'); setShowContentReadyOnly(false); setShowCompletedOnly(false); setSelectedIds(new Set()); }}
+              className={`text-xs px-3 py-1.5 rounded-full font-bold border transition-all ${statusFilter === 'all' && !showContentReadyOnly && !showCompletedOnly ? 'bg-emerald-600 text-white border-emerald-500' : 'bg-gray-800 text-gray-400 border-gray-700 hover:border-emerald-500'}`}
+            >
+              ทุกสถานะ ({articles.length})
+            </button>
+            {statusSummaries.map(status => (
+              <button
+                key={status.key}
+                onClick={() => {
+                  setStatusFilter(statusFilter === status.key ? 'all' : status.key);
+                  setShowContentReadyOnly(false);
+                  setShowCompletedOnly(false);
+                  setShowOldNewsOnly(false);
+                  setShowYoutubeOnly(false);
+                  setSelectedIds(new Set());
+                }}
+                className={`text-xs px-3 py-1.5 rounded-full font-bold border transition-all ${statusFilter === status.key ? status.className : 'bg-gray-800 text-gray-400 border-gray-700 hover:border-gray-500'}`}
+                title={status.desc}
+              >
+                {status.icon} {status.label} ({status.count})
+              </button>
+            ))}
           </div>
         </div>
       </div>
@@ -459,7 +654,7 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
                   ทำข่าวแล้ว {oldNewsSentCount} ข่าว
                 </span>
                 <span className="text-xs bg-gray-700/40 text-gray-300 border border-gray-600 px-2 py-1 rounded">
-                  สแกนจากทั้งหมด {articles.length} บทความ
+                  สแกนจากทั้งหมด {articles.length} Content
                 </span>
               </div>
             )}
@@ -470,7 +665,7 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
                 onClick={handleExitOldNewsScan}
                 className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-100 text-sm font-bold rounded-lg transition-all"
               >
-                ดูบทความทั้งหมด
+                ดู Content ทั้งหมด
               </button>
             )}
             <button
@@ -520,7 +715,7 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
               onClick={toggleYoutubeZone}
               className={`px-5 py-3 text-white text-sm font-bold rounded-lg shadow-lg transition-all ${showYoutubeOnly ? 'bg-gray-700 hover:bg-gray-600' : 'bg-cyan-700 hover:bg-cyan-600 shadow-cyan-500/20'}`}
             >
-              {showYoutubeOnly ? 'ดูบทความทั้งหมด' : 'ดูเฉพาะ YouTube'}
+              {showYoutubeOnly ? 'ดู Content ทั้งหมด' : 'ดูเฉพาะ YouTube'}
             </button>
           </div>
         </div>
@@ -531,11 +726,11 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
         <div className="card p-4 border-l-4 border-l-orange-500 bg-gradient-to-br from-[var(--bg-card)] to-orange-950/20">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
             <div>
-              <h2 className="text-lg font-bold text-orange-300 flex items-center gap-2">🔍 จัดการบทความซ้ำ</h2>
+              <h2 className="text-lg font-bold text-orange-300 flex items-center gap-2">🔍 จัดการ Content ซ้ำ</h2>
               <p className="text-xs text-gray-400 mt-0.5">
                 {duplicateGroups.length === 0
-                  ? 'ไม่พบบทความซ้ำในคลัง 🎉'
-                  : `พบ ${duplicateGroups.length} กลุ่มซ้ำ — รวม ${duplicateCount} บทความที่ควรลบออก`}
+                  ? 'ไม่พบ Content ซ้ำในคลัง 🎉'
+                  : `พบ ${duplicateGroups.length} กลุ่มซ้ำ — รวม ${duplicateCount} Content ที่ควรลบออก`}
               </p>
             </div>
             {duplicateGroups.length > 0 && (
@@ -621,7 +816,7 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
             type="text"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder="🔍 ค้นหาบทความ..."
+            placeholder="🔍 ค้นหา Content..."
             className="input-field flex-1 min-w-[200px] text-sm"
           />
           <select
@@ -653,7 +848,7 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
             <span className="text-xs text-gray-500">กรอง:</span>
             {contentReadyCount > 0 && (
               <button
-                onClick={() => { setShowContentReadyOnly(v => !v); setShowCompletedOnly(false); setShowOldNewsOnly(false); setShowYoutubeOnly(false); }}
+                onClick={() => { setShowContentReadyOnly(v => !v); setShowCompletedOnly(false); setStatusFilter('all'); setShowOldNewsOnly(false); setShowYoutubeOnly(false); }}
                 className={`text-xs px-3 py-1.5 rounded-full font-bold border transition-all ${showContentReadyOnly ? 'bg-emerald-600 text-white border-emerald-500 shadow-md shadow-emerald-500/20' : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20'}`}
               >
                 📝 บทความพร้อม ({contentReadyCount})
@@ -661,7 +856,7 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
             )}
             {completedCount > 0 && (
               <button
-                onClick={() => { setShowCompletedOnly(v => !v); setShowContentReadyOnly(false); setShowOldNewsOnly(false); setShowYoutubeOnly(false); }}
+                onClick={() => { setShowCompletedOnly(v => !v); setShowContentReadyOnly(false); setStatusFilter('all'); setShowOldNewsOnly(false); setShowYoutubeOnly(false); }}
                 className={`text-xs px-3 py-1.5 rounded-full font-bold border transition-all ${showCompletedOnly ? 'bg-violet-600 text-white border-violet-500 shadow-md shadow-violet-500/20' : 'bg-violet-500/10 text-violet-300 border-violet-500/30 hover:bg-violet-500/20'}`}
               >
                 ✅ ทำเสร็จทุกอย่างแล้ว ({completedCount})
@@ -670,7 +865,7 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
             {outsideStockCount > 0 && (
               <span
                 className="text-[10px] text-gray-400 bg-gray-800/60 border border-gray-700 px-2 py-1 rounded"
-                title="มีผลลัพธ์ในหน้าผลลัพธ์ที่หา sourceUrl ตรงกับบทความในคลังไม่เจอ จึงไม่นับในปุ่มกรองของคลัง"
+                title="มีผลลัพธ์ในหน้าผลลัพธ์ที่หา sourceUrl ตรงกับ Content ในคลังไม่เจอ จึงไม่นับในปุ่มกรองของคลัง"
               >
                 ผลลัพธ์รวม {completedResultTotal} / ตรงกับคลัง {completedCount} / นอกคลัง {outsideStockCount}
               </span>
@@ -695,7 +890,7 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
                 <button
                   onClick={() => setSelectedIds(new Set(readyNotDone.map(a => a.id)))}
                   className="text-xs bg-emerald-700/60 hover:bg-emerald-600 text-emerald-200 px-3 py-1.5 rounded font-bold transition-all border border-emerald-500/40"
-                  title="เลือกเฉพาะบทความที่มีเนื้อหาพร้อมแล้ว แต่ยังไม่มีผลลัพธ์ในระบบ"
+                  title="เลือกเฉพาะ Content ที่มีเนื้อหาพร้อมแล้ว แต่ยังไม่มีผลลัพธ์ในระบบ"
                 >
                   📝 เลือกพร้อมแต่ยังไม่เสร็จ ({readyNotDone.length})
                 </button>
@@ -735,14 +930,24 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
               กำลังแสดงเฉพาะคลิป YouTube
             </span>
           )}
+          {sourceFilter !== 'all' && (
+            <span className="text-xs text-violet-300 bg-violet-500/10 border border-violet-500/20 px-2 py-1 rounded">
+              กำลังแสดงเฉพาะแหล่งที่มา: {sourceSummaries.find(s => s.key === sourceFilter)?.label || sourceFilter}
+            </span>
+          )}
+          {statusFilter !== 'all' && (
+            <span className="text-xs text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 rounded">
+              กำลังแสดงเฉพาะสถานะ: {statusSummaries.find(s => s.key === statusFilter)?.label || statusFilter}
+            </span>
+          )}
           {showContentReadyOnly && (
             <span className="text-xs text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 rounded">
-              กำลังแสดงเฉพาะบทความที่สร้างเสร็จแล้ว
+              กำลังแสดงเฉพาะ Content ที่สร้างบทความเสร็จแล้ว
             </span>
           )}
           {showCompletedOnly && (
             <span className="text-xs text-violet-300 bg-violet-500/10 border border-violet-500/20 px-2 py-1 rounded">
-              กำลังแสดงเฉพาะบทความที่ทำเสร็จทุกอย่างแล้ว (อยู่ในผลลัพธ์)
+              กำลังแสดงเฉพาะ Content ที่ทำเสร็จทุกอย่างแล้ว (อยู่ในผลลัพธ์)
             </span>
           )}
           {selectedIds.size > 0 && onSendToAIPage && (
@@ -750,7 +955,7 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
               onClick={handleSendSelected}
               className="ml-auto px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white text-sm font-bold rounded-lg shadow-lg shadow-purple-500/20 transition-all flex items-center gap-2"
             >
-              🚀 ส่ง {selectedIds.size} บทความไปทำโพสต์
+              🚀 ส่ง {selectedIds.size} Content ไปทำโพสต์
             </button>
           )}
           {selectedIds.size > 0 && (
@@ -759,7 +964,7 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
               disabled={isDeleting}
               className="px-4 py-2 bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white text-sm font-bold rounded-lg shadow-lg shadow-red-500/20 transition-all flex items-center gap-2"
             >
-              {isDeleting ? '⏳ กำลังลบ...' : `🗑️ ลบ ${selectedIds.size} บทความ`}
+              {isDeleting ? '⏳ กำลังลบ...' : `🗑️ ลบ ${selectedIds.size} Content`}
             </button>
           )}
         </div>
@@ -769,13 +974,13 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
       {isLoading ? (
         <div className="text-center py-20 text-gray-500">
           <div className="text-4xl mb-3 animate-pulse">📦</div>
-          <p>กำลังโหลดคลังบทความ...</p>
+          <p>กำลังโหลดคลัง Content...</p>
         </div>
       ) : filteredArticles.length === 0 ? (
         <div className="text-center py-20 text-gray-500">
           <div className="text-4xl mb-3">📭</div>
-          <p className="text-lg font-medium mb-2">{showYoutubeOnly ? 'ยังไม่มีคลิป YouTube ในคลัง' : showOldNewsOnly ? 'ไม่พบข่าวเก่าที่เข้าเงื่อนไข' : 'ยังไม่มีบทความในคลัง'}</p>
-          <p className="text-sm">{showYoutubeOnly ? 'ไปหน้าเรดาร์คู่แข่ง แล้วเลือกคลิปจากช่อง YouTube เพื่อบันทึก' : showOldNewsOnly ? 'เงื่อนไขคือ คะแนนข่าว 8 ขึ้นไป, Evergreen 7 ลงมา, อายุในคลัง 7 วันขึ้นไป' : 'ไปหน้า "ค้นหาContent น่าสนใจ" แล้วกดเก็บบทความเข้าคลัง'}</p>
+          <p className="text-lg font-medium mb-2">{showYoutubeOnly ? 'ยังไม่มีคลิป YouTube ในคลัง' : showOldNewsOnly ? 'ไม่พบข่าวเก่าที่เข้าเงื่อนไข' : 'ยังไม่มี Content ในคลัง'}</p>
+          <p className="text-sm">{showYoutubeOnly ? 'ไปหน้าเรดาร์คู่แข่ง แล้วเลือกคลิปจากช่อง YouTube เพื่อบันทึก' : showOldNewsOnly ? 'เงื่อนไขคือ คะแนนข่าว 8 ขึ้นไป, Evergreen 7 ลงมา, อายุในคลัง 7 วันขึ้นไป' : 'ไปหน้า "ค้นหาContent น่าสนใจ" แล้วกดเก็บ Content เข้าคลัง'}</p>
         </div>
       ) : (
         <div className="space-y-3 max-h-[calc(100vh-350px)] overflow-y-auto pr-1 custom-scrollbar">
@@ -786,6 +991,8 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
             const cached = getCachedEntry(article);
             const isCacheExpanded = expandedCacheId === article.id;
             const isCompleted = completedSourceUrls.has(article.sourceUrl);
+            const source = getArticleSource(article);
+            const status = getArticleStatus(article);
             return (
               <div
                 key={article.id}
@@ -806,6 +1013,12 @@ export function ArticleStockTab({ onSendToAIPage, onNavigateToYoutubeExtract }: 
                   <div className="flex-1 min-w-0">
                     {/* Top row: domain, scores, tags */}
                     <div className="flex flex-wrap items-center gap-2 mb-2">
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${source.className}`}>
+                        {source.icon} {source.label}
+                      </span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${status.className}`} title={status.desc}>
+                        {status.icon} {status.label}
+                      </span>
                       <span className="text-[10px] text-gray-500 font-bold">{article.domain}</span>
 
                       {article.newsScore > 0 && (

@@ -16,7 +16,11 @@ interface ApiProfile {
   active?: boolean;
 }
 
-export default function GlobalSettings() {
+interface GlobalSettingsProps {
+  hideTrigger?: boolean;
+}
+
+export default function GlobalSettings({ hideTrigger = false }: GlobalSettingsProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [profiles, setProfiles] = useState<ApiProfile[]>([]);
   const [activeProfileId, setActiveProfileId] = useState<string>('');
@@ -37,6 +41,12 @@ export default function GlobalSettings() {
   
   const hasAttemptedAuth = useRef(false);
   const getDropboxRedirectUri = () => `${window.location.origin.replace(/\/$/, '')}/`;
+
+  useEffect(() => {
+    const openAdvancedSettings = () => setIsOpen(true);
+    window.addEventListener('open-api-advanced-settings', openAdvancedSettings);
+    return () => window.removeEventListener('open-api-advanced-settings', openAdvancedSettings);
+  }, []);
 
   const readLocalProfiles = (): ApiProfile[] => {
     try {
@@ -223,6 +233,7 @@ export default function GlobalSettings() {
     if (newProfile.googleKey) {
       localStorage.setItem('google_api_key', newProfile.googleKey);
     }
+    localStorage.setItem('apify_api_key', newProfile.apifyKey || '');
     localStorage.setItem('giphy_api_key', newProfile.giphyKey || '');
     window.dispatchEvent(new CustomEvent('api-profiles-updated', {
       detail: { profiles: updated, activeProfileId: newProfile.id },
@@ -266,6 +277,7 @@ export default function GlobalSettings() {
       localStorage.setItem('openrouter_key', p.openRouterKey);
       localStorage.setItem('dropbox_api_key', p.dropboxKey);
       if (p.googleKey) localStorage.setItem('google_api_key', p.googleKey);
+      localStorage.setItem('apify_api_key', p.apifyKey || '');
       localStorage.setItem('giphy_api_key', p.giphyKey || '');
       window.dispatchEvent(new CustomEvent('api-profiles-updated', {
         detail: { profiles, activeProfileId: p.id },
@@ -332,19 +344,21 @@ export default function GlobalSettings() {
 
   return (
     <>
-      <button 
-        onClick={() => setIsOpen(true)}
-        className="p-2 rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-all font-medium flex items-center gap-2"
-      >
-        <span>⚙️ ตั้งค่า API (คีย์)</span>
-      </button>
+      {!hideTrigger && (
+        <button 
+          onClick={() => setIsOpen(true)}
+          className="p-2 rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-all font-medium flex items-center gap-2"
+        >
+          <span>⚙️ API ขั้นสูง</span>
+        </button>
+      )}
 
       {isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-white dark:bg-gray-900 border border-[var(--border-color)] rounded-2xl p-6 w-full max-w-lg shadow-xl max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
-                <span>🔑 จัดการโปรไฟล์ API Keys</span>
+                <span>🔑 จัดการโปรไฟล์ API ขั้นสูง</span>
               </h2>
               <button onClick={() => setIsOpen(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-xl font-bold">×</button>
             </div>
